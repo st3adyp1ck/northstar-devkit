@@ -1,0 +1,17 @@
+# PowerShell
+*.ps1.log
+*.ps1.xml
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Temp files
+*.tmp
+*.temp
