@@ -135,54 +135,53 @@ if (-not $Force) {
 
 # Step 1: Fetch from upstream
 Write-Host "`n  [1/4] Fetching from $UpstreamRemote..." -ForegroundColor Yellow
-try {
     git fetch $UpstreamRemote 2>&1 | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "`n  ERROR: Failed to fetch from upstream.`n" -ForegroundColor Red
+        Pop-Location
+        exit 1
+    }
     Write-Host "  DONE: Fetched from upstream." -ForegroundColor Green
-} catch {
-    Write-Host "`n  ERROR: Failed to fetch from upstream: $_`n" -ForegroundColor Red
-    Pop-Location
-    exit 1
-}
 
 # Step 2: Checkout target branch
 Write-Host "`n  [2/4] Checking out $Branch..." -ForegroundColor Yellow
-try {
     git checkout $Branch 2>&1 | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "`n  ERROR: Failed to checkout branch.`n" -ForegroundColor Red
+        Pop-Location
+        exit 1
+    }
     Write-Host "  DONE: On branch $Branch." -ForegroundColor Green
-} catch {
-    Write-Host "`n  ERROR: Failed to checkout branch: $_`n" -ForegroundColor Red
-    Pop-Location
-    exit 1
-}
 
 # Step 3: Merge or Rebase
 Write-Host "`n  [3/4] Syncing with $UpstreamRemote/$Branch..." -ForegroundColor Yellow
-try {
     if ($Rebase) {
         git rebase "$UpstreamRemote/$Branch" 2>&1 | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
-        Write-Host "  DONE: Rebased onto $UpstreamRemote/$Branch." -ForegroundColor Green
     } else {
         git merge "$UpstreamRemote/$Branch" --no-edit 2>&1 | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
+    }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "`n  ERROR: Sync failed." -ForegroundColor Red
+        Write-Host "  You may need to resolve conflicts manually." -ForegroundColor Yellow
+        Pop-Location
+        exit 1
+    }
+    if ($Rebase) {
+        Write-Host "  DONE: Rebased onto $UpstreamRemote/$Branch." -ForegroundColor Green
+    } else {
         Write-Host "  DONE: Merged $UpstreamRemote/$Branch." -ForegroundColor Green
     }
-} catch {
-    Write-Host "`n  ERROR: Sync failed: $_" -ForegroundColor Red
-    Write-Host "  You may need to resolve conflicts manually." -ForegroundColor Yellow
-    Pop-Location
-    exit 1
-}
 
 # Step 4: Push to origin
 Write-Host "`n  [4/4] Pushing to $OriginRemote..." -ForegroundColor Yellow
-try {
     $pushArgs = if ($Rebase) { "-f" } else { "" }
     git push $OriginRemote $Branch $pushArgs 2>&1 | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "`n  ERROR: Failed to push.`n" -ForegroundColor Red
+        Pop-Location
+        exit 1
+    }
     Write-Host "  DONE: Pushed to $OriginRemote." -ForegroundColor Green
-} catch {
-    Write-Host "`n  ERROR: Failed to push: $_`n" -ForegroundColor Red
-    Pop-Location
-    exit 1
-}
 
 Write-Host "`n  ===================================" -ForegroundColor Cyan
 Write-Host "  Fork sync complete!" -ForegroundColor Green

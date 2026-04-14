@@ -31,7 +31,7 @@ function Write-Check {
         [string]$FixMessage = ""
     )
     
-    $icon = if ($Passed) { "✓" } else { "✗" }
+    $icon = if ($Passed) { "OK" } else { "FAIL" }
     $color = if ($Passed) { "Green" } else { "Red" }
     
     if ($Quiet -and $Passed) { return }
@@ -44,7 +44,7 @@ function Write-Check {
     }
     
     if (-not $Passed -and $FixMessage) {
-        Write-Host "      → $FixMessage" -ForegroundColor Yellow
+        Write-Host "      -> $FixMessage" -ForegroundColor Yellow
     }
 }
 
@@ -205,7 +205,11 @@ $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIden
 Write-Check "Administrator Rights" $isAdmin "" "Some features require admin - Run as Administrator if needed"
 
 # Execution policy
-$execPolicy = Get-ExecutionPolicy
+try {
+    $execPolicy = Get-ExecutionPolicy
+} catch {
+    $execPolicy = "Unknown"
+}
 $execPolicyOk = $execPolicy -in @('RemoteSigned', 'Unrestricted', 'Bypass')
 Write-Check "Execution Policy" $execPolicyOk $execPolicy "Run: Set-ExecutionPolicy RemoteSigned -Scope CurrentUser"
 if (-not $execPolicyOk) { $warningsFound++ }
@@ -221,13 +225,13 @@ if (-not $diskOk) { $warningsFound++ }
 # ==================== Summary ====================
 Write-Host "`n  ===================================" -ForegroundColor Cyan
 if ($issuesFound -eq 0 -and $warningsFound -eq 0) {
-    Write-Host "  ✓ All checks passed!" -ForegroundColor Green
+    Write-Host "  [OK] All checks passed!" -ForegroundColor Green
     Write-Host "  Your development environment looks good." -ForegroundColor Gray
 } elseif ($issuesFound -eq 0) {
-    Write-Host "  ⚠ $warningsFound warning(s) found" -ForegroundColor Yellow
+    Write-Host "  [!] $warningsFound warning(s) found" -ForegroundColor Yellow
     Write-Host "  Your environment works but could be improved." -ForegroundColor Gray
 } else {
-    Write-Host "  ✗ $issuesFound issue(s) and $warningsFound warning(s) found" -ForegroundColor Red
+    Write-Host "  [FAIL] $issuesFound issue(s) and $warningsFound warning(s) found" -ForegroundColor Red
     Write-Host "  Please address the issues above." -ForegroundColor Gray
 }
 Write-Host "  ===================================`n" -ForegroundColor Cyan

@@ -29,7 +29,7 @@ function Show-Header {
     Clear-Host
     Write-Host "=============================================" -ForegroundColor Cyan
     Write-Host "        Northstar DevKit v2.0              " -ForegroundColor Cyan
-    Write-Host "    Developer Toolkit by Northstar SD      " -ForegroundColor Cyan
+    Write-Host "    Developer Toolkit by Northstar.com      " -ForegroundColor Cyan
     Write-Host "=============================================" -ForegroundColor Cyan
     Write-Host "  Current: $Title" -ForegroundColor Yellow
     Write-Host ""
@@ -430,11 +430,17 @@ function Start-ViteTools {
         switch ($choice) {
             '1' { 
                 Clear-Host
-                & "$ScriptDir\vite\Vite-DevFresh.ps1"
+                $targetPath = Read-Host "Enter project path (or '.' for current)"
+                if ($targetPath -eq '.') { $targetPath = Get-Location }
+                & "$ScriptDir\vite\Vite-DevFresh.ps1" -Path $targetPath
+                Read-Host "Press Enter to continue"
             }
             '2' { 
                 Clear-Host
-                & "$ScriptDir\vite\Vite-PreviewBuild.ps1"
+                $targetPath = Read-Host "Enter project path (or '.' for current)"
+                if ($targetPath -eq '.') { $targetPath = Get-Location }
+                & "$ScriptDir\vite\Vite-PreviewBuild.ps1" -Path $targetPath
+                Read-Host "Press Enter to continue"
             }
             '0' { return }
         }
@@ -459,15 +465,24 @@ function Start-GitTools {
         switch ($choice) {
             '1' { 
                 Clear-Host
-                & "$ScriptDir\git\Git-Cleanup.ps1"
+                $targetPath = Read-Host "Enter project path (or '.' for current)"
+                if ($targetPath -eq '.') { $targetPath = Get-Location }
+                & "$ScriptDir\git\Git-Cleanup.ps1" -Path $targetPath
+                Read-Host "Press Enter to continue"
             }
             '2' { 
                 Clear-Host
-                & "$ScriptDir\git\Git-StatusAll.ps1"
+                $targetPath = Read-Host "Enter root path to scan (or '.' for current)"
+                if ($targetPath -eq '.') { $targetPath = Get-Location }
+                & "$ScriptDir\git\Git-StatusAll.ps1" -Path $targetPath
+                Read-Host "Press Enter to continue"
             }
             '3' { 
                 Clear-Host
-                & "$ScriptDir\git\Git-SyncFork.ps1"
+                $targetPath = Read-Host "Enter project path (or '.' for current)"
+                if ($targetPath -eq '.') { $targetPath = Get-Location }
+                & "$ScriptDir\git\Git-SyncFork.ps1" -Path $targetPath
+                Read-Host "Press Enter to continue"
             }
             '0' { return }
         }
@@ -530,11 +545,16 @@ function Start-SystemTools {
             }
             '2' { 
                 Clear-Host
-                & "$ScriptDir\system\Env-Backup.ps1"
+                $targetPath = Read-Host "Enter backup output path (or '.' for current)"
+                if ($targetPath -eq '.') { $targetPath = Get-Location }
+                & "$ScriptDir\system\Env-Backup.ps1" -OutputPath $targetPath
+                Read-Host "Press Enter to continue"
             }
             '3' { 
                 Clear-Host
-                & "$ScriptDir\system\Env-Restore.ps1"
+                $backupFile = Read-Host "Enter backup file path to restore"
+                & "$ScriptDir\system\Env-Restore.ps1" -BackupFile $backupFile
+                Read-Host "Press Enter to continue"
             }
             '4' { 
                 Clear-Host
@@ -563,15 +583,24 @@ function Start-WorkflowTools {
         switch ($choice) {
             '1' { 
                 Clear-Host
-                & "$ScriptDir\workflow\Code-Here.ps1"
+                $targetPath = Read-Host "Enter project path (or '.' for current)"
+                if ($targetPath -eq '.') { $targetPath = Get-Location }
+                & "$ScriptDir\workflow\Code-Here.ps1" -Path $targetPath
+                Read-Host "Press Enter to continue"
             }
             '2' { 
                 Clear-Host
-                & "$ScriptDir\workflow\Open-Repo.ps1"
+                $targetPath = Read-Host "Enter project path (or '.' for current)"
+                if ($targetPath -eq '.') { $targetPath = Get-Location }
+                & "$ScriptDir\workflow\Open-Repo.ps1" -Path $targetPath
+                Read-Host "Press Enter to continue"
             }
             '3' { 
                 Clear-Host
-                & "$ScriptDir\workflow\Copy-EnvTemplate.ps1"
+                $targetPath = Read-Host "Enter project path (or '.' for current)"
+                if ($targetPath -eq '.') { $targetPath = Get-Location }
+                & "$ScriptDir\workflow\Copy-EnvTemplate.ps1" -Path $targetPath
+                Read-Host "Press Enter to continue"
             }
             '0' { return }
         }
@@ -596,10 +625,12 @@ function Start-DiagnosticsTools {
             '1' { 
                 Clear-Host
                 & "$ScriptDir\diagnostics\DevKit-Doctor.ps1"
+                Read-Host "Press Enter to continue"
             }
             '2' { 
                 Clear-Host
                 & "$ScriptDir\diagnostics\System-DevInfo.ps1"
+                Read-Host "Press Enter to continue"
             }
             '0' { return }
         }

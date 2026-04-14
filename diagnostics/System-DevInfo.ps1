@@ -162,7 +162,11 @@ $pathCount = ($env:PATH -split ';' | Where-Object { $_ }).Count
 Write-Host "    PATH entries: $pathCount" -ForegroundColor Gray
 $info.Resources.PATHEntries = $pathCount
 
-$execPolicy = Get-ExecutionPolicy
+try {
+    $execPolicy = Get-ExecutionPolicy
+} catch {
+    $execPolicy = "Unknown"
+}
 Write-Host "    Execution Policy: $execPolicy" -ForegroundColor Gray
 $info.Resources.ExecutionPolicy = $execPolicy
 

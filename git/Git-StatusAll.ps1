@@ -53,7 +53,11 @@ try {
 # Find Git repositories
 Write-Host "  Scanning for repositories..." -ForegroundColor Yellow
 
-$gitRepos = Get-ChildItem -Path $targetPath -Directory -Recurse -Depth $Depth | 
+$gitRepos = @()
+if (Test-Path (Join-Path $targetPath ".git")) {
+    $gitRepos += Get-Item -Path $targetPath
+}
+$gitRepos += Get-ChildItem -Path $targetPath -Directory -Recurse -Depth $Depth | 
     Where-Object { Test-Path (Join-Path $_.FullName ".git") }
 
 if (-not $gitRepos) {
@@ -135,11 +139,11 @@ foreach ($repo in $gitRepos) {
                 $summary.Modified++
             }
             if ($ahead -gt 0) { 
-                $indicators += "↑$ahead"
+                $indicators += "A:$ahead"
                 $summary.Ahead++
             }
             if ($behind -gt 0) { 
-                $indicators += "↓$behind"
+                $indicators += "B:$behind"
                 $summary.Behind++
             }
             
