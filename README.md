@@ -291,7 +291,7 @@ Distributed under the MIT License. See [LICENSE](LICENSE) for details.
 
 <div align="center">
 
-**Made with ❤️ by [Northstar.com](https://www.northstarcoding.com)**
+**Made with ❤️ by [Northstar Software Development](https://www.northstarcoding.com)**
 
 *Empowering developers, one tool at a time.*
 
