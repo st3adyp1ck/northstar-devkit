@@ -174,7 +174,7 @@ if (-not $KeepDNS) {
         Write-Host "  Secondary: $dns2" -ForegroundColor Gray
 
         Write-Step "Setting IPv6 DNS on $($adapter.Name)"
-        Set-DnsClientServerAddress -InterfaceIndex $adapter.InterfaceIndex -ServerAddresses $dns1v6, $dns2v6 -AddressFamily IPv6 -ErrorAction SilentlyContinue
+        Set-DnsClientServerAddress -InterfaceIndex $adapter.InterfaceIndex -ServerAddresses $dns1v6, $dns2v6 -ErrorAction SilentlyContinue
         Write-Done
         Write-Host "  Primary IPv6: $dns1v6" -ForegroundColor Gray
         Write-Host "  Secondary IPv6: $dns2v6" -ForegroundColor Gray
