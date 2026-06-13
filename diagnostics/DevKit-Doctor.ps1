@@ -8,18 +8,14 @@
     
     Created by Northstar Software Development
     Website: https://www.northstarcoding.com
-.PARAMETER Fix
-    Attempt to automatically fix issues where possible.
 .PARAMETER Quiet
     Only show errors and warnings.
 .EXAMPLE
     .\DevKit-Doctor.ps1
-    .\DevKit-Doctor.ps1 -Fix
     .\DevKit-Doctor.ps1 -Quiet
 #>
 [CmdletBinding()]
 param(
-    [switch]$Fix,
     [switch]$Quiet
 )
 
@@ -64,131 +60,157 @@ if (-not $ps7Installed) { $issuesFound++ }
 
 # ==================== Node.js ====================
 Write-Host "`n  Node.js:" -ForegroundColor Cyan
-try {
-    $nodeVersion = node --version 2>$null
-    if ($LASTEXITCODE -eq 0) {
-        $nodeInstalled = $true
-        $versionNum = [version]($nodeVersion -replace '^v','')
+$nodeCmd = Get-Command node -ErrorAction SilentlyContinue
+if ($nodeCmd) {
+    $nodeVersion = & node --version 2>$null
+    $nodeInstalled = $true
+    if ($nodeVersion -match '^v?(\d+\.\d+\.\d+)') {
+        $versionNum = [version]$matches[1]
         $nodeCurrent = $versionNum.Major -ge 18
         Write-Check "Node.js Installed" $true $nodeVersion
         Write-Check "Node.js Version (18+)" $nodeCurrent "v$versionNum" "Update Node.js from https://nodejs.org"
         if (-not $nodeCurrent) { $warningsFound++ }
     } else {
-        throw "Node not found"
+        Write-Check "Node.js Installed" $true $nodeVersion
     }
-} catch {
+} else {
     Write-Check "Node.js Installed" $false "" "Install Node.js from https://nodejs.org"
     $issuesFound++
 }
 
 # NPM
-try {
-    $npmVersion = npm --version 2>$null
-    if ($LASTEXITCODE -eq 0) {
-        Write-Check "NPM Installed" $true "v$npmVersion"
-    } else {
-        throw "NPM not found"
-    }
-} catch {
+$npmCmd = Get-Command npm -ErrorAction SilentlyContinue
+if ($npmCmd) {
+    $npmVersion = & npm --version 2>$null
+    Write-Check "NPM Installed" $true "v$npmVersion"
+} else {
     Write-Check "NPM Installed" $false "" "Reinstall Node.js (includes NPM)"
     $issuesFound++
 }
 
-# Yarn/PNPM (optional but nice)
-try {
-    $yarnVersion = yarn --version 2>$null
-    if ($LASTEXITCODE -eq 0) {
-        Write-Check "Yarn Installed" $true "v$yarnVersion"
-    }
-} catch {}
+# Yarn/PNPM/Bun (optional but nice)
+$yamCmd = Get-Command yarn -ErrorAction SilentlyContinue
+if ($yamCmd) {
+    $yarnVersion = & yarn --version 2>$null
+    Write-Check "Yarn Installed" $true "v$yarnVersion"
+}
 
-try {
-    $pnpmVersion = pnpm --version 2>$null
-    if ($LASTEXITCODE -eq 0) {
-        Write-Check "PNPM Installed" $true "v$pnpmVersion"
-    }
-} catch {}
+$pnpmCmd = Get-Command pnpm -ErrorAction SilentlyContinue
+if ($pnpmCmd) {
+    $pnpmVersion = & pnpm --version 2>$null
+    Write-Check "PNPM Installed" $true "v$pnpmVersion"
+}
+
+$bunCmd = Get-Command bun -ErrorAction SilentlyContinue
+if ($bunCmd) {
+    $bunVersion = & bun --version 2>$null
+    Write-Check "Bun Installed" $true "v$bunVersion"
+}
 
 # ==================== Git ====================
 Write-Host "`n  Git:" -ForegroundColor Cyan
-try {
-    $gitVersion = git --version 2>$null
-    if ($LASTEXITCODE -eq 0) {
-        Write-Check "Git Installed" $true ($gitVersion -replace '^git version ','')
-        
-        # Check Git config
-        $gitName = git config user.name 2>$null
-        $gitEmail = git config user.email 2>$null
-        
-        $gitConfigOk = $gitName -and $gitEmail
-        Write-Check "Git Config (name/email)" $gitConfigOk "" "Run: git config --global user.name 'Your Name' && git config --global user.email 'your@email.com'"
-        if (-not $gitConfigOk) { $warningsFound++ }
-    } else {
-        throw "Git not found"
+$gitCmd = Get-Command git -ErrorAction SilentlyContinue
+if ($gitCmd) {
+    $gitVersion = & git --version 2>$null
+    Write-Check "Git Installed" $true ($gitVersion -replace '^git version ','')
+    
+    # Check Git config
+    $gitName = & git config user.name 2>$null
+    $gitEmail = & git config user.email 2>$null
+    
+    $gitConfigOk = $gitName -and $gitEmail
+    Write-Check "Git Config (name/email)" $gitConfigOk "" "Run: git config --global user.name 'Your Name' && git config --global user.email 'your@email.com'"
+    if (-not $gitConfigOk) { $warningsFound++ }
+
+    # Check defaultBranch
+    $defaultBranch = & git config init.defaultBranch 2>$null
+    if ($defaultBranch) {
+        Write-Check "Git defaultBranch" $true $defaultBranch
     }
-} catch {
+
+    # Check core.autocrlf
+    $autocrlf = & git config core.autocrlf 2>$null
+    if ($autocrlf) {
+        Write-Check "Git core.autocrlf" $true $autocrlf
+    }
+} else {
     Write-Check "Git Installed" $false "" "Install Git from https://git-scm.com"
     $issuesFound++
 }
 
 # ==================== Docker ====================
 Write-Host "`n  Docker:" -ForegroundColor Cyan
-try {
-    $dockerVersion = docker --version 2>$null
-    if ($LASTEXITCODE -eq 0) {
-        Write-Check "Docker CLI" $true ($dockerVersion -replace '^Docker version ','' -replace ',.*$','')
-        
-        # Check if daemon is running
-        $dockerInfo = docker info 2>$null
-        $dockerRunning = $LASTEXITCODE -eq 0
-        Write-Check "Docker Daemon" $dockerRunning "" "Start Docker Desktop"
-        if (-not $dockerRunning) { $warningsFound++ }
-    } else {
-        throw "Docker not found"
+$dockerCmd = Get-Command docker -ErrorAction SilentlyContinue
+if ($dockerCmd) {
+    $dockerVersion = & docker --version 2>$null
+    Write-Check "Docker CLI" $true ($dockerVersion -replace '^Docker version ','' -replace ',.*$','')
+    
+    # Check if daemon is running
+    $null = & docker info 2>$null
+    $dockerRunning = $LASTEXITCODE -eq 0
+    Write-Check "Docker Daemon" $dockerRunning "" "Start Docker Desktop"
+    if (-not $dockerRunning) { $warningsFound++ }
+
+    # Check docker compose
+    $composeCmd = Get-Command docker-compose -ErrorAction SilentlyContinue
+    if (-not $composeCmd) {
+        $composePlugin = & docker compose version 2>$null
+        if ($LASTEXITCODE -eq 0) { $composeCmd = $true }
     }
-} catch {
+    if ($composeCmd) {
+        Write-Check "Docker Compose" $true "Installed"
+    } else {
+        Write-Check "Docker Compose" $false "" "Install Docker Compose"
+    }
+} else {
     Write-Check "Docker" $false "" "Install Docker Desktop from https://docker.com"
     $warningsFound++
 }
 
 # ==================== VS Code ====================
 Write-Host "`n  Editors:" -ForegroundColor Cyan
-try {
-    $codeVersion = code --version 2>$null | Select-Object -First 1
-    if ($LASTEXITCODE -eq 0) {
-        Write-Check "VS Code" $true $codeVersion
-    } else {
-        throw "VS Code not found"
-    }
-} catch {
+$codeCmd = Get-Command code -ErrorAction SilentlyContinue
+if ($codeCmd) {
+    $codeVersion = & code --version 2>$null | Select-Object -First 1
+    Write-Check "VS Code" $true $codeVersion
+} else {
     Write-Check "VS Code" $false "" "Install from https://code.visualstudio.com"
 }
 
-try {
-    $cursorCheck = Get-Command cursor -ErrorAction SilentlyContinue
-    if ($cursorCheck) {
-        Write-Check "Cursor" $true "Installed"
+$cursorCmd = Get-Command cursor -ErrorAction SilentlyContinue
+if ($cursorCmd) {
+    Write-Check "Cursor" $true "Installed"
+}
+
+# ==================== GitHub CLI ====================
+$ghCmd = Get-Command gh -CommandType Application -ErrorAction SilentlyContinue | 
+    Where-Object { $_.Source -match '\.(exe|cmd|bat|com)$' } | 
+    Select-Object -First 1
+if ($ghCmd) {
+    try {
+        $ghOutput = & $ghCmd.Source --version 2>$null
+        $ghVersion = $ghOutput | Select-Object -First 1
+        Write-Check "GitHub CLI" $true ($ghVersion -replace '^gh version ','')
+    } catch {
+        Write-Check "GitHub CLI" $false "" "Optional - Install from https://cli.github.com"
     }
-} catch {}
+} else {
+    Write-Check "GitHub CLI" $false "" "Optional - Install from https://cli.github.com"
+}
 
 # ==================== Python (optional) ====================
 Write-Host "`n  Python:" -ForegroundColor Cyan
-try {
-    $pythonVersion = python --version 2>&1
+$pythonCmd = Get-Command python -ErrorAction SilentlyContinue
+if (-not $pythonCmd) { $pythonCmd = Get-Command python3 -ErrorAction SilentlyContinue }
+if ($pythonCmd) {
+    $pythonVersion = & $pythonCmd.Source --version 2>&1
     if ($pythonVersion -match 'Python (\d+\.\d+\.\d+)') {
         Write-Check "Python Installed" $true $matches[1]
     } else {
-        throw "Python not found"
+        Write-Check "Python Installed" $true "Unknown version"
     }
-} catch {
-    try {
-        $pythonVersion = python3 --version 2>&1
-        if ($pythonVersion -match 'Python (\d+\.\d+\.\d+)') {
-            Write-Check "Python Installed" $true $matches[1]
-        }
-    } catch {
-        Write-Check "Python" $false "" "Optional - Install from https://python.org if needed"
-    }
+} else {
+    Write-Check "Python" $false "" "Optional - Install from https://python.org if needed"
 }
 
 # ==================== System ====================
@@ -210,7 +232,7 @@ try {
 } catch {
     $execPolicy = "Unknown"
 }
-$execPolicyOk = $execPolicy -in @('RemoteSigned', 'Unrestricted', 'Bypass')
+$execPolicyOk = $execPolicy -in @('RemoteSigned', 'Unrestricted', 'Bypass', 'AllSigned')
 Write-Check "Execution Policy" $execPolicyOk $execPolicy "Run: Set-ExecutionPolicy RemoteSigned -Scope CurrentUser"
 if (-not $execPolicyOk) { $warningsFound++ }
 
@@ -221,6 +243,19 @@ $totalSpaceGB = [math]::Round($systemDrive.Size / 1GB, 1)
 $diskOk = $freeSpaceGB -gt 10
 Write-Check "Disk Space (C:)" $diskOk "$freeSpaceGB GB free / $totalSpaceGB GB total" "Free up disk space"
 if (-not $diskOk) { $warningsFound++ }
+
+# RAM
+$totalRAM = [math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB, 1)
+Write-Check "Memory (RAM)" ($totalRAM -ge 8) "$totalRAM GB total" "Consider upgrading to 16GB+ for development"
+if ($totalRAM -lt 8) { $warningsFound++ }
+
+# WSL
+$wslCheck = Get-Command wsl -ErrorAction SilentlyContinue
+if ($wslCheck) {
+    Write-Check "WSL" $true "Installed"
+} else {
+    Write-Check "WSL" $false "" "Optional - Install WSL for Linux development"
+}
 
 # ==================== Summary ====================
 Write-Host "`n  ===================================" -ForegroundColor Cyan

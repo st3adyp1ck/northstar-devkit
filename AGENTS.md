@@ -8,7 +8,7 @@
 - **Website:** https://www.northstarcoding.com
 - **License:** MIT
 - **Language:** English (all comments and documentation)
-- **Version:** 2.0.0
+- **Version:** 2.1.0
 
 ## Technology Stack
 
@@ -171,14 +171,15 @@ try {
 ## Key Features by Module
 
 ### Port Tools (`ports/`)
-- **Common ports scanned:** 3000, 3001, 5173, 8000, 8080, 9000, 4200, 5000, 5500
+- **Common ports scanned:** 3000, 3001, 3002, 3003, 5173, 5174, 8000, 8080, 8081, 9000, 4200, 5000, 5500, 1337, 5432, 3306, 6379, 27017
 - Uses `Get-NetTCPConnection` for port detection
 - Uses `Get-Process` and `Stop-Process` for process management
 
 ### Node.js Tools (`node/`)
 - Executes `npm cache clean --force` for cache clearing
-- Recursively removes `node_modules` directories
-- Supports `package-lock.json` cleanup
+- Recursively removes `node_modules` directories using long-path-safe deletion
+- Supports `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, and `bun.lockb` cleanup
+- Auto-detects package manager (npm/yarn/pnpm/bun) from lock files
 
 ### Next.js Tools (`nextjs/`)
 - Removes `.next/` build cache directory
@@ -226,8 +227,9 @@ try {
 ### WiFi Tools (`wifi/`)
 - Uses `netsh` commands for network operations
 - Uses `Get-NetAdapter` and `Set-DnsClientServerAddress` for DNS management
-- Cloudflare DNS (1.1.1.1) and Google DNS (8.8.8.8) testing
+- Cloudflare DNS (1.1.1.1 / 2606:4700:4700::1111) and Google DNS (8.8.8.8 / 2001:4860:4860::8888) testing
 - Speed test via Cloudflare's speed endpoint
+- Requires administrator privileges; warns about required reboot after TCP/IP reset
 
 ## Usage Patterns
 
@@ -261,8 +263,8 @@ Launches the main interactive menu for navigation via keyboard input.
 
 ## Security Considerations
 
-- **Administrator privileges** are recommended for:
-  - WiFi optimization features
+- **Administrator privileges** are required for:
+  - WiFi optimization features (script checks and warns if not admin)
   - Editing system (Machine) PATH
   - Restoring Machine environment variables
 - Scripts use `-ExecutionPolicy Bypass` in batch wrappers for convenience
@@ -311,9 +313,10 @@ When adding a new tool to DevKit:
 
 ## Notes
 
-- Scripts assume PowerShell 7 (`pwsh.exe`) is preferred but fall back to Windows PowerShell
+- Scripts assume PowerShell 7 (`pwsh.exe`) is preferred but fall back to Windows PowerShell (batch wrappers implement this fallback chain)
 - All paths use `Join-Path` or `Resolve-Path` for cross-platform compatibility
-- Scripts use `Push-Location` and `Pop-Location` to maintain working directory context
+- Scripts use `Push-Location` and `Pop-Location` wrapped in `try/finally` to maintain working directory context
+- Batch wrappers use `%~dp0` to locate `.ps1` files without changing the caller's working directory
 - No package management (no package.json, requirements.txt, etc.) - this is a standalone toolkit
 - Scripts use consistent header format with Northstar branding
 - Version 2.0 adds Git, Docker, Vite, System, Workflow, and Diagnostics modules

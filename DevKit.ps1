@@ -29,7 +29,7 @@ function Show-Header {
     Clear-Host
     Write-Host "=============================================" -ForegroundColor Cyan
     Write-Host "        Northstar DevKit v2.0              " -ForegroundColor Cyan
-    Write-Host "    Developer Toolkit by Northstar.com      " -ForegroundColor Cyan
+    Write-Host "    Developer Toolkit by northstarcoding.com" -ForegroundColor Cyan
     Write-Host "=============================================" -ForegroundColor Cyan
     Write-Host "  Current: $Title" -ForegroundColor Yellow
     Write-Host ""
@@ -66,6 +66,7 @@ function Show-PortMenu {
     Write-Host "  [2] Scan Specific Port"
     Write-Host "  [3] Kill Process by PID"
     Write-Host "  [4] Kill All Node Processes"
+    Write-Host "  [5] Kill Process by Port Number"
     Write-Host ""
     Write-Host "  [0] Back"
     Write-Host ""
@@ -152,6 +153,40 @@ function Invoke-KillProcess {
     Read-Host "Press Enter to continue"
 }
 
+function Invoke-KillProcessByPort {
+    Show-Header "Kill Process by Port"
+    $portInput = Read-Host "Enter port number"
+    
+    if ($portInput -match '^\d+$') {
+        $targetPort = [int]$portInput
+        $connection = Get-NetTCPConnection -LocalPort $targetPort -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($connection) {
+            $process = Get-Process -Id $connection.OwningProcess -ErrorAction SilentlyContinue
+            Write-Host ""
+            Write-Host "  Process: $($process.ProcessName) (PID: $($connection.OwningProcess))" -ForegroundColor Yellow
+            Write-Host "  Port: $targetPort" -ForegroundColor Yellow
+            $confirm = Read-Host "  Confirm kill? (y/n)"
+            if ($confirm -eq 'y') {
+                try {
+                    Stop-Process -Id $connection.OwningProcess -Force
+                    Write-Host "  DONE: Process killed." -ForegroundColor Green
+                } catch {
+                    Write-Host "  ERROR: Failed to kill process." -ForegroundColor Red
+                }
+            } else {
+                Write-Host "  Cancelled." -ForegroundColor Gray
+            }
+        } else {
+            Write-Host ""
+            Write-Host "  OK: Port $targetPort is free." -ForegroundColor Green
+        }
+    } else {
+        Write-Host "  ERROR: Invalid port number." -ForegroundColor Red
+    }
+    Write-Host ""
+    Read-Host "Press Enter to continue"
+}
+
 function Invoke-KillAllNode {
     Show-Header "Kill All Node Processes"
     $nodeProcesses = Get-Process -Name "node" -ErrorAction SilentlyContinue
@@ -161,8 +196,11 @@ function Invoke-KillAllNode {
         Write-Host "  Found $count node process(es)." -ForegroundColor Yellow
         $confirm = Read-Host "  Confirm kill all? (y/n)"
         if ($confirm -eq 'y') {
-            $nodeProcesses | Stop-Process -Force
-            Write-Host "  DONE: All node processes killed." -ForegroundColor Green
+            $killed = 0
+            foreach ($proc in $nodeProcesses) {
+                try { Stop-Process -Id $proc.Id -Force; $killed++ } catch {}
+            }
+            Write-Host "  DONE: Killed $killed process(es)." -ForegroundColor Green
         } else {
             Write-Host "  Cancelled." -ForegroundColor Gray
         }
@@ -182,7 +220,9 @@ function Start-PortTools {
             '2' { Invoke-PortScanSpecific }
             '3' { Invoke-KillProcess }
             '4' { Invoke-KillAllNode }
+            '5' { Invoke-KillProcessByPort }
             '0' { return }
+            default { Write-Host "  Invalid option. Press Enter to continue." -ForegroundColor Red; Read-Host }
         }
     }
 }
@@ -204,8 +244,12 @@ function Invoke-ClearNpmCache {
     Write-Host "  Running: npm cache clean --force" -ForegroundColor Gray
     Write-Host ""
     npm cache clean --force
-    Write-Host ""
-    Write-Host "  DONE: NPM cache cleared." -ForegroundColor Green
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  WARNING: npm cache clean may have failed." -ForegroundColor Yellow
+    } else {
+        Write-Host ""
+        Write-Host "  DONE: NPM cache cleared." -ForegroundColor Green
+    }
     Write-Host ""
     Read-Host "Press Enter to continue"
 }
@@ -213,7 +257,7 @@ function Invoke-ClearNpmCache {
 function Invoke-DeleteNodeModules {
     Show-Header "Delete node_modules"
     $targetPath = Read-Host "Enter project path (or '.' for current)"
-    if ($targetPath -eq '.') { $targetPath = Get-Location }
+    if ($targetPath -eq '.') { $targetPath = (Get-Location).Path }
     
     $nmPath = Join-Path $targetPath "node_modules"
     if (Test-Path $nmPath) {
@@ -230,7 +274,7 @@ function Invoke-DeleteNodeModules {
 function Invoke-NukeAndReinstall {
     Show-Header "Nuke and Reinstall"
     $targetPath = Read-Host "Enter project path (or '.' for current)"
-    if ($targetPath -eq '.') { $targetPath = Get-Location }
+    if ($targetPath -eq '.') { $targetPath = (Get-Location).Path }
     
     Push-Location $targetPath
     
@@ -245,8 +289,12 @@ function Invoke-NukeAndReinstall {
         }
         Write-Host "  Running npm install..." -ForegroundColor Yellow
         npm install
-        Write-Host ""
-        Write-Host "  DONE: Fresh install complete." -ForegroundColor Green
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "  ERROR: npm install failed." -ForegroundColor Red
+        } else {
+            Write-Host ""
+            Write-Host "  DONE: Fresh install complete." -ForegroundColor Green
+        }
     } catch {
         Write-Host "  ERROR: $_" -ForegroundColor Red
     } finally {
@@ -296,7 +344,7 @@ function Show-NextJsMenu {
 function Invoke-ClearNextCache {
     Show-Header "Clear .next Cache"
     $targetPath = Read-Host "Enter project path (or '.' for current)"
-    if ($targetPath -eq '.') { $targetPath = Get-Location }
+    if ($targetPath -eq '.') { $targetPath = (Get-Location).Path }
     
     $nextPath = Join-Path $targetPath ".next"
     if (Test-Path $nextPath) {
@@ -313,7 +361,7 @@ function Invoke-ClearNextCache {
 function Invoke-ClearTurbopackCache {
     Show-Header "Clear Turbopack Cache"
     $targetPath = Read-Host "Enter project path (or '.' for current)"
-    if ($targetPath -eq '.') { $targetPath = Get-Location }
+    if ($targetPath -eq '.') { $targetPath = (Get-Location).Path }
     
     $cachePaths = @(
         (Join-Path $targetPath ".next\cache"),
@@ -342,30 +390,37 @@ function Invoke-ClearTurbopackCache {
 function Invoke-FullNextClean {
     Show-Header "Full Next.js Clean"
     $targetPath = Read-Host "Enter project path (or '.' for current)"
-    if ($targetPath -eq '.') { $targetPath = Get-Location }
+    if ($targetPath -eq '.') { $targetPath = (Get-Location).Path }
     
     Push-Location $targetPath
     
     try {
         $nodeProcs = Get-Process -Name "node" -ErrorAction SilentlyContinue | 
-            Where-Object { $_.Path -like "*$targetPath*" }
+            Where-Object { $_.Path -eq (Join-Path $targetPath "node_modules") -or $_.Path -like "*$targetPath\*" }
         if ($nodeProcs) {
             Write-Host "  Stopping local node processes..." -ForegroundColor Yellow
-            $nodeProcs | Stop-Process -Force
+            foreach ($proc in $nodeProcs) { try { $proc | Stop-Process -Force } catch {} }
         }
         
-        $pathsToDelete = @(".next", "node_modules", "package-lock.json")
+        $pathsToDelete = @(".next", "node_modules")
         foreach ($p in $pathsToDelete) {
             if (Test-Path $p) {
                 Write-Host "  Deleting $p..." -ForegroundColor Yellow
                 Remove-Item -Path $p -Recurse -Force
             }
         }
+        @("package-lock.json", "yarn.lock", "pnpm-lock.yaml", "bun.lockb") | ForEach-Object {
+            if (Test-Path $_) { Remove-Item -Path $_ -Force }
+        }
         
         Write-Host "  Running npm install..." -ForegroundColor Yellow
         npm install
-        Write-Host ""
-        Write-Host "  DONE: Full clean and reinstall complete!" -ForegroundColor Green
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "  ERROR: npm install failed." -ForegroundColor Red
+        } else {
+            Write-Host ""
+            Write-Host "  DONE: Full clean and reinstall complete!" -ForegroundColor Green
+        }
     } catch {
         Write-Host "  ERROR: $_" -ForegroundColor Red
     } finally {
@@ -378,7 +433,7 @@ function Invoke-FullNextClean {
 function Invoke-NextDevFresh {
     Show-Header "Next.js Dev Server (Fresh Start)"
     $targetPath = Read-Host "Enter project path (or '.' for current)"
-    if ($targetPath -eq '.') { $targetPath = Get-Location }
+    if ($targetPath -eq '.') { $targetPath = (Get-Location).Path }
     
     Push-Location $targetPath
     
@@ -390,6 +445,7 @@ function Invoke-NextDevFresh {
         
         Write-Host "  Starting dev server..." -ForegroundColor Green
         Write-Host ""
+        $env:NEXT_TELEMETRY_DISABLED = "1"
         npm run dev
     } catch {
         Write-Host "  ERROR: $_" -ForegroundColor Red
@@ -409,6 +465,7 @@ function Start-NextJsTools {
             '3' { Invoke-FullNextClean }
             '4' { Invoke-NextDevFresh }
             '0' { return }
+            default { Write-Host "  Invalid option. Press Enter to continue." -ForegroundColor Red; Read-Host }
         }
     }
 }
@@ -431,18 +488,21 @@ function Start-ViteTools {
             '1' { 
                 Clear-Host
                 $targetPath = Read-Host "Enter project path (or '.' for current)"
-                if ($targetPath -eq '.') { $targetPath = Get-Location }
-                & "$ScriptDir\vite\Vite-DevFresh.ps1" -Path $targetPath
+                if ($targetPath -eq '.') { $targetPath = (Get-Location).Path }
+                $scriptPath = Join-Path $ScriptDir "vite\Vite-DevFresh.ps1"
+                if (Test-Path $scriptPath) { & $scriptPath -Path $targetPath } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
                 Read-Host "Press Enter to continue"
             }
             '2' { 
                 Clear-Host
                 $targetPath = Read-Host "Enter project path (or '.' for current)"
-                if ($targetPath -eq '.') { $targetPath = Get-Location }
-                & "$ScriptDir\vite\Vite-PreviewBuild.ps1" -Path $targetPath
+                if ($targetPath -eq '.') { $targetPath = (Get-Location).Path }
+                $scriptPath = Join-Path $ScriptDir "vite\Vite-PreviewBuild.ps1"
+                if (Test-Path $scriptPath) { & $scriptPath -Path $targetPath } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
                 Read-Host "Press Enter to continue"
             }
             '0' { return }
+            default { Write-Host "  Invalid option. Press Enter to continue." -ForegroundColor Red; Read-Host }
         }
     }
 }
@@ -466,25 +526,29 @@ function Start-GitTools {
             '1' { 
                 Clear-Host
                 $targetPath = Read-Host "Enter project path (or '.' for current)"
-                if ($targetPath -eq '.') { $targetPath = Get-Location }
-                & "$ScriptDir\git\Git-Cleanup.ps1" -Path $targetPath
+                if ($targetPath -eq '.') { $targetPath = (Get-Location).Path }
+                $scriptPath = Join-Path $ScriptDir "git\Git-Cleanup.ps1"
+                if (Test-Path $scriptPath) { & $scriptPath -Path $targetPath } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
                 Read-Host "Press Enter to continue"
             }
             '2' { 
                 Clear-Host
                 $targetPath = Read-Host "Enter root path to scan (or '.' for current)"
-                if ($targetPath -eq '.') { $targetPath = Get-Location }
-                & "$ScriptDir\git\Git-StatusAll.ps1" -Path $targetPath
+                if ($targetPath -eq '.') { $targetPath = (Get-Location).Path }
+                $scriptPath = Join-Path $ScriptDir "git\Git-StatusAll.ps1"
+                if (Test-Path $scriptPath) { & $scriptPath -Path $targetPath } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
                 Read-Host "Press Enter to continue"
             }
             '3' { 
                 Clear-Host
                 $targetPath = Read-Host "Enter project path (or '.' for current)"
-                if ($targetPath -eq '.') { $targetPath = Get-Location }
-                & "$ScriptDir\git\Git-SyncFork.ps1" -Path $targetPath
+                if ($targetPath -eq '.') { $targetPath = (Get-Location).Path }
+                $scriptPath = Join-Path $ScriptDir "git\Git-SyncFork.ps1"
+                if (Test-Path $scriptPath) { & $scriptPath -Path $targetPath } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
                 Read-Host "Press Enter to continue"
             }
             '0' { return }
+            default { Write-Host "  Invalid option. Press Enter to continue." -ForegroundColor Red; Read-Host }
         }
     }
 }
@@ -507,17 +571,24 @@ function Start-DockerTools {
         switch ($choice) {
             '1' { 
                 Clear-Host
-                & "$ScriptDir\docker\Docker-Nuke.ps1"
+                $scriptPath = Join-Path $ScriptDir "docker\Docker-Nuke.ps1"
+                if (Test-Path $scriptPath) { & $scriptPath } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
+                Read-Host "Press Enter to continue"
             }
             '2' { 
                 Clear-Host
-                & "$ScriptDir\docker\Docker-Cleanup.ps1"
+                $scriptPath = Join-Path $ScriptDir "docker\Docker-Cleanup.ps1"
+                if (Test-Path $scriptPath) { & $scriptPath } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
+                Read-Host "Press Enter to continue"
             }
             '3' { 
                 Clear-Host
-                & "$ScriptDir\docker\Docker-QuickLogs.ps1"
+                $scriptPath = Join-Path $ScriptDir "docker\Docker-QuickLogs.ps1"
+                if (Test-Path $scriptPath) { & $scriptPath } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
+                Read-Host "Press Enter to continue"
             }
             '0' { return }
+            default { Write-Host "  Invalid option. Press Enter to continue." -ForegroundColor Red; Read-Host }
         }
     }
 }
@@ -541,26 +612,33 @@ function Start-SystemTools {
         switch ($choice) {
             '1' { 
                 Clear-Host
-                & "$ScriptDir\system\Edit-Path.ps1"
+                $scriptPath = Join-Path $ScriptDir "system\Edit-Path.ps1"
+                if (Test-Path $scriptPath) { & $scriptPath } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
+                Read-Host "Press Enter to continue"
             }
             '2' { 
                 Clear-Host
                 $targetPath = Read-Host "Enter backup output path (or '.' for current)"
-                if ($targetPath -eq '.') { $targetPath = Get-Location }
-                & "$ScriptDir\system\Env-Backup.ps1" -OutputPath $targetPath
+                if ($targetPath -eq '.') { $targetPath = (Get-Location).Path }
+                $scriptPath = Join-Path $ScriptDir "system\Env-Backup.ps1"
+                if (Test-Path $scriptPath) { & $scriptPath -OutputPath $targetPath } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
                 Read-Host "Press Enter to continue"
             }
             '3' { 
                 Clear-Host
                 $backupFile = Read-Host "Enter backup file path to restore"
-                & "$ScriptDir\system\Env-Restore.ps1" -BackupFile $backupFile
+                $scriptPath = Join-Path $ScriptDir "system\Env-Restore.ps1"
+                if (Test-Path $scriptPath) { & $scriptPath -BackupFile $backupFile } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
                 Read-Host "Press Enter to continue"
             }
             '4' { 
                 Clear-Host
-                & "$ScriptDir\system\Shell-Reload.ps1"
+                $scriptPath = Join-Path $ScriptDir "system\Shell-Reload.ps1"
+                if (Test-Path $scriptPath) { & $scriptPath } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
+                Read-Host "Press Enter to continue"
             }
             '0' { return }
+            default { Write-Host "  Invalid option. Press Enter to continue." -ForegroundColor Red; Read-Host }
         }
     }
 }
@@ -584,25 +662,29 @@ function Start-WorkflowTools {
             '1' { 
                 Clear-Host
                 $targetPath = Read-Host "Enter project path (or '.' for current)"
-                if ($targetPath -eq '.') { $targetPath = Get-Location }
-                & "$ScriptDir\workflow\Code-Here.ps1" -Path $targetPath
+                if ($targetPath -eq '.') { $targetPath = (Get-Location).Path }
+                $scriptPath = Join-Path $ScriptDir "workflow\Code-Here.ps1"
+                if (Test-Path $scriptPath) { & $scriptPath -Path $targetPath } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
                 Read-Host "Press Enter to continue"
             }
             '2' { 
                 Clear-Host
                 $targetPath = Read-Host "Enter project path (or '.' for current)"
-                if ($targetPath -eq '.') { $targetPath = Get-Location }
-                & "$ScriptDir\workflow\Open-Repo.ps1" -Path $targetPath
+                if ($targetPath -eq '.') { $targetPath = (Get-Location).Path }
+                $scriptPath = Join-Path $ScriptDir "workflow\Open-Repo.ps1"
+                if (Test-Path $scriptPath) { & $scriptPath -Path $targetPath } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
                 Read-Host "Press Enter to continue"
             }
             '3' { 
                 Clear-Host
                 $targetPath = Read-Host "Enter project path (or '.' for current)"
-                if ($targetPath -eq '.') { $targetPath = Get-Location }
-                & "$ScriptDir\workflow\Copy-EnvTemplate.ps1" -Path $targetPath
+                if ($targetPath -eq '.') { $targetPath = (Get-Location).Path }
+                $scriptPath = Join-Path $ScriptDir "workflow\Copy-EnvTemplate.ps1"
+                if (Test-Path $scriptPath) { & $scriptPath -Path $targetPath } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
                 Read-Host "Press Enter to continue"
             }
             '0' { return }
+            default { Write-Host "  Invalid option. Press Enter to continue." -ForegroundColor Red; Read-Host }
         }
     }
 }
@@ -624,15 +706,18 @@ function Start-DiagnosticsTools {
         switch ($choice) {
             '1' { 
                 Clear-Host
-                & "$ScriptDir\diagnostics\DevKit-Doctor.ps1"
+                $scriptPath = Join-Path $ScriptDir "diagnostics\DevKit-Doctor.ps1"
+                if (Test-Path $scriptPath) { & $scriptPath } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
                 Read-Host "Press Enter to continue"
             }
             '2' { 
                 Clear-Host
-                & "$ScriptDir\diagnostics\System-DevInfo.ps1"
+                $scriptPath = Join-Path $ScriptDir "diagnostics\System-DevInfo.ps1"
+                if (Test-Path $scriptPath) { & $scriptPath } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
                 Read-Host "Press Enter to continue"
             }
             '0' { return }
+            default { Write-Host "  Invalid option. Press Enter to continue." -ForegroundColor Red; Read-Host }
         }
     }
 }
@@ -650,17 +735,23 @@ function Show-WiFiMenu {
 
 function Invoke-WiFiOptimize {
     Clear-Host
-    & "$ScriptDir\wifi\WiFi-Optimize.ps1"
+    $scriptPath = Join-Path $ScriptDir "wifi\WiFi-Optimize.ps1"
+    if (Test-Path $scriptPath) { & $scriptPath } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
+    Read-Host "Press Enter to continue"
 }
 
 function Invoke-WiFiFast {
     Clear-Host
-    & "$ScriptDir\wifi\WiFi-Optimize.ps1" -Fast
+    $scriptPath = Join-Path $ScriptDir "wifi\WiFi-Optimize.ps1"
+    if (Test-Path $scriptPath) { & $scriptPath -Fast } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
+    Read-Host "Press Enter to continue"
 }
 
 function Invoke-WiFiScan {
     Clear-Host
-    & "$ScriptDir\wifi\WiFi-Scan.ps1"
+    $scriptPath = Join-Path $ScriptDir "wifi\WiFi-Scan.ps1"
+    if (Test-Path $scriptPath) { & $scriptPath } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
+    Read-Host "Press Enter to continue"
 }
 
 function Start-WiFiTools {
@@ -672,6 +763,7 @@ function Start-WiFiTools {
             '2' { Invoke-WiFiFast }
             '3' { Invoke-WiFiScan }
             '0' { return }
+            default { Write-Host "  Invalid option. Press Enter to continue." -ForegroundColor Red; Read-Host }
         }
     }
 }
@@ -692,5 +784,6 @@ while ($true) {
         '9' { Start-DiagnosticsTools }
         '10' { Start-WiFiTools }
         '0' { exit }
+        default { Write-Host "  Invalid option. Press Enter to continue." -ForegroundColor Red; Read-Host }
     }
 }

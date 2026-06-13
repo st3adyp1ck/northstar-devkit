@@ -61,10 +61,6 @@ if ($Recent) {
     $recentPaths = @()
     
     if ($editorCmd -eq "code") {
-        $storagePath = Join-Path $env:APPDATA "Code\User\globalStorage\state.vscdb"
-        $backupPath = Join-Path $env:APPDATA "Code\User\globalStorage\state.vscdb.backup"
-        
-        # Try to get recent from workspace storage
         $workspaceStorage = Join-Path $env:APPDATA "Code\User\workspaceStorage"
         if (Test-Path $workspaceStorage) {
             Get-ChildItem $workspaceStorage -Directory | ForEach-Object {
@@ -117,7 +113,7 @@ if ($Recent) {
     for ($i = 0; $i -lt $recentPaths.Count; $i++) {
         $name = Split-Path $recentPaths[$i] -Leaf
         Write-Host "  [$($i + 1)] $name" -ForegroundColor Cyan
-        Write-Host "      $recentPaths[$i]" -ForegroundColor DarkGray
+        Write-Host "      $($recentPaths[$i])" -ForegroundColor DarkGray
     }
     
     Write-Host ""
@@ -138,19 +134,19 @@ if ($Recent) {
 }
 
 # Resolve and validate path
-$targetPath = Resolve-Path $Path -ErrorAction SilentlyContinue
-if (-not $targetPath) {
+if (-not (Test-Path $Path)) {
     Write-Host "  ERROR: Path not found: $Path`n" -ForegroundColor Red
     exit 1
 }
+$targetPath = (Resolve-Path $Path).Path
 
 Write-Host "  Opening: $targetPath" -ForegroundColor Gray
 Write-Host ""
 
 # Open editor
-$args = @($targetPath)
-if ($Wait) { $args += "--wait" }
+$editorArgs = @($targetPath)
+if ($Wait) { $editorArgs += "--wait" }
 
-& $editorCmd @args
+& $editorCmd @editorArgs
 
 Write-Host "  Launched $editorName.`n" -ForegroundColor Green

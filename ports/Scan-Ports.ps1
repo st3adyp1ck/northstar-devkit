@@ -19,9 +19,9 @@ param(
     [switch]$Kill
 )
 
-$CommonPorts = @(3000, 3001, 5173, 8000, 8080, 9000, 4200, 5000, 5500)
+$CommonPorts = @(3000, 3001, 3002, 3003, 5173, 5174, 8000, 8080, 8081, 9000, 4200, 5000, 5500, 1337, 5432, 3306, 6379, 27017)
 
-Write-Host "`nNorthstar DevKit - Port Scanner`" -ForegroundColor Cyan
+Write-Host "`nNorthstar DevKit - Port Scanner" -ForegroundColor Cyan
 Write-Host "Ports: $($CommonPorts -join ', ')`n" -ForegroundColor Gray
 
 $foundProcesses = @()
@@ -30,20 +30,17 @@ foreach ($port in $CommonPorts) {
     $connection = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($connection) {
         $process = Get-Process -Id $connection.OwningProcess -ErrorAction SilentlyContinue
+        $procName = if ($process) { $process.ProcessName } else { "Unknown" }
         $foundProcesses += [PSCustomObject]@{
             Port = $port
             PID = $connection.OwningProcess
-            Name = $process.ProcessName
-            Path = $process.Path
+            Name = $procName
+            Path = if ($process) { $process.Path } else { $null }
         }
         
         Write-Host "  WARNING: Port $port" -ForegroundColor Red -NoNewline
         Write-Host " -> PID: $($connection.OwningProcess)" -ForegroundColor Yellow -NoNewline
-        if ($process) {
-            Write-Host " ($($process.ProcessName))" -ForegroundColor Gray
-        } else {
-            Write-Host ""
-        }
+        Write-Host " ($procName)" -ForegroundColor Gray
     }
 }
 

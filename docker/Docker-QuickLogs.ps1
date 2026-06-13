@@ -33,18 +33,14 @@ param(
 Write-Host "`nNorthstar DevKit - Docker Quick Logs`n" -ForegroundColor Cyan
 
 # Check Docker
-try {
-    $null = docker --version 2>$null
-    if ($LASTEXITCODE -ne 0) { throw "Docker not found" }
-} catch {
+$null = docker --version 2>$null
+if ($LASTEXITCODE -ne 0) {
     Write-Host "  ERROR: Docker not found in PATH.`n" -ForegroundColor Red
     exit 1
 }
 
-try {
-    $null = docker info 2>$null
-    if ($LASTEXITCODE -ne 0) { throw "Docker daemon not running" }
-} catch {
+$null = docker info 2>$null
+if ($LASTEXITCODE -ne 0) {
     Write-Host "  ERROR: Docker daemon is not running.`n" -ForegroundColor Red
     exit 1
 }
@@ -115,7 +111,9 @@ if ($containers.Count -eq 1) {
     $jobs = @()
     
     foreach ($container in $containers) {
-        $jobArgs = @("logs", "--tail", $Lines, "--follow") + $(if($Timestamps){"--timestamps"}else{@()})
+        $jobArgs = @("logs", "--tail", $Lines)
+        if ($Follow) { $jobArgs += "--follow" }
+        if ($Timestamps) { $jobArgs += "--timestamps" }
         $jobScript = {
             param($container, $argsArray)
             & docker $argsArray $container 2>&1 | ForEach-Object {

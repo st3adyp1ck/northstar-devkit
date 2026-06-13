@@ -30,10 +30,15 @@ param(
     [switch]$DryRun
 )
 
-$targetPath = Resolve-Path $Path
+Write-Host "`nNorthstar DevKit - Git Cleanup`n" -ForegroundColor Cyan
+
+if (-not (Test-Path $Path)) {
+    Write-Host "  ERROR: Path not found: $Path`n" -ForegroundColor Red
+    exit 1
+}
+$targetPath = (Resolve-Path $Path).Path
 $gitPath = Join-Path $targetPath ".git"
 
-Write-Host "`nNorthstar DevKit - Git Cleanup`n" -ForegroundColor Cyan
 Write-Host "  Path: $targetPath" -ForegroundColor Gray
 
 # Verify Git repo
@@ -42,7 +47,8 @@ if (-not (Test-Path $gitPath)) {
     exit 1
 }
 
-Push-Location $targetPath
+try {
+    Push-Location $targetPath
 
 # Check if git command available
 try {
@@ -148,5 +154,6 @@ if (-not $DryRun) {
 } else {
     Write-Host "`n  [DRY RUN] No changes made.`n" -ForegroundColor Magenta
 }
-
-Pop-Location
+} finally {
+    Pop-Location
+}

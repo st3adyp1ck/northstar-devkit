@@ -12,16 +12,29 @@
     Skip speed test
 .PARAMETER KeepDNS
     Don't change DNS settings
+.PARAMETER Force
+    Skip confirmation prompts.
 .EXAMPLE
     .\WiFi-Optimize.ps1
     .\WiFi-Optimize.ps1 -Fast
+    .\WiFi-Optimize.ps1 -Force
 #>
 
 [CmdletBinding()]
 param(
     [switch]$Fast,
-    [switch]$KeepDNS
+    [switch]$KeepDNS,
+    [switch]$Force
 )
+
+# Admin check
+$isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")
+if (-not $isAdmin) {
+    Write-Host "`nNorthstar DevKit - WiFi OPTIMIZER`n" -ForegroundColor Cyan
+    Write-Host "  ERROR: Administrator privileges required." -ForegroundColor Red
+    Write-Host "  Right-click and select 'Run as administrator'.`n" -ForegroundColor Yellow
+    exit 1
+}
 
 $startTime = Get-Date
 
@@ -46,7 +59,6 @@ function Write-Skip {
     Write-Host " SKIP" -ForegroundColor Gray
 }
 
-Clear-Host
 Write-Host ""
 Write-Host "   NORTHSTAR DevKit - WiFi OPTIMIZER" -ForegroundColor Cyan
 Write-Host "     https://www.northstarcoding.com" -ForegroundColor Gray
@@ -54,6 +66,20 @@ Write-Host ""
 Write-Host "  Optimize your connection for max speed" -ForegroundColor DarkGray
 Write-Host "  Started: $(Get-Date -Format 'HH:mm:ss')" -ForegroundColor DarkGray
 Write-Host ""
+
+# Warning and confirmation
+Write-Host "  WARNING: This will:" -ForegroundColor Red
+Write-Host "    - Reset your network stack (Winsock/TCP/IP)" -ForegroundColor Yellow
+Write-Host "    - Temporarily disconnect your internet" -ForegroundColor Yellow
+Write-Host "    - Require a system restart to fully complete" -ForegroundColor Yellow
+Write-Host ""
+if (-not $Force) {
+    $confirm = Read-Host "  Continue? (y/n)"
+    if ($confirm -ne 'y') {
+        Write-Host "  Cancelled.`n" -ForegroundColor Gray
+        exit 0
+    }
+}
 
 # Check if connected
 Write-Step "Checking connection"
@@ -112,17 +138,23 @@ if (-not $KeepDNS) {
         if ($cfPing -le $ggPing) {
             $dns1 = "1.1.1.1"
             $dns2 = "1.0.0.1"
+            $dns1v6 = "2606:4700:4700::1111"
+            $dns2v6 = "2606:4700:4700::1001"
             Write-Done
             Write-Host "  Cloudflare faster (${cfPing}ms vs ${ggPing}ms)" -ForegroundColor Gray
         } else {
             $dns1 = "8.8.8.8"
             $dns2 = "8.8.4.4"
+            $dns1v6 = "2001:4860:4860::8888"
+            $dns2v6 = "2001:4860:4860::8844"
             Write-Done
             Write-Host "  Google faster (${ggPing}ms vs ${cfPing}ms)" -ForegroundColor Gray
         }
     } else {
         $dns1 = "1.1.1.1"
         $dns2 = "1.0.0.1"
+        $dns1v6 = "2606:4700:4700::1111"
+        $dns2v6 = "2606:4700:4700::1001"
         Write-Done
         Write-Host "  Defaulting to Cloudflare" -ForegroundColor Gray
     }
@@ -130,11 +162,17 @@ if (-not $KeepDNS) {
     # Get active adapter
     $adapter = Get-NetAdapter | Where-Object { $_.Status -eq "Up" -and $_.HardwareInterface -eq $true } | Select-Object -First 1
     if ($adapter) {
-        Write-Step "Setting DNS on $($adapter.Name)"
+        Write-Step "Setting IPv4 DNS on $($adapter.Name)"
         Set-DnsClientServerAddress -InterfaceIndex $adapter.InterfaceIndex -ServerAddresses $dns1, $dns2 -ErrorAction SilentlyContinue
         Write-Done
         Write-Host "  Primary: $dns1" -ForegroundColor Gray
         Write-Host "  Secondary: $dns2" -ForegroundColor Gray
+
+        Write-Step "Setting IPv6 DNS on $($adapter.Name)"
+        Set-DnsClientServerAddress -InterfaceIndex $adapter.InterfaceIndex -ServerAddresses $dns1v6, $dns2v6 -AddressFamily IPv6 -ErrorAction SilentlyContinue
+        Write-Done
+        Write-Host "  Primary IPv6: $dns1v6" -ForegroundColor Gray
+        Write-Host "  Secondary IPv6: $dns2v6" -ForegroundColor Gray
     }
 } else {
     Write-Header "DNS Optimization"
@@ -143,18 +181,6 @@ if (-not $KeepDNS) {
 
 # ========== WINDOWS OPTIMIZATIONS ==========
 Write-Header "Optimizing System"
-
-Write-Step "Disabling background tasks"
-$servicesToStop = @("DiagTrack", "dmwappushservice", "MapsBroker", "WMPNetworkSvc")
-foreach ($svc in $servicesToStop) {
-    Stop-Service -Name $svc -Force -ErrorAction SilentlyContinue
-    Set-Service -Name $svc -StartupType Manual -ErrorAction SilentlyContinue
-}
-Write-Done
-
-Write-Step "Clearing temporary files"
-Remove-Item -Path "$env:TEMP\*" -Recurse -Force -ErrorAction SilentlyContinue
-Write-Done
 
 Write-Step "Optimizing TCP settings"
 netsh int tcp set global autotuninglevel=normal | Out-Null
@@ -202,8 +228,9 @@ Write-Host "  Duration: $duration seconds" -ForegroundColor Gray
 Write-Host ""
 Write-Host "  DNS: $(if($KeepDNS){'Unchanged'}else{"$dns1, $dns2"})" -ForegroundColor Gray
 Write-Host "  Network stack: Reset" -ForegroundColor Gray
-Write-Host "  Background tasks: Optimized" -ForegroundColor Gray
 Write-Host ""
+Write-Host "  IMPORTANT: A system restart is recommended" -ForegroundColor Red
+Write-Host "  to fully complete the TCP/IP reset.`n" -ForegroundColor Yellow
 
 Write-Host "  Tips for better speeds:" -ForegroundColor Cyan
 Write-Host "    - Move closer to the router" -ForegroundColor Gray

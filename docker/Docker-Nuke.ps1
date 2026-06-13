@@ -36,21 +36,17 @@ Write-Host "  WARNING: This will remove ALL Docker resources!" -ForegroundColor 
 Write-Host ""
 
 # Check if Docker is available
-try {
-    $dockerVersion = docker --version 2>$null
-    if ($LASTEXITCODE -ne 0) { throw "Docker not found" }
-    Write-Host "  Docker: $dockerVersion" -ForegroundColor Gray
-} catch {
+$dockerVersion = docker --version 2>$null
+if ($LASTEXITCODE -ne 0) {
     Write-Host "  ERROR: Docker not found in PATH.`n" -ForegroundColor Red
     Write-Host "  Please install Docker Desktop or Docker Engine.`n" -ForegroundColor Yellow
     exit 1
 }
+Write-Host "  Docker: $dockerVersion" -ForegroundColor Gray
 
 # Check Docker daemon
-try {
-    $null = docker info 2>$null
-    if ($LASTEXITCODE -ne 0) { throw "Docker daemon not running" }
-} catch {
+$null = docker info 2>$null
+if ($LASTEXITCODE -ne 0) {
     Write-Host "  ERROR: Docker daemon is not running.`n" -ForegroundColor Red
     Write-Host "  Please start Docker Desktop or Docker service.`n" -ForegroundColor Yellow
     exit 1
@@ -60,7 +56,7 @@ try {
 $containers = docker ps -aq 2>$null | Where-Object { $_ }
 $images = docker images -q 2>$null | Where-Object { $_ }
 $volumes = docker volume ls -q 2>$null | Where-Object { $_ }
-$networks = docker network ls -q 2>$null | Where-Object { $_ -notmatch 'bridge|host|none' }
+$networks = docker network ls --format "{{.Name}}" 2>$null | Where-Object { $_ -notmatch '^(bridge|host|none)$' }
 
 $containerCount = ($containers | Measure-Object).Count
 $imageCount = ($images | Measure-Object).Count
@@ -134,7 +130,7 @@ if ($containerCount -gt 0) {
     
     # Step 2: Remove all containers
     Write-Host "`n  [$step/$totalSteps] Removing all containers..." -ForegroundColor Yellow
-    docker rm $(docker ps -aq) -f 2>&1 | ForEach-Object {
+    docker rm -f $(docker ps -aq) 2>&1 | ForEach-Object {
         if ($_ -match '^[a-f0-9]') {
             Write-Host "    Removed: $($_.Substring(0,12))" -ForegroundColor DarkGray
         }
@@ -149,7 +145,7 @@ if ($containerCount -gt 0) {
 # Step 3: Remove images (unless KeepImages)
 if (-not $KeepImages -and $imageCount -gt 0) {
     Write-Host "`n  [$step/$totalSteps] Removing all images..." -ForegroundColor Yellow
-    docker rmi $(docker images -q) -f 2>&1 | ForEach-Object {
+    docker rmi -f $(docker images -q) 2>&1 | ForEach-Object {
         if ($_ -match 'Untagged|Deleted') {
             Write-Host "    $_" -ForegroundColor DarkGray
         }
@@ -190,7 +186,9 @@ Write-Host "  DONE: Networks and build cache pruned." -ForegroundColor Green
 
 # Final system prune to clean up everything else
 Write-Host "`n  Final cleanup with system prune..." -ForegroundColor Yellow
-docker system prune -f --volumes:$($KeepVolumes -eq $false) 2>&1 | Out-Null
+$pruneArgs = @("system", "prune", "-f")
+if (-not $KeepVolumes) { $pruneArgs += "--volumes" }
+docker @pruneArgs 2>&1 | Out-Null
 
 Write-Host "`n  ===================================" -ForegroundColor Cyan
 Write-Host "  DOCKER NUKE COMPLETE!" -ForegroundColor Green

@@ -56,18 +56,19 @@ Write-Host "    User:      $($info.System.Username)" -ForegroundColor Gray
 Write-Host "`n  Development Tools:" -ForegroundColor Yellow
 
 $tools = @(
-    @{ Name = "PowerShell"; Cmd = "pwsh"; Args = "--version"; Pattern = '(\d+\.\d+\.\d+)' }
-    @{ Name = "Node.js"; Cmd = "node"; Args = "--version"; Pattern = 'v(\d+\.\d+\.\d+)' }
-    @{ Name = "NPM"; Cmd = "npm"; Args = "--version"; Pattern = '(\d+\.\d+\.\d+)' }
-    @{ Name = "Git"; Cmd = "git"; Args = "--version"; Pattern = '(\d+\.\d+\.\d+)' }
-    @{ Name = "Docker"; Cmd = "docker"; Args = "--version"; Pattern = '(\d+\.\d+\.\d+)' }
-    @{ Name = "Python"; Cmd = "python"; Args = "--version"; Pattern = '(\d+\.\d+\.\d+)' }
-    @{ Name = "VS Code"; Cmd = "code"; Args = "--version"; Pattern = '(^[\d\.]+)' }
+    @{ Name = "PowerShell"; Cmd = "pwsh"; Args = @("--version"); Pattern = '(\d+\.\d+\.\d+)' }
+    @{ Name = "Node.js"; Cmd = "node"; Args = @("--version"); Pattern = 'v(\d+\.\d+\.\d+)' }
+    @{ Name = "NPM"; Cmd = "npm"; Args = @("--version"); Pattern = '(\d+\.\d+\.\d+)' }
+    @{ Name = "Git"; Cmd = "git"; Args = @("--version"); Pattern = '(\d+\.\d+\.\d+)' }
+    @{ Name = "Docker"; Cmd = "docker"; Args = @("--version"); Pattern = '(\d+\.\d+\.\d+)' }
+    @{ Name = "Python"; Cmd = "python"; Args = @("--version"); Pattern = '(\d+\.\d+\.\d+)' }
+    @{ Name = "VS Code"; Cmd = "code"; Args = @("--version"); Pattern = '(^[\d\.]+)' }
 )
 
 foreach ($tool in $tools) {
     try {
-        $output = & $tool.Cmd $tool.Args.Split(' ') 2>&1 | Select-Object -First 1
+        $cmdArgs = $tool.Args
+        $output = & $tool.Cmd @cmdArgs 2>&1 | Select-Object -First 1
         if ($LASTEXITCODE -eq 0 -or $output -match $tool.Pattern) {
             if ($output -match $tool.Pattern) {
                 $version = $matches[1]
@@ -81,6 +82,18 @@ foreach ($tool in $tools) {
             throw "Not installed"
         }
     } catch {
+        # Try python3 fallback for Python
+        if ($tool.Name -eq "Python") {
+            try {
+                $output = & python3 --version 2>&1 | Select-Object -First 1
+                if ($output -match '(\d+\.\d+\.\d+)') {
+                    $version = $matches[1]
+                    $info.Tools += @{ Name = $tool.Name; Version = $version; Installed = $true }
+                    Write-Host "    $($tool.Name.PadRight(12)) v$version (python3)" -ForegroundColor Green
+                    continue
+                }
+            } catch {}
+        }
         $info.Tools += @{ Name = $tool.Name; Version = $null; Installed = $false }
         Write-Host "    $($tool.Name.PadRight(12)) Not installed" -ForegroundColor Gray
     }
@@ -175,26 +188,37 @@ Write-Host "    Admin Rights: $(if($isAdmin){'Yes'}else{'No'})" -ForegroundColor
 $info.Resources.IsAdmin = $isAdmin
 
 # Export
-if ($Export) {
-    $exportFile = "devinfo-$(Get-Date -Format 'yyyyMMdd_HHmmss').json"
-    $info | ConvertTo-Json -Depth 5 | Out-File $exportFile
-    Write-Host "`n  Exported to: $exportFile" -ForegroundColor Green
+try {
+    if ($Export) {
+        $exportFile = "devinfo-$(Get-Date -Format 'yyyyMMdd_HHmmss_fff').json"
+        $info | ConvertTo-Json -Depth 5 | Out-File $exportFile
+        Write-Host "`n  Exported to: $exportFile" -ForegroundColor Green
+    }
+} catch {
+    Write-Host "`n  ERROR: Failed to export: $_" -ForegroundColor Red
 }
 
 # Clipboard
-if ($Clipboard) {
-    $clipboardText = @"
+try {
+    if ($Clipboard) {
+        $systemDriveKey = "Disk$($env:SystemDrive)"
+        $diskInfo = $info.Resources[$systemDriveKey]
+        $diskText = if ($diskInfo) { "$($diskInfo.FreeGB)GB free / $($diskInfo.TotalGB)GB total" } else { "N/A" }
+        $clipboardText = @"
 System Dev Info - $(Get-Date -Format 'yyyy-MM-dd')
 
 OS: $($info.System.OS) $($info.System.Version)
 Tools:
 $(($info.Tools | Where-Object Installed | ForEach-Object { "- $($_.Name): v$($_.Version)" }) -join "`n")
 
-Disk: $($info.Resources.DiskC_.FreeGB)GB free / $($info.Resources.DiskC_.TotalGB)GB total
+Disk: $diskText
 RAM: $($info.Resources.RAM_GB) GB
 "@
-    $clipboardText | Set-Clipboard
-    Write-Host "`n  Copied to clipboard!" -ForegroundColor Green
+        $clipboardText | Set-Clipboard
+        Write-Host "`n  Copied to clipboard!" -ForegroundColor Green
+    }
+} catch {
+    Write-Host "`n  ERROR: Failed to copy to clipboard: $_" -ForegroundColor Red
 }
 
 Write-Host "`n  ===================================" -ForegroundColor Cyan

@@ -10,7 +10,8 @@
     Website: https://www.northstarcoding.com
 .EXAMPLE
     .\WiFi-FastMode.ps1
+    .\WiFi-FastMode.ps1 -KeepDNS
 #>
 
-# Just call the main script with -Fast flag
-& "$PSScriptRoot\WiFi-Optimize.ps1" -Fast
+# Call the main script with -Fast flag, passing through all arguments
+& "$PSScriptRoot\WiFi-Optimize.ps1" -Fast @args

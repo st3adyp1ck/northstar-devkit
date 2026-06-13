@@ -31,9 +31,14 @@ param(
     [switch]$Fetch
 )
 
-$targetPath = Resolve-Path $Path
-
 Write-Host "`nNorthstar DevKit - Git Status All`n" -ForegroundColor Cyan
+
+if (-not (Test-Path $Path)) {
+    Write-Host "  ERROR: Path not found: $Path`n" -ForegroundColor Red
+    exit 1
+}
+$targetPath = (Resolve-Path $Path).Path
+
 Write-Host "  Scanning: $targetPath" -ForegroundColor Gray
 Write-Host "  Depth: $Depth levels" -ForegroundColor Gray
 Write-Host "  Fetch: $(if($Fetch){'Yes'}else{'No'})" -ForegroundColor Gray

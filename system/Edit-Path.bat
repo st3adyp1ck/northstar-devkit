@@ -1,15 +1,24 @@
 @echo off
-cd /d "%~dp0"
-echo Edit PATH Environment Variable
+setlocal
+
+echo Edit PATH - Environment variable editor
 echo.
 
 where pwsh >nul 2>&1
-if %ERRORLEVEL% NEQ 0 (
-    echo ERROR: PowerShell 7 not found!
-    pause
-    exit /b 1
+if %ERRORLEVEL% EQU 0 (
+    set PSH=pwsh
+) else (
+    where powershell >nul 2>&1
+    if %ERRORLEVEL% EQU 0 (
+        set PSH=powershell
+    ) else (
+        echo ERROR: No PowerShell found!
+        pause
+        exit /b 1
+    )
 )
 
-pwsh -ExecutionPolicy Bypass -File "Edit-Path.ps1" %*
-echo.
-pause
+%PSH% -ExecutionPolicy Bypass -File "%~dp0Edit-Path.ps1" %*
+set PS_EXIT=%ERRORLEVEL%
+if %PS_EXIT% NEQ 0 pause
+exit /b %PS_EXIT%

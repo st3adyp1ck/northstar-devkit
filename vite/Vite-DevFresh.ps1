@@ -34,98 +34,98 @@ param(
     [switch]$SkipInstall
 )
 
-$targetPath = Resolve-Path $Path
-
 Write-Host "`nNorthstar DevKit - Vite Dev Fresh`n" -ForegroundColor Cyan
+
+if (-not (Test-Path $Path)) {
+    Write-Host "  ERROR: Path not found: $Path`n" -ForegroundColor Red
+    exit 1
+}
+$targetPath = (Resolve-Path $Path).Path
+
 Write-Host "  Path: $targetPath" -ForegroundColor Gray
 Write-Host ""
 
-Push-Location $targetPath
+try {
+    Push-Location $targetPath
 
-# Check if this is a Vite project
-if (-not (Test-Path "package.json")) {
-    Write-Host "  ERROR: No package.json found. Not a Node.js project?`n" -ForegroundColor Red
-    Pop-Location
-    exit 1
-}
-
-$packageJson = Get-Content "package.json" | ConvertFrom-Json
-$hasVite = ($packageJson.devDependencies.PSObject.Properties.Name -contains "vite") -or
-           ($packageJson.dependencies.PSObject.Properties.Name -contains "vite")
-
-if (-not $hasVite) {
-    Write-Host "  WARNING: Vite not found in package.json`n" -ForegroundColor Yellow
-    $continue = Read-Host "  Continue anyway? (y/n)"
-    if ($continue -ne 'y') {
-        Write-Host "  Cancelled.`n" -ForegroundColor Gray
-        Pop-Location
-        exit 0
-    }
-}
-
-# Clear caches
-Write-Host "  Clearing caches..." -ForegroundColor Yellow
-
-$cachePaths = @(
-    ".vite",
-    "node_modules/.vite",
-    "node_modules/.cache",
-    "dist",
-    "*.timestamp-*"
-)
-
-foreach ($cachePath in $cachePaths) {
-    $fullPath = Join-Path $targetPath $cachePath
-    if (Test-Path $fullPath) {
-        try {
-            Remove-Item -Path $fullPath -Recurse -Force -ErrorAction SilentlyContinue
-            Write-Host "    Deleted: $cachePath" -ForegroundColor Green
-        } catch {
-            Write-Host "    Could not delete: $cachePath" -ForegroundColor Yellow
-        }
-    }
-}
-
-Write-Host "  DONE: Caches cleared." -ForegroundColor Green
-
-# Clear node_modules if requested
-if ($ClearNodeModules) {
-    Write-Host "`n  Clearing node_modules..." -ForegroundColor Yellow
-    if (Test-Path "node_modules") {
-        Remove-Item -Path "node_modules" -Recurse -Force
-        Write-Host "  DONE: node_modules deleted." -ForegroundColor Green
-    }
-}
-
-# Install dependencies
-if (-not $SkipInstall) {
-    Write-Host "`n  Installing dependencies..." -ForegroundColor Yellow
-    npm install
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "`n  ERROR: npm install failed.`n" -ForegroundColor Red
-        Pop-Location
+    # Check if this is a Vite project
+    if (-not (Test-Path "package.json")) {
+        Write-Host "  ERROR: No package.json found. Not a Node.js project?`n" -ForegroundColor Red
         exit 1
     }
-    Write-Host "  DONE: Dependencies installed." -ForegroundColor Green
-}
 
-# Build the dev server command
-$devCommand = "npm run dev"
-if ($packageJson.scripts.dev -eq "vite") {
-    # Using direct vite command, we can add args
-    $args = @()
-    if ($Port -gt 0) { $args += "--port $Port" }
-    if ($ExposeHost) { $args += "--host" }
-    if ($args.Count -gt 0) {
-        $devCommand = "npx vite $($args -join ' ')"
+    $packageJson = Get-Content "package.json" | ConvertFrom-Json
+    $hasVite = ($packageJson.devDependencies.PSObject.Properties.Name -contains "vite") -or
+               ($packageJson.dependencies.PSObject.Properties.Name -contains "vite")
+
+    if (-not $hasVite) {
+        Write-Host "  WARNING: Vite not found in package.json`n" -ForegroundColor Yellow
+        $continue = Read-Host "  Continue anyway? (y/n)"
+        if ($continue -ne 'y') {
+            Write-Host "  Cancelled.`n" -ForegroundColor Gray
+            exit 0
+        }
     }
+
+    # Clear caches
+    Write-Host "  Clearing caches..." -ForegroundColor Yellow
+
+    $cachePaths = @(
+        ".vite",
+        "node_modules/.vite",
+        "node_modules/.cache",
+        "dist",
+        "*.timestamp-*"
+    )
+
+    foreach ($cachePath in $cachePaths) {
+        $fullPath = Join-Path $targetPath $cachePath
+        if (Test-Path $fullPath) {
+            try {
+                Remove-Item -Path $fullPath -Recurse -Force -ErrorAction Stop
+                Write-Host "    Deleted: $cachePath" -ForegroundColor Green
+            } catch {
+                Write-Host "    Could not delete: $cachePath" -ForegroundColor Yellow
+            }
+        }
+    }
+
+    Write-Host "  DONE: Caches cleared." -ForegroundColor Green
+
+    # Clear node_modules if requested
+    if ($ClearNodeModules) {
+        Write-Host "`n  Clearing node_modules..." -ForegroundColor Yellow
+        if (Test-Path "node_modules") {
+            Remove-Item -Path "node_modules" -Recurse -Force
+            Write-Host "  DONE: node_modules deleted." -ForegroundColor Green
+        }
+    }
+
+    # Install dependencies
+    if (-not $SkipInstall) {
+        Write-Host "`n  Installing dependencies..." -ForegroundColor Yellow
+        npm install
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "`n  ERROR: npm install failed.`n" -ForegroundColor Red
+            exit 1
+        }
+        Write-Host "  DONE: Dependencies installed." -ForegroundColor Green
+    }
+
+    # Build dev args
+    $devArgs = @()
+    if ($Port -gt 0) { $devArgs += "--port"; $devArgs += $Port }
+    if ($ExposeHost) { $devArgs += "--host" }
+
+    Write-Host "`n  ===================================" -ForegroundColor Cyan
+    Write-Host "  Starting Vite dev server..." -ForegroundColor Green
+    Write-Host "  ===================================`n" -ForegroundColor Cyan
+
+    if ($devArgs.Count -gt 0) {
+        & npm run dev -- @devArgs
+    } else {
+        & npm run dev
+    }
+} finally {
+    Pop-Location
 }
-
-Write-Host "`n  ===================================" -ForegroundColor Cyan
-Write-Host "  Starting Vite dev server..." -ForegroundColor Green
-Write-Host "  ===================================`n" -ForegroundColor Cyan
-
-# Start the dev server
-& npm run dev
-
-Pop-Location

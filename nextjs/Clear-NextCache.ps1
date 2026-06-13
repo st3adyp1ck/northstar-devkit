@@ -21,10 +21,15 @@ param(
     [switch]$StartDev
 )
 
-$targetPath = Resolve-Path $Path
+Write-Host "`nNorthstar DevKit - Clear Next.js Cache`n" -ForegroundColor Cyan
+
+if (-not (Test-Path $Path)) {
+    Write-Host "  ERROR: Path not found: $Path`n" -ForegroundColor Red
+    exit 1
+}
+$targetPath = (Resolve-Path $Path).Path
 $nextPath = Join-Path $targetPath ".next"
 
-Write-Host "`nNorthstar DevKit - Clear Next.js Cache`n" -ForegroundColor Cyan
 Write-Host "  Path: $targetPath`n" -ForegroundColor Gray
 
 if (-not (Test-Path $nextPath)) {
@@ -49,7 +54,11 @@ if (-not (Test-Path $nextPath)) {
 
 if ($StartDev) {
     Write-Host "  Starting dev server...`n" -ForegroundColor Green
-    Push-Location $targetPath
-    npm run dev
-    Pop-Location
+    $env:NEXT_TELEMETRY_DISABLED = "1"
+    try {
+        Push-Location $targetPath
+        npm run dev
+    } finally {
+        Pop-Location
+    }
 }

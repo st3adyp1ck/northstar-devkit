@@ -32,9 +32,11 @@ $count = ($nodeProcesses | Measure-Object).Count
 Write-Host "  Found $count node process(es):`n" -ForegroundColor Yellow
 
 foreach ($proc in $nodeProcesses) {
+    $cpu = try { $proc.CPU } catch { "N/A" }
+    $startTime = try { $proc.StartTime } catch { "N/A" }
     Write-Host "    PID: $($proc.Id)" -NoNewline
-    Write-Host " | CPU: $($proc.CPU)" -NoNewline
-    Write-Host " | Started: $($proc.StartTime)" -ForegroundColor Gray
+    Write-Host " | CPU: $cpu" -NoNewline
+    Write-Host " | Started: $startTime" -ForegroundColor Gray
 }
 
 Write-Host ""
@@ -47,10 +49,20 @@ if (-not $Force) {
     }
 }
 
-try {
-    $nodeProcesses | Stop-Process -Force
+$killed = 0
+$failed = 0
+foreach ($proc in $nodeProcesses) {
+    try {
+        Stop-Process -Id $proc.Id -Force
+        $killed++
+    } catch {
+        Write-Host "  WARNING: Failed to kill PID $($proc.Id): $_" -ForegroundColor Yellow
+        $failed++
+    }
+}
+
+if ($failed -eq 0) {
     Write-Host "  DONE: All node processes killed.`n" -ForegroundColor Green
-} catch {
-    Write-Host "  ERROR: $_`n" -ForegroundColor Red
-    exit 1
+} else {
+    Write-Host "  DONE: Killed $killed process(es), $failed failed.`n" -ForegroundColor Yellow
 }

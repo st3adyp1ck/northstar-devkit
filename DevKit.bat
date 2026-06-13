@@ -1,11 +1,19 @@
 @echo off
-cd /d "%~dp0"
+setlocal
 
 where pwsh >nul 2>&1
 if %ERRORLEVEL% EQU 0 (
-    pwsh -ExecutionPolicy Bypass -File "DevKit.ps1"
+    set PSH=pwsh
 ) else (
-    powershell -ExecutionPolicy Bypass -File "DevKit.ps1"
+    where powershell >nul 2>&1
+    if %ERRORLEVEL% EQU 0 (
+        set PSH=powershell
+    ) else (
+        echo ERROR: No PowerShell found!
+        pause
+        exit /b 1
+    )
 )
 
-pause
+%PSH% -ExecutionPolicy Bypass -File "%~dp0DevKit.ps1" %*
+if %ERRORLEVEL% NEQ 0 pause

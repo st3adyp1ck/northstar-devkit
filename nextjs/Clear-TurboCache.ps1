@@ -17,9 +17,14 @@ param(
     [string]$Path = "."
 )
 
-$targetPath = Resolve-Path $Path
-
 Write-Host "`nNorthstar DevKit - Clear Turbopack Cache`n" -ForegroundColor Cyan
+
+if (-not (Test-Path $Path)) {
+    Write-Host "  ERROR: Path not found: $Path`n" -ForegroundColor Red
+    exit 1
+}
+$targetPath = (Resolve-Path $Path).Path
+
 Write-Host "  Path: $targetPath`n" -ForegroundColor Gray
 
 $cachePaths = @(
@@ -41,7 +46,11 @@ foreach ($cachePath in $cachePaths) {
         $totalSize += $sizeMB
         
         Write-Host "  Deleting: $cachePath ($sizeMB MB)" -ForegroundColor Yellow
-        Remove-Item -Path $cachePath -Recurse -Force
+        try {
+            Remove-Item -Path $cachePath -Recurse -Force -ErrorAction Stop
+        } catch {
+            Write-Host "  WARNING: Could not delete $cachePath`: $_" -ForegroundColor Yellow
+        }
     }
 }
 

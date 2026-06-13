@@ -42,14 +42,15 @@ if (-not $ProfileOnly) {
     # Refresh PATH from registry
     $userPath = [Environment]::GetEnvironmentVariable("PATH", "User")
     $machinePath = [Environment]::GetEnvironmentVariable("PATH", "Machine")
-    $env:PATH = "$machinePath;$userPath"
+    $pathEntries = @($machinePath, $userPath) | Where-Object { $_ } | ForEach-Object { $_ -split ';' | Where-Object { $_ } } | Select-Object -Unique
+    $env:PATH = $pathEntries -join ';'
     
     # Refresh other common environment variables
     $varsToRefresh = @(
         "TEMP", "TMP",
         "HOME", "USERPROFILE",
         "JAVA_HOME", "NODE_PATH",
-        "PYTHONPATH", " GOPATH"
+        "PYTHONPATH", "GOPATH"
     )
     
     foreach ($var in $varsToRefresh) {
