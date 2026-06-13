@@ -18,7 +18,7 @@ if %ERRORLEVEL% EQU 0 (
     )
 )
 
-%PSH% -ExecutionPolicy Bypass -File "%~dp0Nuke-And-Reinstall.ps1" %*
+%PSH% -NoProfile -ExecutionPolicy Bypass -File "%~dp0Nuke-And-Reinstall.ps1" %*
 set PS_EXIT=%ERRORLEVEL%
 if %PS_EXIT% NEQ 0 pause
 exit /b %PS_EXIT%

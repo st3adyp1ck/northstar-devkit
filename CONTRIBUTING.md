@@ -25,8 +25,10 @@ First off, thanks for taking the time to contribute! 🎉
 
 - **Language**: All scripts are PowerShell. Target PowerShell 5.1+ compatibility.
 - **Style**: Follow the existing script structure in `AGENTS.md`.
+- **Shared helpers**: Dot-source `lib/DevKit-Common.ps1` for common tasks (path validation, safe `node_modules` deletion, package-manager detection, banners, etc.).
 - **No new dependencies**: DevKit is meant to be dependency-free and use built-in Windows tools.
 - **Menu integration**: If you add a new tool, update `DevKit.ps1` and add a `.bat` wrapper.
+- **Single source of truth**: Avoid duplicating logic between `DevKit.ps1` and standalone scripts. The menu should call the standalone script whenever possible.
 
 ## Code of Conduct
 

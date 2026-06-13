@@ -23,8 +23,7 @@
     .\Vite-PreviewBuild.ps1
     .\Vite-PreviewBuild.ps1 -Port 8080
     .\Vite-PreviewBuild.ps1 -Analyze
-#>
-[CmdletBinding()]
+#>[CmdletBinding()]
 param(
     [string]$Path = ".",
     [int]$Port = 4173,
@@ -32,6 +31,11 @@ param(
     [switch]$SkipBuild,
     [switch]$Analyze
 )
+
+
+$CommonModule = Join-Path $PSScriptRoot ".." "lib" "DevKit-Common.ps1"
+if (Test-Path $CommonModule) { . $CommonModule }
+
 
 Write-Host "`nNorthstar DevKit - Vite Preview Build`n" -ForegroundColor Cyan
 

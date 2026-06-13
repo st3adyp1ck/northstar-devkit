@@ -36,118 +36,114 @@ param(
     [switch]$Actions
 )
 
-Write-Host "`nNorthstar DevKit - Open Repo`n" -ForegroundColor Cyan
+$CommonModule = Join-Path $PSScriptRoot ".." "lib" "DevKit-Common.ps1"
+if (Test-Path $CommonModule) { . $CommonModule }
 
-Push-Location $Path
-
-# Verify Git repo
-if (-not (Test-Path ".git")) {
-    Write-Host "  ERROR: Not a Git repository.`n" -ForegroundColor Red
-    Pop-Location
-    exit 1
-}
-
-# Check git availability
 try {
-    $null = git --version 2>$null
+    $targetPath = Resolve-DevKitDirectory -Path $Path
 } catch {
-    Write-Host "  ERROR: Git not found in PATH.`n" -ForegroundColor Red
-    Pop-Location
+    Write-DevKitHeader "Open Repo"
+    Write-DevKitError $_
     exit 1
 }
 
-# Get remote URL
-$remoteUrl = git remote get-url $Remote 2>$null
-if (-not $remoteUrl) {
-    Write-Host "  ERROR: Remote '$Remote' not found.`n" -ForegroundColor Red
-    Pop-Location
-    exit 1
-}
+Write-DevKitHeader "Open Repo"
 
-Write-Host "  Remote: $remoteUrl" -ForegroundColor Gray
+Invoke-DevKitInDirectory -Path $targetPath -ScriptBlock {
+    # Verify Git repo
+    if (-not (Test-Path ".git")) {
+        Write-DevKitError "Not a Git repository."
+        exit 1
+    }
 
-# Convert SSH URL to HTTPS
-if ($remoteUrl -match '^git@([^:]+):(.+)\.git$') {
-    $hostName = $matches[1]
-    $path = $matches[2]
-    $remoteUrl = "https://$hostName/$path"
-} elseif ($remoteUrl -match '^git@([^:]+):(.+)$') {
-    $hostName = $matches[1]
-    $path = $matches[2]
-    $remoteUrl = "https://$hostName/$path"
-} elseif ($remoteUrl -match '\.git$') {
-    $remoteUrl = $remoteUrl -replace '\.git$',''
-}
+    # Check git availability
+    if (-not (Test-DevKitCommand git)) {
+        Write-DevKitError "Git not found in PATH."
+        exit 1
+    }
 
-# Get current branch if not specified
-if (-not $Branch) {
-    $Branch = git branch --show-current 2>$null
+    # Get remote URL
+    $remoteUrl = git remote get-url $Remote 2>$null
+    if (-not $remoteUrl) {
+        Write-DevKitError "Remote '$Remote' not found."
+        exit 1
+    }
+
+    Write-DevKitInfo "Remote: $remoteUrl"
+
+    # Convert SSH URL to HTTPS
+    if ($remoteUrl -match '^git@([^:]+):(.+)\.git$') {
+        $hostName = $matches[1]
+        $path = $matches[2]
+        $remoteUrl = "https://$hostName/$path"
+    } elseif ($remoteUrl -match '^git@([^:]+):(.+)$') {
+        $hostName = $matches[1]
+        $path = $matches[2]
+        $remoteUrl = "https://$hostName/$path"
+    } elseif ($remoteUrl -match '\.git$') {
+        $remoteUrl = $remoteUrl -replace '\.git$',''
+    }
+
+    # Get current branch if not specified
     if (-not $Branch) {
-        $Branch = "main"
+        $Branch = git branch --show-current 2>$null
+        if (-not $Branch) {
+            $Branch = "main"
+        }
     }
+
+    Write-DevKitInfo "Branch: $Branch"
+
+    # Determine platform and build URL
+    $platform = "unknown"
+    $url = $remoteUrl
+
+    if ($remoteUrl -match 'github\.com') {
+        $platform = "GitHub"
+        if ($PullRequest) {
+            $url = "$remoteUrl/pulls"
+        } elseif ($Issues) {
+            $url = "$remoteUrl/issues"
+        } elseif ($Actions) {
+            $url = "$remoteUrl/actions"
+        } else {
+            $url = "$remoteUrl/tree/$Branch"
+        }
+    } elseif ($remoteUrl -match 'gitlab\.com') {
+        $platform = "GitLab"
+        if ($PullRequest) {
+            $url = "$remoteUrl/-/merge_requests"
+        } elseif ($Issues) {
+            $url = "$remoteUrl/-/issues"
+        } elseif ($Actions) {
+            $url = "$remoteUrl/-/pipelines"
+        } else {
+            $url = "$remoteUrl/-/tree/$Branch"
+        }
+    } elseif ($remoteUrl -match 'bitbucket\.org') {
+        $platform = "Bitbucket"
+        if ($PullRequest) {
+            $url = "$remoteUrl/pull-requests"
+        } elseif ($Issues) {
+            $url = "$remoteUrl/issues"
+        } else {
+            $url = "$remoteUrl/src/$Branch"
+        }
+    } elseif ($remoteUrl -match 'dev\.azure\.com|visualstudio\.com') {
+        $platform = "Azure DevOps"
+        if ($PullRequest) {
+            $url = "$remoteUrl/pullrequests"
+        } elseif ($Issues) {
+            $url = "$remoteUrl/_workitems"
+        } elseif ($Actions) {
+            $url = "$remoteUrl/_build"
+        }
+    }
+
+    Write-DevKitInfo "Platform: $platform"
+    Write-DevKitInfo "Opening: $url"
+
+    Start-Process $url
+
+    Write-Host ""
 }
-
-Write-Host "  Branch: $Branch" -ForegroundColor Gray
-
-# Determine platform and build URL
-$platform = "unknown"
-$url = $remoteUrl
-
-if ($remoteUrl -match 'github\.com') {
-    $platform = "GitHub"
-    if ($PullRequest) {
-        $url = "$remoteUrl/pulls"
-    } elseif ($Issues) {
-        $url = "$remoteUrl/issues"
-    } elseif ($Actions) {
-        $url = "$remoteUrl/actions"
-    } else {
-        $url = "$remoteUrl/tree/$Branch"
-    }
-} elseif ($remoteUrl -match 'gitlab\.com') {
-    $platform = "GitLab"
-    if ($PullRequest) {
-        $url = "$remoteUrl/-/merge_requests"
-    } elseif ($Issues) {
-        $url = "$remoteUrl/-/issues"
-    } elseif ($Actions) {
-        $url = "$remoteUrl/-/pipelines"
-    } else {
-        $url = "$remoteUrl/-/tree/$Branch"
-    }
-} elseif ($remoteUrl -match 'bitbucket\.org') {
-    $platform = "Bitbucket"
-    if ($PullRequest) {
-        $url = "$remoteUrl/pull-requests"
-    } elseif ($Issues) {
-        $url = "$remoteUrl/issues"
-    } else {
-        $url = "$remoteUrl/src/$Branch"
-    }
-} elseif ($remoteUrl -match 'dev\.azure\.com|visualstudio\.com') {
-    $platform = "Azure DevOps"
-    if ($PullRequest) {
-        $url = "$remoteUrl/pullrequests"
-    } elseif ($Issues) {
-        $url = "$remoteUrl/_workitems"
-    } elseif ($Actions) {
-        $url = "$remoteUrl/_build"
-    } else {
-        # Azure DevOps doesn't have a simple branch URL pattern
-        $url = $remoteUrl
-    }
-}
-
-Write-Host "  Platform: $platform" -ForegroundColor Gray
-Write-Host ""
-
-# Open browser
-Write-Host "  Opening browser..." -ForegroundColor Yellow
-Write-Host "  $url" -ForegroundColor Cyan
-Write-Host ""
-
-Start-Process $url
-
-Write-Host "  DONE: Browser launched.`n" -ForegroundColor Green
-
-Pop-Location

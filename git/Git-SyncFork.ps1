@@ -25,8 +25,7 @@
     .\Git-SyncFork.ps1 -Path "C:\my-fork"
     .\Git-SyncFork.ps1 -UpstreamRemote "upstream" -Rebase
     .\Git-SyncFork.ps1 -Branch "develop"
-#>
-[CmdletBinding()]
+#>[CmdletBinding()]
 param(
     [string]$Path = ".",
     [string]$UpstreamRemote = "upstream",
@@ -35,6 +34,11 @@ param(
     [switch]$Rebase,
     [switch]$Force
 )
+
+
+$CommonModule = Join-Path $PSScriptRoot ".." "lib" "DevKit-Common.ps1"
+if (Test-Path $CommonModule) { . $CommonModule }
+
 
 Write-Host "`nNorthstar DevKit - Git Sync Fork`n" -ForegroundColor Cyan
 

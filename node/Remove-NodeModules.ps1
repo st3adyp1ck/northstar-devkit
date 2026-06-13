@@ -26,19 +26,23 @@ param(
     [switch]$Force
 )
 
-Write-Host "`nNorthstar DevKit - Delete node_modules`n" -ForegroundColor Cyan
+$CommonModule = Join-Path $PSScriptRoot ".." "lib" "DevKit-Common.ps1"
+if (Test-Path $CommonModule) { . $CommonModule }
 
-if (-not (Test-Path $Path)) {
-    Write-Host "  ERROR: Path not found: $Path`n" -ForegroundColor Red
+try {
+    $targetPath = Resolve-DevKitDirectory -Path $Path
+} catch {
+    Write-DevKitHeader "Delete node_modules"
+    Write-DevKitError $_
     exit 1
 }
-$targetPath = (Resolve-Path $Path).Path
+
+Write-DevKitHeader "Delete node_modules"
+Write-DevKitInfo "Path: $targetPath"
+
 $nmPath = Join-Path $targetPath "node_modules"
-
-Write-Host "  Path: $targetPath`n" -ForegroundColor Gray
-
 if (-not (Test-Path $nmPath)) {
-    Write-Host "  ERROR: node_modules not found.`n" -ForegroundColor Red
+    Write-DevKitError "node_modules not found."
     exit 1
 }
 
@@ -52,38 +56,33 @@ Write-Host "  Size: $sizeMB MB" -ForegroundColor Yellow
 if (-not $Force) {
     $confirm = Read-Host "  Delete node_modules? (y/n)"
     if ($confirm -ne 'y') {
-        Write-Host "  Cancelled.`n" -ForegroundColor Gray
+        Write-DevKitInfo "Cancelled."
         exit 0
     }
 }
 
-Write-Host "  Deleting..." -ForegroundColor Yellow
-
+Write-DevKitStep "Deleting node_modules"
 try {
-    # Use robocopy empty-folder trick for long-path safety
-    $empty = Join-Path $env:TEMP "empty_devkit_$(Get-Random)"
-    New-Item -ItemType Directory -Path $empty -Force | Out-Null
-    robocopy $empty $nmPath /MIR /MT:8 /NFL /NDL /NJH /NJS | Out-Null
-    Remove-Item -Path $nmPath -Recurse -Force -ErrorAction SilentlyContinue
-    Remove-Item $empty -Recurse -Force -ErrorAction SilentlyContinue
-    Write-Host "  DONE: node_modules deleted." -ForegroundColor Green
+    if (Remove-DevKitNodeModules -Path $targetPath) {
+        Write-DevKitDone
+    } else {
+        Write-DevKitSkip
+    }
 } catch {
-    Write-Host "  ERROR: $_`n" -ForegroundColor Red
+    Write-DevKitError $_
     exit 1
 }
 
 if ($Reinstall) {
-    Write-Host "`n  Reinstalling dependencies...`n" -ForegroundColor Yellow
+    Write-Host "`n  Reinstalling dependencies..." -ForegroundColor Yellow
     try {
-        Push-Location $targetPath
-        npm install
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "`n  ERROR: npm install failed.`n" -ForegroundColor Red
-            exit 1
+        Invoke-DevKitInDirectory -Path $targetPath -ScriptBlock {
+            Invoke-DevKitPackageInstall -Path .
         }
         Write-Host "`n  DONE: Reinstall complete." -ForegroundColor Green
-    } finally {
-        Pop-Location
+    } catch {
+        Write-DevKitError $_
+        exit 1
     }
 }
 

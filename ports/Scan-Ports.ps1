@@ -19,28 +19,24 @@ param(
     [switch]$Kill
 )
 
+$CommonModule = Join-Path $PSScriptRoot ".." "lib" "DevKit-Common.ps1"
+if (Test-Path $CommonModule) { . $CommonModule }
+
 $CommonPorts = @(3000, 3001, 3002, 3003, 5173, 5174, 8000, 8080, 8081, 9000, 4200, 5000, 5500, 1337, 5432, 3306, 6379, 27017)
 
-Write-Host "`nNorthstar DevKit - Port Scanner" -ForegroundColor Cyan
-Write-Host "Ports: $($CommonPorts -join ', ')`n" -ForegroundColor Gray
+Write-DevKitHeader "Port Scanner"
+Write-DevKitInfo "Ports: $($CommonPorts -join ', ')"
 
 $foundProcesses = @()
 
 foreach ($port in $CommonPorts) {
-    $connection = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($connection) {
-        $process = Get-Process -Id $connection.OwningProcess -ErrorAction SilentlyContinue
-        $procName = if ($process) { $process.ProcessName } else { "Unknown" }
-        $foundProcesses += [PSCustomObject]@{
-            Port = $port
-            PID = $connection.OwningProcess
-            Name = $procName
-            Path = if ($process) { $process.Path } else { $null }
-        }
-        
+    $procInfo = Get-DevKitProcessByPort -Port $port
+    if ($procInfo) {
+        $foundProcesses += $procInfo
+
         Write-Host "  WARNING: Port $port" -ForegroundColor Red -NoNewline
-        Write-Host " -> PID: $($connection.OwningProcess)" -ForegroundColor Yellow -NoNewline
-        Write-Host " ($procName)" -ForegroundColor Gray
+        Write-Host " -> PID: $($procInfo.PID)" -ForegroundColor Yellow -NoNewline
+        Write-Host " ($($procInfo.Name))" -ForegroundColor Gray
     }
 }
 
@@ -52,21 +48,20 @@ if ($foundProcesses.Count -eq 0) {
 Write-Host ""
 
 if ($Kill) {
-    Write-Host "Kill Mode Enabled`n" -ForegroundColor Magenta
-    
+    Write-Host "  Kill Mode Enabled`n" -ForegroundColor Magenta
+
     foreach ($proc in $foundProcesses) {
         $confirm = Read-Host "  Kill PID $($proc.PID) ($($proc.Name)) on port $($proc.Port)? (y/n)"
         if ($confirm -eq 'y') {
             try {
                 Stop-Process -Id $proc.PID -Force
-                Write-Host "    KILLED`n" -ForegroundColor Green
+                Write-Host "    DONE: Killed PID $($proc.PID)" -ForegroundColor Green
             } catch {
-                Write-Host "    FAILED: $_`n" -ForegroundColor Red
+                Write-Host "    ERROR: Failed to kill PID $($proc.PID): $_" -ForegroundColor Red
             }
         } else {
-            Write-Host "    Skipped`n" -ForegroundColor Gray
+            Write-Host "    Skipped PID $($proc.PID)" -ForegroundColor Gray
         }
     }
+    Write-Host ""
 }
-
-Write-Host ""

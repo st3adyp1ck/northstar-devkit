@@ -21,14 +21,18 @@
     .\Docker-QuickLogs.ps1 -Container "my-app"
     .\Docker-QuickLogs.ps1 -Container "app1", "app2" -Lines 100
     .\Docker-QuickLogs.ps1 -Timestamps
-#>
-[CmdletBinding()]
+#>[CmdletBinding()]
 param(
     [string[]]$Container,
     [int]$Lines = 50,
     [switch]$Follow = $true,
     [switch]$Timestamps
 )
+
+
+$CommonModule = Join-Path $PSScriptRoot ".." "lib" "DevKit-Common.ps1"
+if (Test-Path $CommonModule) { . $CommonModule }
+
 
 Write-Host "`nNorthstar DevKit - Docker Quick Logs`n" -ForegroundColor Cyan
 

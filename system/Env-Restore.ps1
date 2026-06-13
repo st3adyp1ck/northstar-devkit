@@ -19,6 +19,7 @@
     .\Env-Restore.ps1 -BackupFile "backup.json" -WhatIf
     Get-ChildItem *.json | .\Env-Restore.ps1
 #>
+
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true, ValueFromPipeline = $true)]
@@ -26,6 +27,9 @@ param(
     [switch]$WhatIf,
     [switch]$Force
 )
+
+$CommonModule = Join-Path $PSScriptRoot ".." "lib" "DevKit-Common.ps1"
+if (Test-Path $CommonModule) { . $CommonModule }
 
 begin {
     Write-Host "`nNorthstar DevKit - Environment Restore`n" -ForegroundColor Cyan

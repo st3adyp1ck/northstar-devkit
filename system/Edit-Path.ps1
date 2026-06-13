@@ -27,8 +27,7 @@
     .\Edit-Path.ps1 -Show
     .\Edit-Path.ps1 -Add "C:\MyTools"
     .\Edit-Path.ps1 -Clean
-#>
-[CmdletBinding()]
+#>[CmdletBinding()]
 param(
     [switch]$User,
     [switch]$Machine,
@@ -37,6 +36,11 @@ param(
     [string]$Remove,
     [switch]$Clean
 )
+
+
+$CommonModule = Join-Path $PSScriptRoot ".." "lib" "DevKit-Common.ps1"
+if (Test-Path $CommonModule) { . $CommonModule }
+
 
 Write-Host "`nNorthstar DevKit - Edit PATH`n" -ForegroundColor Cyan
 

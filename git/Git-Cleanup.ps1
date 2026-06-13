@@ -21,14 +21,18 @@
     .\Git-Cleanup.ps1 -Path "C:\my-project"
     .\Git-Cleanup.ps1 -ClearReflog -Force
     .\Git-Cleanup.ps1 -DryRun
-#>
-[CmdletBinding()]
+#>[CmdletBinding()]
 param(
     [string]$Path = ".",
     [switch]$ClearReflog,
     [switch]$Force,
     [switch]$DryRun
 )
+
+
+$CommonModule = Join-Path $PSScriptRoot ".." "lib" "DevKit-Common.ps1"
+if (Test-Path $CommonModule) { . $CommonModule }
+
 
 Write-Host "`nNorthstar DevKit - Git Cleanup`n" -ForegroundColor Cyan
 

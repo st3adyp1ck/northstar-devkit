@@ -24,8 +24,7 @@
     .\Docker-Cleanup.ps1 -DanglingOnly
     .\Docker-Cleanup.ps1 -Volumes -Force
     .\Docker-Cleanup.ps1 -AllUnused -DryRun
-#>
-[CmdletBinding()]
+#>[CmdletBinding()]
 param(
     [switch]$DanglingOnly,
     [switch]$Volumes,
@@ -33,6 +32,11 @@ param(
     [switch]$Force,
     [switch]$DryRun
 )
+
+
+$CommonModule = Join-Path $PSScriptRoot ".." "lib" "DevKit-Common.ps1"
+if (Test-Path $CommonModule) { . $CommonModule }
+
 
 Write-Host "`nNorthstar DevKit - Docker Cleanup`n" -ForegroundColor Cyan
 

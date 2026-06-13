@@ -12,22 +12,26 @@
     .\WiFi-Scan.ps1
 #>
 
+$CommonModule = Join-Path $PSScriptRoot ".." "lib" "DevKit-Common.ps1"
+if (Test-Path $CommonModule) { . $CommonModule }
+
 Write-Host ""
 Write-Host "   NORTHSTAR DevKit - WiFi SCANNER" -ForegroundColor Cyan
 Write-Host "     https://www.northstarcoding.com" -ForegroundColor Gray
 Write-Host ""
 
 # Get WiFi networks
-Write-Host "  Scanning for networks..." -ForegroundColor Yellow
-Write-Host ""
+Write-DevKitStep "Scanning for networks"
 
 $networks = netsh wlan show networks mode=Bssid | Out-String
 
 if ($networks -match "There is no wireless interface on the system") {
-    Write-Host "  ERROR: No WiFi adapter found!" -ForegroundColor Red
+    Write-DevKitError "No WiFi adapter found!"
     Read-Host "Press Enter to exit"
     exit 1
 }
+
+Write-DevKitDone
 
 # Parse networks
 $lines = $networks -split "`r`n"
@@ -68,8 +72,11 @@ if ($currentNet -and $currentNet.BSSIDs.Count -gt 0) {
 }
 
 if ($results.Count -eq 0) {
-    Write-Host "  No WiFi networks found." -ForegroundColor Yellow
-    Read-Host "Press Enter to exit"
+    Write-Host "  No WiFi networks parsed." -ForegroundColor Yellow
+    Write-Host "  This may be due to a non-English Windows locale or empty scan results." -ForegroundColor Gray
+    Write-Host "`n  Raw output:" -ForegroundColor Cyan
+    Write-Host $networks -ForegroundColor Gray
+    Read-Host "`nPress Enter to exit"
     exit 0
 }
 

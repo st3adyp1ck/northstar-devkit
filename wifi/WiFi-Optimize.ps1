@@ -18,14 +18,17 @@
     .\WiFi-Optimize.ps1
     .\WiFi-Optimize.ps1 -Fast
     .\WiFi-Optimize.ps1 -Force
-#>
-
-[CmdletBinding()]
+#>[CmdletBinding()]
 param(
     [switch]$Fast,
     [switch]$KeepDNS,
     [switch]$Force
 )
+
+
+$CommonModule = Join-Path $PSScriptRoot ".." "lib" "DevKit-Common.ps1"
+if (Test-Path $CommonModule) { . $CommonModule }
+
 
 # Admin check
 $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")
@@ -130,9 +133,11 @@ if (-not $KeepDNS) {
     
     Write-Step "Testing DNS options"
     $cfPing = Test-Connection -ComputerName "1.1.1.1" -Count 2 -ErrorAction SilentlyContinue | 
-        Measure-Object -Property ResponseTime -Average | Select-Object -ExpandProperty Average
+        ForEach-Object { if ($_.Latency -ne $null) { $_.Latency } else { $_.ResponseTime } } |
+        Measure-Object -Average | Select-Object -ExpandProperty Average
     $ggPing = Test-Connection -ComputerName "8.8.8.8" -Count 2 -ErrorAction SilentlyContinue | 
-        Measure-Object -Property ResponseTime -Average | Select-Object -ExpandProperty Average
+        ForEach-Object { if ($_.Latency -ne $null) { $_.Latency } else { $_.ResponseTime } } |
+        Measure-Object -Average | Select-Object -ExpandProperty Average
     
     if ($cfPing -and $ggPing) {
         if ($cfPing -le $ggPing) {
@@ -192,7 +197,8 @@ Write-Header "Testing Connection"
 
 Write-Step "Testing latency"
 $latency = Test-Connection -ComputerName "1.1.1.1" -Count 4 -ErrorAction SilentlyContinue | 
-    Measure-Object -Property ResponseTime -Average | Select-Object -ExpandProperty Average
+    ForEach-Object { if ($_.Latency -ne $null) { $_.Latency } else { $_.ResponseTime } } |
+    Measure-Object -Average | Select-Object -ExpandProperty Average
 if ($latency) {
     Write-Done
     Write-Host "  Average latency: $($latency)ms" -ForegroundColor $(if($latency -lt 50){"Green"}elseif($latency -lt 100){"Yellow"}else{"Red"})
@@ -217,7 +223,7 @@ if (-not $Fast) {
     }
 } else {
     Write-Skip
-    Write-Host "  (Skipped - use -Fast to skip speed test)" -ForegroundColor Gray
+    Write-Host "  (Skipped because -Fast was used)" -ForegroundColor Gray
 }
 
 # ========== SUMMARY ==========

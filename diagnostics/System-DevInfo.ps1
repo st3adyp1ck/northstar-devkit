@@ -16,12 +16,16 @@
     .\System-DevInfo.ps1
     .\System-DevInfo.ps1 -Export
     .\System-DevInfo.ps1 -Clipboard
-#>
-[CmdletBinding()]
+#>[CmdletBinding()]
 param(
     [switch]$Export,
     [switch]$Clipboard
 )
+
+
+$CommonModule = Join-Path $PSScriptRoot ".." "lib" "DevKit-Common.ps1"
+if (Test-Path $CommonModule) { . $CommonModule }
+
 
 Write-Host "`nNorthstar DevKit - System Dev Info`n" -ForegroundColor Cyan
 

@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="https://img.shields.io/badge/Northstar-DevKit-2.0-blue?style=for-the-badge&logo=powershell&logoColor=white" alt="Northstar DevKit">
+<img src="https://img.shields.io/badge/Northstar-DevKit-2.1.0-blue?style=for-the-badge&logo=powershell&logoColor=white" alt="Northstar DevKit">
 
 <h3>A powerful, dependency-free Windows toolkit for modern web developers</h3>
 
@@ -97,7 +97,7 @@ Launch `DevKit.bat` and navigate with your keyboard:
 
 ```
 =============================================
-        Northstar DevKit v2.0
+        Northstar DevKit v2.1.0
     Developer Toolkit by Northstar.com
 =============================================
   Current: Main Menu
@@ -245,6 +245,7 @@ DevKit/
 ├── CODE_OF_CONDUCT.md      # Community standards
 ├── LICENSE                 # MIT License
 │
+├── lib/                    # Shared PowerShell helpers
 ├── ports/                  # Port management
 ├── node/                   # Node.js utilities
 ├── nextjs/                 # Next.js tools

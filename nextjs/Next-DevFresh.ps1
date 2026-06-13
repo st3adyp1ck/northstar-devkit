@@ -5,6 +5,7 @@
 .DESCRIPTION
     Clears .next cache and starts the dev server.
     Optionally clears Turbopack cache too.
+    Auto-detects package manager.
     
     Created by Northstar Software Development
     Website: https://www.northstarcoding.com
@@ -26,54 +27,43 @@ param(
     [int]$Port = 0
 )
 
-Write-Host "`nNorthstar DevKit - Next.js Dev Server (Fresh)`n" -ForegroundColor Cyan
-
-if (-not (Test-Path $Path)) {
-    Write-Host "  ERROR: Path not found: $Path`n" -ForegroundColor Red
-    exit 1
-}
-$targetPath = (Resolve-Path $Path).Path
-
-Write-Host "  Path: $targetPath`n" -ForegroundColor Gray
+$CommonModule = Join-Path $PSScriptRoot ".." "lib" "DevKit-Common.ps1"
+if (Test-Path $CommonModule) { . $CommonModule }
 
 try {
-    Push-Location $targetPath
+    $targetPath = Resolve-DevKitDirectory -Path $Path
+} catch {
+    Write-DevKitHeader "Next.js Dev Server (Fresh)"
+    Write-DevKitError $_
+    exit 1
+}
 
-    # Clear Turbopack cache first (before deleting .next)
+Write-DevKitHeader "Next.js Dev Server (Fresh)"
+Write-DevKitInfo "Path: $targetPath"
+
+$manager = Get-DevKitPackageManager -Path $targetPath
+Write-DevKitInfo "Package manager: $($manager.Command)"
+
+Invoke-DevKitInDirectory -Path $targetPath -ScriptBlock {
     if ($Turbo) {
-        $turboPaths = @(
-            (Join-Path ".next" "cache"),
-            (Join-Path "node_modules" ".cache"),
-            ".turbo"
-        )
-        foreach ($tp in $turboPaths) {
-            if (Test-Path $tp) {
-                Write-Host "  Clearing $tp..." -ForegroundColor Yellow
-                Remove-Item -Path $tp -Recurse -Force
-            }
-        }
-        Write-Host "  DONE: Turbopack cache cleared" -ForegroundColor Green
+        Write-DevKitStep "Clearing Turbopack cache"
+        Clear-DevKitNodeCaches -Path . -IncludeTurbo | Out-Null
+        Write-DevKitDone
     }
 
-    # Clear .next cache
-    if (Test-Path ".next") {
-        Write-Host "  Clearing .next cache..." -ForegroundColor Yellow
-        Remove-Item -Path ".next" -Recurse -Force
-        Write-Host "  DONE" -ForegroundColor Green
+    $nextPath = Join-Path . ".next"
+    if (Test-Path $nextPath) {
+        Write-DevKitStep "Clearing .next cache"
+        Remove-Item -Path $nextPath -Recurse -Force
+        Write-DevKitDone
     }
 
     Write-Host "`n  Starting dev server...`n" -ForegroundColor Green
 
     $env:NEXT_TELEMETRY_DISABLED = "1"
 
-    $devArgs = @()
-    if ($Port -gt 0) { $devArgs += "--port"; $devArgs += $Port }
+    $devArgs = @("run", "dev")
+    if ($Port -gt 0) { $devArgs += @("--", "--port", $Port) }
 
-    if ($devArgs.Count -gt 0) {
-        & npm run dev -- @devArgs
-    } else {
-        & npm run dev
-    }
-} finally {
-    Pop-Location
+    & $manager.Command @devArgs
 }

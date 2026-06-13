@@ -22,14 +22,18 @@
     .\Git-StatusAll.ps1 -Path "C:\Projects" -Depth 3
     .\Git-StatusAll.ps1 -ShowClean
     .\Git-StatusAll.ps1 -Fetch
-#>
-[CmdletBinding()]
+#>[CmdletBinding()]
 param(
     [string]$Path = ".",
     [int]$Depth = 2,
     [switch]$ShowClean,
     [switch]$Fetch
 )
+
+
+$CommonModule = Join-Path $PSScriptRoot ".." "lib" "DevKit-Common.ps1"
+if (Test-Path $CommonModule) { . $CommonModule }
+
 
 Write-Host "`nNorthstar DevKit - Git Status All`n" -ForegroundColor Cyan
 
@@ -85,7 +89,7 @@ $summary = @{
 foreach ($repo in $gitRepos) {
     $repoName = $repo.Name
     $repoPath = $repo.FullName
-    $relPath = $repoPath.Substring($targetPath.Path.Length).TrimStart('\', '/')
+    $relPath = $repoPath.Substring($targetPath.Length).TrimStart('\', '/')
     
     Push-Location $repoPath -ErrorAction SilentlyContinue
     

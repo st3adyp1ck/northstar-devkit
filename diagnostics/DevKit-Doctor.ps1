@@ -13,11 +13,15 @@
 .EXAMPLE
     .\DevKit-Doctor.ps1
     .\DevKit-Doctor.ps1 -Quiet
-#>
-[CmdletBinding()]
+#>[CmdletBinding()]
 param(
     [switch]$Quiet
 )
+
+
+$CommonModule = Join-Path $PSScriptRoot ".." "lib" "DevKit-Common.ps1"
+if (Test-Path $CommonModule) { . $CommonModule }
+
 
 function Write-Check {
     param(
@@ -89,8 +93,8 @@ if ($npmCmd) {
 }
 
 # Yarn/PNPM/Bun (optional but nice)
-$yamCmd = Get-Command yarn -ErrorAction SilentlyContinue
-if ($yamCmd) {
+$yarnCmd = Get-Command yarn -ErrorAction SilentlyContinue
+if ($yarnCmd) {
     $yarnVersion = & yarn --version 2>$null
     Write-Check "Yarn Installed" $true "v$yarnVersion"
 }

@@ -3,59 +3,65 @@
 .SYNOPSIS
     Clear Turbopack Cache - Northstar DevKit
 .DESCRIPTION
-    Deletes Turbopack and webpack caches from various locations.
+    Deletes Turbopack and related build caches.
     
     Created by Northstar Software Development
     Website: https://www.northstarcoding.com
 .PARAMETER Path
     The project directory. Defaults to current directory.
+.PARAMETER Force
+    Skip confirmation prompt.
 .EXAMPLE
     .\Clear-TurboCache.ps1
+    .\Clear-TurboCache.ps1 -Path "C:\my-project"
+    .\Clear-TurboCache.ps1 -Force
 #>
 [CmdletBinding()]
 param(
-    [string]$Path = "."
+    [string]$Path = ".",
+    [switch]$Force
 )
 
-Write-Host "`nNorthstar DevKit - Clear Turbopack Cache`n" -ForegroundColor Cyan
+$CommonModule = Join-Path $PSScriptRoot ".." "lib" "DevKit-Common.ps1"
+if (Test-Path $CommonModule) { . $CommonModule }
 
-if (-not (Test-Path $Path)) {
-    Write-Host "  ERROR: Path not found: $Path`n" -ForegroundColor Red
+try {
+    $targetPath = Resolve-DevKitDirectory -Path $Path
+} catch {
+    Write-DevKitHeader "Clear Turbopack Cache"
+    Write-DevKitError $_
     exit 1
 }
-$targetPath = (Resolve-Path $Path).Path
 
-Write-Host "  Path: $targetPath`n" -ForegroundColor Gray
+Write-DevKitHeader "Clear Turbopack Cache"
 
 $cachePaths = @(
-    (Join-Path $targetPath ".next\cache"),
-    (Join-Path $targetPath ".next\webpack"),
-    (Join-Path $targetPath "node_modules\.cache"),
+    (Join-Path $targetPath ".next" "cache"),
+    (Join-Path $targetPath "node_modules" ".cache"),
     (Join-Path $targetPath ".turbo")
 )
 
 $found = $false
-$totalSize = 0
-
 foreach ($cachePath in $cachePaths) {
     if (Test-Path $cachePath) {
-        $found = $true
-        $size = (Get-ChildItem $cachePath -Recurse -ErrorAction SilentlyContinue | 
-            Measure-Object -Property Length -Sum).Sum
-        $sizeMB = if ($size) { [math]::Round($size / 1MB, 2) } else { 0 }
-        $totalSize += $sizeMB
-        
-        Write-Host "  Deleting: $cachePath ($sizeMB MB)" -ForegroundColor Yellow
-        try {
-            Remove-Item -Path $cachePath -Recurse -Force -ErrorAction Stop
-        } catch {
-            Write-Host "  WARNING: Could not delete $cachePath`: $_" -ForegroundColor Yellow
+        if (-not $found) {
+            $found = $true
+            if (-not $Force) {
+                $confirm = Read-Host "  Delete Turbopack caches? (y/n)"
+                if ($confirm -ne 'y') {
+                    Write-DevKitInfo "Cancelled."
+                    exit 0
+                }
+            }
         }
+        Write-DevKitStep "Deleting $cachePath"
+        Remove-Item -Path $cachePath -Recurse -Force
+        Write-DevKitDone
     }
 }
 
-if ($found) {
-    Write-Host "`n  DONE: Turbopack caches cleared ($totalSize MB freed).`n" -ForegroundColor Green
-} else {
-    Write-Host "  WARNING: No Turbopack caches found.`n" -ForegroundColor Yellow
+if (-not $found) {
+    Write-DevKitInfo "No Turbopack caches found."
 }
+
+Write-Host ""

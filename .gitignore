@@ -15,3 +15,8 @@ desktop.ini
 # Temp files
 *.tmp
 *.temp
+
+# DevKit generated files
+env-backup-*.json
+devinfo-*.json
+.env

@@ -3,62 +3,54 @@
 .SYNOPSIS
     Clear Next.js Cache - Northstar DevKit
 .DESCRIPTION
-    Deletes the .next build directory to force a fresh build.
+    Deletes the .next build cache directory.
     
     Created by Northstar Software Development
     Website: https://www.northstarcoding.com
 .PARAMETER Path
     The project directory. Defaults to current directory.
-.PARAMETER StartDev
-    Start dev server after clearing cache.
+.PARAMETER Force
+    Skip confirmation prompt.
 .EXAMPLE
     .\Clear-NextCache.ps1
-    .\Clear-NextCache.ps1 -StartDev
+    .\Clear-NextCache.ps1 -Path "C:\my-project"
+    .\Clear-NextCache.ps1 -Force
 #>
 [CmdletBinding()]
 param(
     [string]$Path = ".",
-    [switch]$StartDev
+    [switch]$Force
 )
 
-Write-Host "`nNorthstar DevKit - Clear Next.js Cache`n" -ForegroundColor Cyan
+$CommonModule = Join-Path $PSScriptRoot ".." "lib" "DevKit-Common.ps1"
+if (Test-Path $CommonModule) { . $CommonModule }
 
-if (-not (Test-Path $Path)) {
-    Write-Host "  ERROR: Path not found: $Path`n" -ForegroundColor Red
+try {
+    $targetPath = Resolve-DevKitDirectory -Path $Path
+} catch {
+    Write-DevKitHeader "Clear Next.js Cache"
+    Write-DevKitError $_
     exit 1
 }
-$targetPath = (Resolve-Path $Path).Path
+
+Write-DevKitHeader "Clear Next.js Cache"
+
 $nextPath = Join-Path $targetPath ".next"
-
-Write-Host "  Path: $targetPath`n" -ForegroundColor Gray
-
 if (-not (Test-Path $nextPath)) {
-    Write-Host "  WARNING: .next folder not found.`n" -ForegroundColor Yellow
-} else {
-    # Calculate size
-    $size = (Get-ChildItem $nextPath -Recurse -ErrorAction SilentlyContinue | 
-        Measure-Object -Property Length -Sum).Sum
-    $sizeMB = if ($size) { [math]::Round($size / 1MB, 2) } else { 0 }
-    
-    Write-Host "  Cache size: $sizeMB MB" -ForegroundColor Gray
-    Write-Host "  Deleting..." -ForegroundColor Yellow
-    
-    try {
-        Remove-Item -Path $nextPath -Recurse -Force
-        Write-Host "  DONE: .next cache cleared.`n" -ForegroundColor Green
-    } catch {
-        Write-Host "  ERROR: $_`n" -ForegroundColor Red
-        exit 1
+    Write-DevKitInfo ".next folder not found."
+    exit 0
+}
+
+if (-not $Force) {
+    $confirm = Read-Host "  Delete .next folder? (y/n)"
+    if ($confirm -ne 'y') {
+        Write-DevKitInfo "Cancelled."
+        exit 0
     }
 }
 
-if ($StartDev) {
-    Write-Host "  Starting dev server...`n" -ForegroundColor Green
-    $env:NEXT_TELEMETRY_DISABLED = "1"
-    try {
-        Push-Location $targetPath
-        npm run dev
-    } finally {
-        Pop-Location
-    }
-}
+Write-DevKitStep "Deleting .next folder"
+Remove-Item -Path $nextPath -Recurse -Force
+Write-DevKitDone
+
+Write-Host ""

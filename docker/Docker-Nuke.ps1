@@ -22,14 +22,18 @@
     .\Docker-Nuke.ps1 -Force
     .\Docker-Nuke.ps1 -KeepVolumes
     .\Docker-Nuke.ps1 -DryRun
-#>
-[CmdletBinding()]
+#>[CmdletBinding()]
 param(
     [switch]$Force,
     [switch]$KeepVolumes,
     [switch]$KeepImages,
     [switch]$DryRun
 )
+
+
+$CommonModule = Join-Path $PSScriptRoot ".." "lib" "DevKit-Common.ps1"
+if (Test-Path $CommonModule) { . $CommonModule }
+
 
 Write-Host "`nNorthstar DevKit - DOCKER NUKE`n" -ForegroundColor Cyan
 Write-Host "  WARNING: This will remove ALL Docker resources!" -ForegroundColor Red

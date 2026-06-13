@@ -1,9 +1,6 @@
 @echo off
 setlocal
 
-echo Environment Backup - Backup env variables
-echo.
-
 where pwsh >nul 2>&1
 if %ERRORLEVEL% EQU 0 (
     set PSH=pwsh
@@ -18,7 +15,7 @@ if %ERRORLEVEL% EQU 0 (
     )
 )
 
-%PSH% -NoProfile -ExecutionPolicy Bypass -File "%~dp0Env-Backup.ps1" %*
+%PSH% -NoProfile -ExecutionPolicy Bypass -File "%~dp0Kill-Port.ps1" %*
 set PS_EXIT=%ERRORLEVEL%
 if %PS_EXIT% NEQ 0 pause
 exit /b %PS_EXIT%

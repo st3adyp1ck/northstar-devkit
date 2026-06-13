@@ -6,6 +6,8 @@
     Backup environment variables to a JSON file for later restoration.
     Backs up both User and Machine environment variables.
     
+    WARNING: Backup files may contain secrets or tokens. Store them securely.
+    
     Created by Northstar Software Development
     Website: https://www.northstarcoding.com
 .PARAMETER OutputPath
@@ -23,10 +25,26 @@
 param(
     [string]$OutputPath = ".",
     [string]$Name = "",
-    [switch]$IncludePath = $true
+    [switch]$IncludePath = $true,
+    [switch]$Force
 )
 
-Write-Host "`nNorthstar DevKit - Environment Backup`n" -ForegroundColor Cyan
+$CommonModule = Join-Path $PSScriptRoot ".." "lib" "DevKit-Common.ps1"
+if (Test-Path $CommonModule) { . $CommonModule }
+
+Write-DevKitHeader "Environment Backup"
+
+Write-Host "  WARNING: Backup files may contain secrets, API keys, or tokens." -ForegroundColor Yellow
+Write-Host "  Store the output file in a secure location and keep it out of Git." -ForegroundColor Yellow
+Write-Host ""
+
+if (-not $Force) {
+    $confirm = Read-Host "  Continue? (y/n)"
+    if ($confirm -ne 'y') {
+        Write-DevKitInfo "Cancelled."
+        exit 0
+    }
+}
 
 # Resolve output path
 $backupDir = Resolve-Path $OutputPath -ErrorAction SilentlyContinue
@@ -40,8 +58,8 @@ $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $backupName = if ($Name) { "$Name-$timestamp" } else { "env-backup-$timestamp" }
 $backupFile = Join-Path $backupDir "$backupName.json"
 
-Write-Host "  Creating backup..." -ForegroundColor Yellow
-Write-Host "  Target: $backupFile" -ForegroundColor Gray
+Write-DevKitStep "Creating backup"
+Write-DevKitInfo "Target: $backupFile"
 
 # Collect environment variables
 $backup = @{
@@ -55,7 +73,7 @@ $backup = @{
 }
 
 # Backup User variables
-Write-Host "  Backing up User environment variables..." -ForegroundColor Yellow
+Write-DevKitInfo "Backing up User environment variables"
 $userVars = [Environment]::GetEnvironmentVariables("User")
 foreach ($var in $userVars.GetEnumerator()) {
     if ($var.Key -eq "PATH" -and -not $IncludePath) { continue }
@@ -63,9 +81,8 @@ foreach ($var in $userVars.GetEnumerator()) {
 }
 
 # Backup Machine variables (if admin)
-$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-if ($isAdmin) {
-    Write-Host "  Backing up Machine environment variables..." -ForegroundColor Yellow
+if (Test-DevKitAdmin) {
+    Write-DevKitInfo "Backing up Machine environment variables"
     $machineVars = [Environment]::GetEnvironmentVariables("Machine")
     foreach ($var in $machineVars.GetEnumerator()) {
         if ($var.Key -eq "PATH" -and -not $IncludePath) { continue }
@@ -80,7 +97,7 @@ $backup | ConvertTo-Json -Depth 10 | Out-File -FilePath $backupFile -Encoding UT
 
 # Summary
 $userCount = $backup.Variables.User.Count
-$machineCount = if ($isAdmin) { $backup.Variables.Machine.Count } else { 0 }
+$machineCount = if (Test-DevKitAdmin) { $backup.Variables.Machine.Count } else { 0 }
 
 Write-Host "`n  ===================================" -ForegroundColor Cyan
 Write-Host "  DONE: Backup created successfully!" -ForegroundColor Green

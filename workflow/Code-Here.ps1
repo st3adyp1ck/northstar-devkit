@@ -21,14 +21,18 @@
     .\Code-Here.ps1 -Recent
     .\Code-Here.ps1 -Path "C:\MyProject"
     .\Code-Here.ps1 -Cursor
-#>
-[CmdletBinding()]
+#>[CmdletBinding()]
 param(
     [string]$Path = ".",
     [switch]$Recent,
     [switch]$Cursor,
     [switch]$Wait
 )
+
+
+$CommonModule = Join-Path $PSScriptRoot ".." "lib" "DevKit-Common.ps1"
+if (Test-Path $CommonModule) { . $CommonModule }
+
 
 Write-Host "`nNorthstar DevKit - Code Here`n" -ForegroundColor Cyan
 

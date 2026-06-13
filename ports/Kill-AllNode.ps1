@@ -19,7 +19,10 @@ param(
     [switch]$Force
 )
 
-Write-Host "`nNorthstar DevKit - Kill All Node Processes`n" -ForegroundColor Cyan
+$CommonModule = Join-Path $PSScriptRoot ".." "lib" "DevKit-Common.ps1"
+if (Test-Path $CommonModule) { . $CommonModule }
+
+Write-DevKitHeader "Kill All Node Processes"
 
 $nodeProcesses = Get-Process -Name "node" -ErrorAction SilentlyContinue
 

@@ -9,7 +9,7 @@
     Created by Northstar Software Development
     Website: https://www.northstarcoding.com
 .PARAMETER Full
-    Perform a full reload including PATH refresh.
+    Also refresh all User and Machine environment variables from the registry.
 .PARAMETER ProfileOnly
     Only reload the PowerShell profile scripts.
 .PARAMETER ShowDiff
@@ -26,7 +26,10 @@ param(
     [switch]$ShowDiff
 )
 
-Write-Host "`nNorthstar DevKit - Shell Reload`n" -ForegroundColor Cyan
+$CommonModule = Join-Path $PSScriptRoot ".." "lib" "DevKit-Common.ps1"
+if (Test-Path $CommonModule) { . $CommonModule }
+
+Write-DevKitHeader "Shell Reload"
 
 # Store original values for comparison
 $originalPath = $env:PATH
@@ -37,14 +40,14 @@ if ($ShowDiff) {
 
 # Reload profiles
 if (-not $ProfileOnly) {
-    Write-Host "  Reloading environment variables..." -ForegroundColor Yellow
-    
+    Write-DevKitStep "Reloading environment variables"
+
     # Refresh PATH from registry
     $userPath = [Environment]::GetEnvironmentVariable("PATH", "User")
     $machinePath = [Environment]::GetEnvironmentVariable("PATH", "Machine")
     $pathEntries = @($machinePath, $userPath) | Where-Object { $_ } | ForEach-Object { $_ -split ';' | Where-Object { $_ } } | Select-Object -Unique
     $env:PATH = $pathEntries -join ';'
-    
+
     # Refresh other common environment variables
     $varsToRefresh = @(
         "TEMP", "TMP",
@@ -52,7 +55,7 @@ if (-not $ProfileOnly) {
         "JAVA_HOME", "NODE_PATH",
         "PYTHONPATH", "GOPATH"
     )
-    
+
     foreach ($var in $varsToRefresh) {
         $userVal = [Environment]::GetEnvironmentVariable($var, "User")
         $machineVal = [Environment]::GetEnvironmentVariable($var, "Machine")
@@ -61,12 +64,25 @@ if (-not $ProfileOnly) {
             Set-Item -Path "Env:$var" -Value $newVal
         }
     }
-    
-    Write-Host "  DONE: Environment variables refreshed." -ForegroundColor Green
+
+    # Full reload: merge all User and Machine variables
+    if ($Full) {
+        $machineVars = [Environment]::GetEnvironmentVariables("Machine")
+        $userVars = [Environment]::GetEnvironmentVariables("User")
+
+        foreach ($var in $machineVars.GetEnumerator()) {
+            Set-Item -Path "Env:$($var.Key)" -Value $var.Value -ErrorAction SilentlyContinue
+        }
+        foreach ($var in $userVars.GetEnumerator()) {
+            Set-Item -Path "Env:$($var.Key)" -Value $var.Value -ErrorAction SilentlyContinue
+        }
+    }
+
+    Write-DevKitDone
 }
 
 # Reload PowerShell profiles
-Write-Host "  Reloading PowerShell profiles..." -ForegroundColor Yellow
+Write-DevKitStep "Reloading PowerShell profiles"
 
 $profilePaths = @(
     $PROFILE.AllUsersAllHosts,
@@ -79,72 +95,42 @@ $loadedCount = 0
 foreach ($profilePath in $profilePaths) {
     try {
         . $profilePath
-        Write-Host "    Loaded: $profilePath" -ForegroundColor DarkGray
         $loadedCount++
     } catch {
-        Write-Host "    ERROR loading ${profilePath}: $_" -ForegroundColor Red
+        Write-Host "    WARNING: Could not load $profilePath" -ForegroundColor Yellow
     }
 }
 
-if ($loadedCount -eq 0) {
-    Write-Host "    No profiles found to reload." -ForegroundColor Gray
-} else {
-    Write-Host "  DONE: Reloaded $loadedCount profile(s)." -ForegroundColor Green
-}
+Write-DevKitDone
+Write-DevKitInfo "Reloaded $loadedCount profile(s)"
 
-# Show differences if requested
+# Show diff if requested
 if ($ShowDiff) {
-    Write-Host "`n  Environment Variable Changes:" -ForegroundColor Yellow
-    
+    Write-Host "`n  Environment variable changes:" -ForegroundColor Cyan
     $currentVars = @{}
     Get-ChildItem Env: | ForEach-Object { $currentVars[$_.Name] = $_.Value }
-    
-    # Find new and modified variables
-    $changesFound = $false
-    foreach ($var in $currentVars.GetEnumerator()) {
-        if (-not $originalVars.ContainsKey($var.Key)) {
-            Write-Host "    + $($var.Key) = $(if($var.Value.Length -gt 50){$var.Value.Substring(0,50)+'...'}else{$var.Value})" -ForegroundColor Green
-            $changesFound = $true
-        } elseif ($originalVars[$var.Key] -ne $var.Value) {
-            Write-Host "    ~ $($var.Key) (modified)" -ForegroundColor Yellow
-            $changesFound = $true
+
+    $changed = $false
+    foreach ($name in ($originalVars.Keys + $currentVars.Keys | Select-Object -Unique)) {
+        $old = $originalVars[$name]
+        $new = $currentVars[$name]
+        if ($old -ne $new) {
+            $changed = $true
+            Write-Host "  $name" -ForegroundColor Yellow
+            if ($old -and $new) {
+                Write-Host "    Old: $old" -ForegroundColor Gray
+                Write-Host "    New: $new" -ForegroundColor Gray
+            } elseif ($new) {
+                Write-Host "    Added: $new" -ForegroundColor Green
+            } else {
+                Write-Host "    Removed" -ForegroundColor Red
+            }
         }
     }
-    
-    # Find removed variables
-    foreach ($var in $originalVars.GetEnumerator()) {
-        if (-not $currentVars.ContainsKey($var.Key)) {
-            Write-Host "    - $($var.Key)" -ForegroundColor Red
-            $changesFound = $true
-        }
-    }
-    
-    if (-not $changesFound) {
-        Write-Host "    No changes detected." -ForegroundColor Gray
-    }
-    
-    # PATH comparison
-    if ($originalPath -ne $env:PATH) {
-        Write-Host "`n  PATH has been updated:" -ForegroundColor Yellow
-        $originalEntries = $originalPath -split ';' | Where-Object { $_ }
-        $newEntries = $env:PATH -split ';' | Where-Object { $_ }
-        
-        $added = $newEntries | Where-Object { $originalEntries -notcontains $_ }
-        $removed = $originalEntries | Where-Object { $newEntries -notcontains $_ }
-        
-        if ($added) {
-            Write-Host "    Added entries:" -ForegroundColor Green
-            $added | ForEach-Object { Write-Host "      + $_" -ForegroundColor Green }
-        }
-        if ($removed) {
-            Write-Host "    Removed entries:" -ForegroundColor Red
-            $removed | ForEach-Object { Write-Host "      - $_" -ForegroundColor Red }
-        }
+
+    if (-not $changed) {
+        Write-DevKitInfo "No changes detected."
     }
 }
 
-# Summary
-Write-Host "`n  ===================================" -ForegroundColor Cyan
-Write-Host "  Shell reload complete!" -ForegroundColor Green
-Write-Host "  PATH entries: $(($env:PATH -split ';' | Where-Object { $_ }).Count)" -ForegroundColor Gray
-Write-Host "  ===================================`n" -ForegroundColor Cyan
+Write-Host ""

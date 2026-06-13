@@ -29,6 +29,9 @@ DevKit/
 ├── AGENTS.md               # This file
 ├── .gitignore              # Git ignore rules
 │
+├── lib/                    # Shared PowerShell helpers
+│   └── DevKit-Common.ps1   # Common functions used by scripts
+│
 ├── ports/                  # Port management tools
 │   ├── Scan-Ports.ps1      # Scan common dev ports (3000, 5173, etc.)
 │   ├── Scan-Ports.bat      # Batch wrapper
@@ -176,15 +179,16 @@ try {
 - Uses `Get-Process` and `Stop-Process` for process management
 
 ### Node.js Tools (`node/`)
-- Executes `npm cache clean --force` for cache clearing
+- Auto-detects package manager (npm/yarn/pnpm/bun) from lock files
+- Executes the correct cache clean command for the detected package manager
 - Recursively removes `node_modules` directories using long-path-safe deletion
 - Supports `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, and `bun.lockb` cleanup
-- Auto-detects package manager (npm/yarn/pnpm/bun) from lock files
 
 ### Next.js Tools (`nextjs/`)
+- Auto-detects package manager (npm/yarn/pnpm/bun) from lock files
 - Removes `.next/` build cache directory
 - Clears Turbopack cache from `.next/cache`, `node_modules/.cache`, `.turbo`
-- Runs `npm run dev` after cache clearing
+- Runs the detected package manager's dev command after cache clearing
 - Disables Next.js telemetry: `$env:NEXT_TELEMETRY_DISABLED = "1"`
 
 ### Vite Tools (`vite/`)
@@ -267,7 +271,7 @@ Launches the main interactive menu for navigation via keyboard input.
   - WiFi optimization features (script checks and warns if not admin)
   - Editing system (Machine) PATH
   - Restoring Machine environment variables
-- Scripts use `-ExecutionPolicy Bypass` in batch wrappers for convenience
+- Batch wrappers use `-NoProfile -ExecutionPolicy Bypass` for fast, predictable launches
 - All scripts use `ErrorAction SilentlyContinue` where appropriate to prevent unnecessary failures
 - Force flags (`-Force`) are available to skip confirmation prompts for automation
 - Docker Nuke requires explicit confirmation (type 'NUKE') to prevent accidents
@@ -288,13 +292,14 @@ This project does not have automated tests. Testing is done manually:
 When adding a new tool to DevKit:
 
 1. Create the PowerShell script in the appropriate subdirectory
-2. Include proper comment-based help (SYNOPSIS, DESCRIPTION, PARAMETERS, EXAMPLES)
-3. Add a batch wrapper for double-click execution
-4. Update `DevKit.ps1` main menu if the tool should be accessible from the interactive menu
-5. Update `README.md` with documentation
-6. Update `AGENTS.md` with module details
-7. Follow existing naming conventions and output styling
-8. Test the tool thoroughly
+2. Dot-source `lib/DevKit-Common.ps1` for shared helpers (admin checks, path validation, safe deletion, etc.)
+3. Include proper comment-based help (SYNOPSIS, DESCRIPTION, PARAMETERS, EXAMPLES)
+4. Add a batch wrapper for double-click execution
+5. Update `DevKit.ps1` main menu if the tool should be accessible from the interactive menu
+6. Update `README.md` with documentation
+7. Update `AGENTS.md` with module details
+8. Follow existing naming conventions and output styling
+9. Test the tool thoroughly
 
 ## Common Development Tasks
 
@@ -319,4 +324,4 @@ When adding a new tool to DevKit:
 - Batch wrappers use `%~dp0` to locate `.ps1` files without changing the caller's working directory
 - No package management (no package.json, requirements.txt, etc.) - this is a standalone toolkit
 - Scripts use consistent header format with Northstar branding
-- Version 2.0 adds Git, Docker, Vite, System, Workflow, and Diagnostics modules
+- Version 2.1 unifies the toolkit under a shared helper module (`lib/DevKit-Common.ps1`), adds package-manager auto-detection, completes batch-wrapper coverage, and fixes PowerShell 7 / path-validation / process-killing bugs

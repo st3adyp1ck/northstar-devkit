@@ -18,23 +18,28 @@ param(
     [switch]$Verify
 )
 
-Write-Host "`nNorthstar DevKit - Clear NPM Cache`n" -ForegroundColor Cyan
+$CommonModule = Join-Path $PSScriptRoot ".." "lib" "DevKit-Common.ps1"
+if (Test-Path $CommonModule) { . $CommonModule }
 
-Write-Host "  Running: npm cache clean --force" -ForegroundColor Gray
-Write-Host ""
+Write-DevKitHeader "Clear NPM Cache"
 
-npm cache clean --force
-
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "`n  ERROR: npm cache clean failed.`n" -ForegroundColor Red
+if (-not (Test-DevKitCommand npm)) {
+    Write-DevKitError "npm is not installed or not in PATH."
     exit 1
 }
 
-Write-Host "`n  DONE: NPM cache cleared." -ForegroundColor Green
+Write-DevKitStep "Running npm cache clean --force"
+npm cache clean --force | Out-Null
+
+if ($LASTEXITCODE -ne 0) {
+    Write-DevKitError "npm cache clean failed."
+    exit 1
+}
+
+Write-DevKitDone
 
 if ($Verify) {
-    Write-Host "`n  Running: npm cache verify" -ForegroundColor Gray
-    Write-Host ""
+    Write-DevKitStep "Running npm cache verify"
     npm cache verify
 }
 

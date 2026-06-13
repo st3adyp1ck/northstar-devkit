@@ -5,79 +5,83 @@
 .DESCRIPTION
     Kill a process by port number or PID.
     Either provide a port number to find and kill the process,
-    or provide a PID directly.
+    or provide a ProcessId directly.
     
     Created by Northstar Software Development
     Website: https://www.northstarcoding.com
 .PARAMETER Port
     The port number to kill.
-.PARAMETER PID
+.PARAMETER ProcessId
     The process ID to kill directly.
 .PARAMETER Force
     Skip confirmation prompt.
 .EXAMPLE
     .\Kill-Port.ps1 -Port 3000
-    .\Kill-Port.ps1 -PID 12345
+    .\Kill-Port.ps1 -ProcessId 12345
     .\Kill-Port.ps1 -Port 3000 -Force
 #>
 [CmdletBinding()]
 param(
     [Parameter(ParameterSetName='ByPort')]
+    [ValidateRange(1, 65535)]
     [int]$Port,
-    
+
     [Parameter(ParameterSetName='ByPID')]
-    [int]$PID,
-    
+    [Alias('PID')]
+    [int]$ProcessId,
+
     [switch]$Force
 )
 
-Write-Host "`nNorthstar DevKit - Kill Port`n" -ForegroundColor Cyan
+$CommonModule = Join-Path $PSScriptRoot ".." "lib" "DevKit-Common.ps1"
+if (Test-Path $CommonModule) { . $CommonModule }
+
+Write-DevKitHeader "Kill Port"
 
 if ($Port) {
-    Write-Host "Finding process on port $Port..." -ForegroundColor Yellow
-    $connection = Get-NetTCPConnection -LocalPort $Port -ErrorAction SilentlyContinue | Select-Object -First 1
-    
-    if (-not $connection) {
-        Write-Host "  ERROR: No process found on port $Port`n" -ForegroundColor Red
+    Write-DevKitInfo "Finding process on port $Port..."
+    $procInfo = Get-DevKitProcessByPort -Port $Port
+
+    if (-not $procInfo) {
+        Write-DevKitError "No process found on port $Port"
         exit 1
     }
-    
-    $PID = $connection.OwningProcess
-    $process = Get-Process -Id $PID -ErrorAction SilentlyContinue
-    
-    Write-Host "  Found: PID $PID" -ForegroundColor Yellow
-    if ($process) {
-        Write-Host "  Name: $($process.ProcessName)" -ForegroundColor Yellow
-        Write-Host "  Path: $($process.Path)" -ForegroundColor Gray
+
+    $ProcessId = $procInfo.PID
+
+    Write-Host "  Found: PID $($procInfo.PID)" -ForegroundColor Yellow
+    if ($procInfo.Name -ne "Unknown") {
+        Write-Host "  Name: $($procInfo.Name)" -ForegroundColor Yellow
+        Write-Host "  Path: $($procInfo.Path)" -ForegroundColor Gray
     }
 }
 
-if (-not $PID) {
-    Write-Host "`nERROR: No PID specified or found.`n" -ForegroundColor Red
+if (-not $ProcessId) {
+    Write-DevKitError "No PID specified or found."
     exit 1
 }
 
 try {
-    $process = Get-Process -Id $PID -ErrorAction Stop
+    $process = Get-Process -Id $ProcessId -ErrorAction Stop
 } catch {
-    Write-Host "`nERROR: Process $PID not found.`n" -ForegroundColor Red
+    Write-DevKitError "Process $ProcessId not found."
     exit 1
 }
 
 Write-Host ""
 
 if (-not $Force) {
-    $confirm = Read-Host "Kill process $($process.ProcessName) (PID: $PID)? (y/n)"
+    $confirm = Read-Host "Kill process $($process.ProcessName) (PID: $ProcessId)? (y/n)"
     if ($confirm -ne 'y') {
-        Write-Host "  Cancelled.`n" -ForegroundColor Gray
+        Write-DevKitInfo "Cancelled."
         exit 0
     }
 }
 
 try {
-    Stop-Process -Id $PID -Force
+    Stop-Process -Id $ProcessId -Force
     Write-Host "  DONE: Process killed.`n" -ForegroundColor Green
 } catch {
-    Write-Host "  ERROR: Failed to kill process: $_`n" -ForegroundColor Red
+    Write-DevKitError "Failed to kill process: $_"
     exit 1
 }
