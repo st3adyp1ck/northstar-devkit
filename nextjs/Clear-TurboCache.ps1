@@ -22,7 +22,7 @@ param(
     [switch]$Force
 )
 
-$CommonModule = Join-Path $PSScriptRoot ".." "lib" "DevKit-Common.ps1"
+$CommonModule = Join-Path (Join-Path (Split-Path -Parent $PSScriptRoot) "lib") "DevKit-Common.ps1"
 if (Test-Path $CommonModule) { . $CommonModule }
 
 try {
@@ -36,8 +36,8 @@ try {
 Write-DevKitHeader "Clear Turbopack Cache"
 
 $cachePaths = @(
-    (Join-Path $targetPath ".next" "cache"),
-    (Join-Path $targetPath "node_modules" ".cache"),
+    (Join-Path (Join-Path $targetPath ".next") "cache"),
+    (Join-Path (Join-Path $targetPath "node_modules") ".cache"),
     (Join-Path $targetPath ".turbo")
 )
 

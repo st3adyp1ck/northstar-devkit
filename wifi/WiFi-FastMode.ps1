@@ -13,7 +13,7 @@
     .\WiFi-FastMode.ps1 -KeepDNS
 #>
 
-$CommonModule = Join-Path $PSScriptRoot ".." "lib" "DevKit-Common.ps1"
+$CommonModule = Join-Path (Join-Path (Split-Path -Parent $PSScriptRoot) "lib") "DevKit-Common.ps1"
 if (Test-Path $CommonModule) { . $CommonModule }
 
 # Call the main script with -Fast flag, passing through all arguments

@@ -139,15 +139,15 @@ function Clear-DevKitNodeCaches {
         (Join-Path $resolved ".next"),
         (Join-Path $resolved ".vite"),
         (Join-Path $resolved "dist"),
-        (Join-Path $resolved "node_modules" ".cache"),
-        (Join-Path $resolved "node_modules" ".vite")
+        (Join-Path (Join-Path $resolved "node_modules") ".cache"),
+        (Join-Path (Join-Path $resolved "node_modules") ".vite")
     )
 
     if ($IncludeTurbo) {
         $cachePaths += @(
             (Join-Path $resolved ".turbo"),
-            (Join-Path $resolved ".next" "cache"),
-            (Join-Path $resolved "node_modules" ".cache")
+            (Join-Path (Join-Path $resolved ".next") "cache"),
+            (Join-Path (Join-Path $resolved "node_modules") ".cache")
         ) | Select-Object -Unique
     }
 

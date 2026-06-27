@@ -19,7 +19,7 @@ param(
     [switch]$Kill
 )
 
-$CommonModule = Join-Path $PSScriptRoot ".." "lib" "DevKit-Common.ps1"
+$CommonModule = Join-Path (Join-Path (Split-Path -Parent $PSScriptRoot) "lib") "DevKit-Common.ps1"
 if (Test-Path $CommonModule) { . $CommonModule }
 
 $CommonPorts = @(3000, 3001, 3002, 3003, 5173, 5174, 8000, 8080, 8081, 9000, 4200, 5000, 5500, 1337, 5432, 3306, 6379, 27017)

@@ -27,7 +27,7 @@ param(
     [int]$Port = 0
 )
 
-$CommonModule = Join-Path $PSScriptRoot ".." "lib" "DevKit-Common.ps1"
+$CommonModule = Join-Path (Join-Path (Split-Path -Parent $PSScriptRoot) "lib") "DevKit-Common.ps1"
 if (Test-Path $CommonModule) { . $CommonModule }
 
 try {

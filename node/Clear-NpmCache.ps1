@@ -18,7 +18,7 @@ param(
     [switch]$Verify
 )
 
-$CommonModule = Join-Path $PSScriptRoot ".." "lib" "DevKit-Common.ps1"
+$CommonModule = Join-Path (Join-Path (Split-Path -Parent $PSScriptRoot) "lib") "DevKit-Common.ps1"
 if (Test-Path $CommonModule) { . $CommonModule }
 
 Write-DevKitHeader "Clear NPM Cache"
