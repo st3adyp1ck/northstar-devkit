@@ -13,7 +13,8 @@
 .PARAMETER WhatIf
     Show what would be restored without making changes.
 .PARAMETER Force
-    Skip confirmation prompts.
+    Skip confirmation prompts. Also skips the PATH diff/merge prompt and
+    restores PATH via a straight overwrite (the pre-3.0 behavior).
 .EXAMPLE
     .\Env-Restore.ps1 -BackupFile "env-backup-20240101_120000.json"
     .\Env-Restore.ps1 -BackupFile "backup.json" -WhatIf
@@ -32,7 +33,74 @@ $CommonModule = Join-Path (Join-Path (Split-Path -Parent $PSScriptRoot) "lib") "
 if (Test-Path $CommonModule) { . $CommonModule }
 
 begin {
-    Write-Host "`nNorthstar DevKit - Environment Restore`n" -ForegroundColor Cyan
+    Write-DevKitHeader "Environment Restore"
+
+    function Resolve-DevKitPathRestoreValue {
+        <#
+            Compares a backed-up PATH value for the given scope against the
+            CURRENT live PATH for that scope, shows the diff, and lets the
+            user choose Overwrite / Merge / Skip. Returns the PATH string to
+            write, or $null if the user chose to skip restoring PATH.
+        #>
+        param(
+            [Parameter(Mandatory = $true)]
+            [string]$Scope,
+
+            [Parameter(Mandatory = $true)]
+            [AllowEmptyString()]
+            [string]$BackupPathValue
+        )
+
+        $currentPathValue = [Environment]::GetEnvironmentVariable("PATH", $Scope)
+        $currentEntries = @($currentPathValue -split ';' | Where-Object { $_ -ne '' })
+        $backupEntries = @($BackupPathValue -split ';' | Where-Object { $_ -ne '' })
+
+        $added = @($backupEntries | Where-Object { $currentEntries -notcontains $_ })
+        $removed = @($currentEntries | Where-Object { $backupEntries -notcontains $_ })
+
+        Write-Host "`n  PATH ($Scope) differs from the current live PATH:" -ForegroundColor Magenta
+        if ($added.Count -gt 0) {
+            Write-Host "    Would ADD (in backup, missing now):" -ForegroundColor Green
+            $added | ForEach-Object { Write-Host "      + $_" -ForegroundColor Green }
+        }
+        if ($removed.Count -gt 0) {
+            Write-Host "    Would REMOVE (present now, not in backup):" -ForegroundColor Red
+            $removed | ForEach-Object { Write-Host "      - $_" -ForegroundColor Red }
+        }
+        if ($added.Count -eq 0 -and $removed.Count -eq 0) {
+            Write-Host "    No differences detected." -ForegroundColor Gray
+        }
+
+        Write-Host ""
+        Write-Host "    [O] Overwrite - replace current $Scope PATH with the backed-up value" -ForegroundColor Cyan
+        Write-Host "    [M] Merge     - union of current + backed-up entries (keeps both)" -ForegroundColor Cyan
+        Write-Host "    [S] Skip      - leave $Scope PATH untouched (default)" -ForegroundColor Cyan
+        $pathChoice = Read-Host "  Restore $Scope PATH - choose (O/M/S)"
+
+        switch ($pathChoice.ToUpper()) {
+            'O' {
+                Write-Host "  $Scope PATH will be overwritten." -ForegroundColor Yellow
+                return $BackupPathValue
+            }
+            'M' {
+                $seen = @{}
+                $merged = @()
+                foreach ($entry in (@($currentEntries) + @($backupEntries))) {
+                    $key = $entry.ToLower()
+                    if (-not $seen.ContainsKey($key)) {
+                        $seen[$key] = $true
+                        $merged += $entry
+                    }
+                }
+                Write-Host "  $Scope PATH will be merged." -ForegroundColor Yellow
+                return ($merged -join ';')
+            }
+            default {
+                Write-Host "  Skipped $Scope PATH restore.`n" -ForegroundColor Gray
+                return $null
+            }
+        }
+    }
 }
 
 process {
@@ -52,7 +120,16 @@ process {
         Write-Host "  ERROR: Failed to parse backup file: $_`n" -ForegroundColor Red
         return
     }
-    
+
+    # Validate this is actually a DevKit environment backup, not just any
+    # syntactically-valid JSON file
+    if (-not $backup.Variables -or
+        (-not $backup.Variables.PSObject.Properties['User'] -and
+         -not $backup.Variables.PSObject.Properties['Machine'])) {
+        Write-DevKitError "Not a recognized DevKit backup file: $backupPath"
+        return
+    }
+
     # Show backup info
     Write-Host "`n  Backup Information:" -ForegroundColor Yellow
     Write-Host "    Created:  $($backup.Timestamp)" -ForegroundColor Gray
@@ -96,21 +173,34 @@ process {
     }
     
     # Check admin for machine variables
-    $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-    
+    $isAdmin = Test-DevKitAdmin
+
     # Restore User variables
     Write-Host "`n  Restoring User environment variables..." -ForegroundColor Yellow
     $userRestored = 0
     $backup.Variables.User.PSObject.Properties | ForEach-Object {
         try {
-            [Environment]::SetEnvironmentVariable($_.Name, $_.Value, "User")
-            $userRestored++
+            if ($_.Name -eq "PATH") {
+                if ($Force) {
+                    [Environment]::SetEnvironmentVariable($_.Name, $_.Value, "User")
+                    $userRestored++
+                } else {
+                    $mergedPath = Resolve-DevKitPathRestoreValue -Scope "User" -BackupPathValue $_.Value
+                    if ($null -ne $mergedPath) {
+                        [Environment]::SetEnvironmentVariable("PATH", $mergedPath, "User")
+                        $userRestored++
+                    }
+                }
+            } else {
+                [Environment]::SetEnvironmentVariable($_.Name, $_.Value, "User")
+                $userRestored++
+            }
         } catch {
             Write-Host "    ERROR restoring $($_.Name): $_" -ForegroundColor Red
         }
     }
     Write-Host "  DONE: Restored $userRestored User variables." -ForegroundColor Green
-    
+
     # Restore Machine variables
     if ($machineVarsCount -gt 0) {
         if (-not $isAdmin) {
@@ -120,8 +210,21 @@ process {
             $machineRestored = 0
             $backup.Variables.Machine.PSObject.Properties | ForEach-Object {
                 try {
-                    [Environment]::SetEnvironmentVariable($_.Name, $_.Value, "Machine")
-                    $machineRestored++
+                    if ($_.Name -eq "PATH") {
+                        if ($Force) {
+                            [Environment]::SetEnvironmentVariable($_.Name, $_.Value, "Machine")
+                            $machineRestored++
+                        } else {
+                            $mergedPath = Resolve-DevKitPathRestoreValue -Scope "Machine" -BackupPathValue $_.Value
+                            if ($null -ne $mergedPath) {
+                                [Environment]::SetEnvironmentVariable("PATH", $mergedPath, "Machine")
+                                $machineRestored++
+                            }
+                        }
+                    } else {
+                        [Environment]::SetEnvironmentVariable($_.Name, $_.Value, "Machine")
+                        $machineRestored++
+                    }
                 } catch {
                     Write-Host "    ERROR restoring $($_.Name): $_" -ForegroundColor Red
                 }

@@ -47,7 +47,8 @@ Write-DevKitInfo "Package manager: $($manager.Command)"
 
 if (-not $Force) {
     Write-Host "  WARNING: This will permanently delete:" -ForegroundColor Yellow
-    Write-Host "    - .next, .turbo, node_modules/.cache" -ForegroundColor Gray
+    Write-Host "    - .next, .turbo, node_modules/.cache, node_modules/.vite" -ForegroundColor Gray
+    Write-Host "    - dist, .vite (build output)" -ForegroundColor Gray
     Write-Host "    - node_modules" -ForegroundColor Gray
     Write-Host "    - package-lock.json, yarn.lock, pnpm-lock.yaml, bun.lockb" -ForegroundColor Gray
     Write-Host ""
@@ -65,6 +66,11 @@ Invoke-DevKitInDirectory -Path $targetPath -ScriptBlock {
         Name = "Stop local node processes"
         Action = {
             $killed = Stop-DevKitNodeProcesses -Path .
+            # Always emit output (and a newline) here regardless of $killed -
+            # this step is excluded from the loop's generic Write-DevKitDone
+            # call below, so without this the next step's step-header would
+            # print on the same line when 0 processes were killed.
+            Write-DevKitDone
             if ($killed -gt 0) {
                 Write-DevKitInfo "Stopped $killed process(es)"
             }
@@ -74,7 +80,7 @@ Invoke-DevKitInDirectory -Path $targetPath -ScriptBlock {
     $steps += @{
         Name = "Clear Next.js and Turbopack caches"
         Action = {
-            Clear-DevKitNodeCaches -Path . -IncludeTurbo | Out-Null
+            Clear-DevKitNodeCaches -Path . -IncludeTurbo -IncludeBuildOutput | Out-Null
         }
     }
 
@@ -100,12 +106,12 @@ Invoke-DevKitInDirectory -Path $targetPath -ScriptBlock {
 
     $steps += @{
         Name = "Clear package manager cache"
-        Action = { Invoke-DevKitPackageCacheClean -Path . }
+        Action = { Invoke-DevKitPackageCacheClean -Path . -Manager $manager }
     }
 
     $steps += @{
         Name = "Install dependencies"
-        Action = { Invoke-DevKitPackageInstall -Path . }
+        Action = { Invoke-DevKitPackageInstall -Path . -Manager $manager }
     }
 
     $stepNum = 1
@@ -122,12 +128,19 @@ Invoke-DevKitInDirectory -Path $targetPath -ScriptBlock {
         }
         $stepNum++
     }
-}
 
-Write-Host "`n  DONE: Full clean complete!`n" -ForegroundColor Green
+    Write-Host "`n  DONE: Full clean complete!`n" -ForegroundColor Green
 
-if ($StartDev) {
-    Write-Host "  Starting dev server...`n" -ForegroundColor Green
-    $env:NEXT_TELEMETRY_DISABLED = "1"
-    & $manager.Command @("run", "dev")
+    if ($StartDev) {
+        Write-Host "  Starting dev server...`n" -ForegroundColor Green
+        try {
+            if (-not (Test-DevKitCommand $manager.Command)) {
+                throw "$($manager.Command) is not installed or not in PATH."
+            }
+            $env:NEXT_TELEMETRY_DISABLED = "1"
+            & $manager.Command @("run", "dev")
+        } catch {
+            Write-DevKitError $_
+        }
+    }
 }

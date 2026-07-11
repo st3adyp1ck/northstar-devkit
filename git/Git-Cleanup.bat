@@ -20,5 +20,6 @@ if %ERRORLEVEL% EQU 0 (
 
 %PSH% -NoProfile -ExecutionPolicy Bypass -File "%~dp0Git-Cleanup.ps1" %*
 set PS_EXIT=%ERRORLEVEL%
-if %PS_EXIT% NEQ 0 pause
+echo.
+pause
 exit /b %PS_EXIT%

@@ -99,6 +99,20 @@ function Invoke-DevKitInDirectory {
 # ==================== FILE / CACHE HELPERS ====================
 
 function Remove-DevKitNodeModules {
+    <#
+    .SYNOPSIS
+        Deletes node_modules from the given project directory.
+    .DESCRIPTION
+        Long-path-safe deletion: mirrors an empty folder over node_modules
+        with robocopy, then removes the (now-empty) directory tree.
+        Robocopy is bounded with /R:2 /W:1 so a locked file cannot hang the
+        call forever. Returns $false both when node_modules never existed
+        and when the delete attempt could not fully remove it (e.g. locked
+        files); throws if robocopy itself reports a hard failure
+        (exit code >= 8), which is distinct from either $false case.
+    .PARAMETER Path
+        The project directory containing node_modules.
+    #>
     param(
         [Parameter(Mandatory = $true)]
         [string]$Path
@@ -115,7 +129,12 @@ function Remove-DevKitNodeModules {
     $empty = Join-Path $env:TEMP "empty_devkit_$(Get-Random)"
     try {
         New-Item -ItemType Directory -Path $empty -Force | Out-Null
-        robocopy $empty $nmPath /MIR /MT:8 /NFL /NDL /NJH /NJS | Out-Null
+        robocopy $empty $nmPath /MIR /MT:8 /R:2 /W:1 /NFL /NDL /NJH /NJS | Out-Null
+        # Robocopy exit codes 0-7 are all "success" (bitmask of what happened,
+        # e.g. files copied/deleted); only >=8 indicates a real failure.
+        if ($LASTEXITCODE -ge 8) {
+            throw "robocopy failed to clear '$nmPath' (exit code $LASTEXITCODE) - files may be locked by a running process."
+        }
         Remove-Item -Path $nmPath -Recurse -Force -ErrorAction SilentlyContinue
     } finally {
         if (Test-Path $empty) {
@@ -123,33 +142,64 @@ function Remove-DevKitNodeModules {
         }
     }
 
+    if (Test-Path $nmPath) {
+        # Removal did not fully succeed (e.g. locked files) - report failure
+        # instead of pretending the directory is gone.
+        return $false
+    }
+
     return $true
 }
 
 function Clear-DevKitNodeCaches {
+    <#
+    .SYNOPSIS
+        Removes common Node.js dev/framework caches from a project directory.
+    .DESCRIPTION
+        By default only removes non-build cache folders: .next,
+        node_modules\.cache, node_modules\.vite. Build-output folders
+        (dist, and the project-root .vite folder) are NOT touched unless
+        -IncludeBuildOutput is passed, since deleting them can silently wipe
+        a production build with no confirmation from the caller.
+    .PARAMETER Path
+        The project directory to clean.
+    .PARAMETER IncludeTurbo
+        Also remove the Turborepo cache (.turbo).
+    .PARAMETER IncludeBuildOutput
+        Also remove build-output folders (dist, .vite at the project root).
+        Defaults to $false for backward compatibility.
+    #>
     param(
         [Parameter(Mandatory = $true)]
         [string]$Path,
 
-        [switch]$IncludeTurbo
+        [switch]$IncludeTurbo,
+
+        [switch]$IncludeBuildOutput
     )
 
     $resolved = Resolve-DevKitDirectory -Path $Path
     $cachePaths = @(
         (Join-Path $resolved ".next"),
-        (Join-Path $resolved ".vite"),
-        (Join-Path $resolved "dist"),
         (Join-Path (Join-Path $resolved "node_modules") ".cache"),
         (Join-Path (Join-Path $resolved "node_modules") ".vite")
     )
 
-    if ($IncludeTurbo) {
+    if ($IncludeBuildOutput) {
         $cachePaths += @(
-            (Join-Path $resolved ".turbo"),
-            (Join-Path (Join-Path $resolved ".next") "cache"),
-            (Join-Path (Join-Path $resolved "node_modules") ".cache")
-        ) | Select-Object -Unique
+            (Join-Path $resolved "dist"),
+            (Join-Path $resolved ".vite")
+        )
     }
+
+    if ($IncludeTurbo) {
+        # .next\cache lives under .next, which the base list already removes
+        # wholesale, and node_modules\.cache is already in the base list -
+        # only .turbo itself is unique to this switch.
+        $cachePaths += (Join-Path $resolved ".turbo")
+    }
+
+    $cachePaths = $cachePaths | Select-Object -Unique
 
     $found = $false
     foreach ($cachePath in $cachePaths) {
@@ -165,6 +215,19 @@ function Clear-DevKitNodeCaches {
 # ==================== PACKAGE MANAGER HELPERS ====================
 
 function Get-DevKitPackageManager {
+    <#
+    .SYNOPSIS
+        Detects which package manager a project uses.
+    .DESCRIPTION
+        Checks lock files first (bun.lockb, pnpm-lock.yaml, yarn.lock,
+        package-lock.json, in that priority order). If none are found, falls
+        back to package.json's corepack "packageManager" field (e.g.
+        "pnpm@8.15.0") so freshly-scaffolded projects that don't yet have a
+        lock file are still detected correctly. Defaults to npm if nothing
+        matches.
+    .PARAMETER Path
+        The project directory to inspect.
+    #>
     param(
         [Parameter(Mandatory = $true)]
         [string]$Path
@@ -185,17 +248,53 @@ function Get-DevKitPackageManager {
         }
     }
 
+    # No lock file found - check package.json's corepack "packageManager"
+    # field (e.g. "pnpm@8.15.0") before defaulting to npm.
+    $packageJsonPath = Join-Path $resolved "package.json"
+    if (Test-Path $packageJsonPath) {
+        try {
+            $packageJson = Get-Content $packageJsonPath -Raw | ConvertFrom-Json
+            if ($packageJson.PSObject.Properties.Name -contains "packageManager" -and $packageJson.packageManager) {
+                $managerName = ($packageJson.packageManager -split "@")[0].Trim()
+                $matched = @($managers | Where-Object { $_.Command -eq $managerName })
+                if ($matched.Count -gt 0) {
+                    return $matched[0]
+                }
+            }
+        } catch {
+            # Malformed package.json - fall through to the npm default
+        }
+    }
+
     # Default to npm
     return @{ Lock = $null; Command = "npm"; Install = @("install") }
 }
 
 function Invoke-DevKitPackageInstall {
+    <#
+    .SYNOPSIS
+        Runs the install command for a project's package manager.
+    .PARAMETER Path
+        The project directory to install in.
+    .PARAMETER Manager
+        Optional pre-resolved package manager (as returned by
+        Get-DevKitPackageManager). Pass this when the caller already
+        resolved the manager earlier (e.g. before deleting lock files), so
+        this function does not need to re-derive it from a directory whose
+        lock files may no longer be present. When omitted, the manager is
+        auto-detected from $Path as before.
+    #>
     param(
         [Parameter(Mandatory = $true)]
-        [string]$Path
+        [string]$Path,
+
+        [hashtable]$Manager
     )
 
-    $manager = Get-DevKitPackageManager -Path $Path
+    $manager = $Manager
+    if (-not $manager) {
+        $manager = Get-DevKitPackageManager -Path $Path
+    }
 
     if (-not (Test-DevKitCommand $manager.Command)) {
         throw "$($manager.Command) is not installed or not in PATH."
@@ -208,12 +307,30 @@ function Invoke-DevKitPackageInstall {
 }
 
 function Invoke-DevKitPackageCacheClean {
+    <#
+    .SYNOPSIS
+        Cleans the local cache for a project's package manager.
+    .PARAMETER Path
+        The project directory whose package manager cache to clean.
+    .PARAMETER Manager
+        Optional pre-resolved package manager (as returned by
+        Get-DevKitPackageManager). Pass this when the caller already
+        resolved the manager earlier (e.g. before deleting lock files), so
+        this function does not need to re-derive it from a directory whose
+        lock files may no longer be present. When omitted, the manager is
+        auto-detected from $Path as before.
+    #>
     param(
         [Parameter(Mandatory = $true)]
-        [string]$Path
+        [string]$Path,
+
+        [hashtable]$Manager
     )
 
-    $manager = Get-DevKitPackageManager -Path $Path
+    $manager = $Manager
+    if (-not $manager) {
+        $manager = Get-DevKitPackageManager -Path $Path
+    }
 
     if ($manager.Command -eq "npm") {
         if (-not (Test-DevKitCommand "npm")) { throw "npm is not installed or not in PATH." }
@@ -278,7 +395,7 @@ function Stop-DevKitNodeProcesses {
     $resolved = Resolve-DevKitDirectory -Path $Path
     $pattern = "$resolved\"
 
-    $procs = Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue |
+    $procs = Get-CimInstance Win32_Process -Filter "Name='node.exe' or Name='bun.exe'" -ErrorAction SilentlyContinue |
         Where-Object {
             $_.CommandLine -and
             ($_.CommandLine -like "*`"$pattern*`"*" -or

@@ -17,7 +17,7 @@ if %ERRORLEVEL% EQU 0 (
     )
 )
 
-%PSH% -NoProfile -ExecutionPolicy Bypass -Command "& { $dir='%~dp0'.TrimEnd('\'); $userPath=[Environment]::GetEnvironmentVariable('PATH','User'); $entries=$userPath -split ';' | Where-Object { $_ }; if($entries -contains $dir){ Write-Host 'DevKit is already in PATH.' -ForegroundColor Yellow } else { [Environment]::SetEnvironmentVariable('PATH', ($entries + $dir) -join ';', 'User'); Write-Host 'Done! Restart your terminal to use devkit from anywhere.' -ForegroundColor Green } }"
+%PSH% -NoProfile -ExecutionPolicy Bypass -Command "& { $dir='%~dp0'.TrimEnd('\'); $userPath=[Environment]::GetEnvironmentVariable('PATH','User'); $entries=$userPath -split ';' | Where-Object { $_ }; $normDir=$dir.Trim().TrimEnd('\'); $alreadyAdded=@($entries | Where-Object { $_.Trim().TrimEnd('\') -ieq $normDir }).Count -gt 0; if($alreadyAdded){ Write-Host 'DevKit is already in PATH.' -ForegroundColor Yellow } else { [Environment]::SetEnvironmentVariable('PATH', ($entries + $dir) -join ';', 'User'); Write-Host 'Done! Restart your terminal to use devkit from anywhere.' -ForegroundColor Green } }"
 set PS_EXIT=%ERRORLEVEL%
 if %PS_EXIT% NEQ 0 (
     echo ERROR: Failed to update PATH.

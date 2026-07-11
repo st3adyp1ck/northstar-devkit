@@ -5,7 +5,8 @@
 .DESCRIPTION
     Clear cache and start Vite dev server fresh.
     Removes .vite cache, node_modules/.cache, and optionally
-    clears node_modules before starting the server.
+    clears node_modules before starting the server. Never touches the
+    production build output (dist), even with -ClearNodeModules.
     Auto-detects package manager.
     
     Created by Northstar Software Development
@@ -52,78 +53,75 @@ Write-DevKitInfo "Path: $targetPath"
 $manager = Get-DevKitPackageManager -Path $targetPath
 Write-DevKitInfo "Package manager: $($manager.Command)"
 
-Invoke-DevKitInDirectory -Path $targetPath -ScriptBlock {
-    # Check if this is a Vite project
-    if (-not (Test-Path "package.json")) {
-        Write-DevKitError "No package.json found. Not a Node.js project?"
-        exit 1
-    }
-
-    $packageJson = Get-Content "package.json" | ConvertFrom-Json
-    $hasVite = ($packageJson.devDependencies.PSObject.Properties.Name -contains "vite") -or
-               ($packageJson.dependencies.PSObject.Properties.Name -contains "vite")
-
-    if (-not $hasVite) {
-        Write-Host "  WARNING: Vite not found in package.json" -ForegroundColor Yellow
-        $continue = Read-Host "  Continue anyway? (y/n)"
-        if ($continue -ne 'y') {
-            Write-DevKitInfo "Cancelled."
-            exit 0
+try {
+    Invoke-DevKitInDirectory -Path $targetPath -ScriptBlock {
+        # Check if this is a Vite project
+        if (-not (Test-Path "package.json")) {
+            Write-DevKitError "No package.json found. Not a Node.js project?"
+            exit 1
         }
-    }
 
-    # Clear caches
-    Write-DevKitStep "Clearing caches"
+        $packageJson = Get-Content "package.json" | ConvertFrom-Json
+        $hasVite = ($packageJson.devDependencies.PSObject.Properties.Name -contains "vite") -or
+                   ($packageJson.dependencies.PSObject.Properties.Name -contains "vite")
 
-    $cachePaths = @(
-        ".vite",
-        "node_modules/.vite",
-        "node_modules/.cache",
-        "dist"
-    )
-
-    foreach ($cachePath in $cachePaths) {
-        $fullPath = Join-Path . $cachePath
-        if (Test-Path $fullPath) {
-            try {
-                Remove-Item -Path $fullPath -Recurse -Force -ErrorAction Stop
-                Write-DevKitInfo "Deleted: $cachePath"
-            } catch {
-                Write-Host "    Could not delete: $cachePath" -ForegroundColor Yellow
+        if (-not $hasVite) {
+            Write-Host "  WARNING: Vite not found in package.json" -ForegroundColor Yellow
+            $continue = Read-Host "  Continue anyway? (y/n)"
+            if ($continue -ne 'y') {
+                Write-DevKitInfo "Cancelled."
+                exit 0
             }
         }
-    }
 
-    # Vite timestamp files live inside node_modules/.vite; already cleared above.
-    Write-DevKitDone
-
-    # Clear node_modules if requested
-    if ($ClearNodeModules) {
-        Write-DevKitStep "Clearing node_modules"
-        if (Remove-DevKitNodeModules -Path .) {
+        # Clear caches (build output such as dist/.vite is intentionally left
+        # alone here - a "dev fresh start" should never touch a production build)
+        Write-DevKitStep "Clearing caches"
+        if (Clear-DevKitNodeCaches -Path $targetPath) {
             Write-DevKitDone
         } else {
             Write-DevKitSkip
         }
+
+        # Clear node_modules if requested
+        if ($ClearNodeModules) {
+            Write-DevKitStep "Clearing node_modules"
+            if (Remove-DevKitNodeModules -Path .) {
+                Write-DevKitDone
+            } else {
+                Write-DevKitSkip
+            }
+        }
+
+        # Install dependencies
+        if (-not $SkipInstall) {
+            Write-DevKitStep "Installing dependencies"
+            Invoke-DevKitPackageInstall -Path .
+            Write-DevKitDone
+        }
+
+        # Build dev args
+        $devArgs = @("run", "dev")
+        $viteArgs = @()
+        if ($Port -gt 0) { $viteArgs += @("--port", $Port) }
+        if ($ExposeHost) { $viteArgs += "--host" }
+        if ($viteArgs.Count -gt 0) { $devArgs += @("--") + $viteArgs }
+
+        # Warn (but do not block) if the target port is already occupied -
+        # Vite will fall back to the next free port on its own.
+        $checkPort = if ($Port -gt 0) { $Port } else { 5173 }
+        $portOwner = Get-DevKitProcessByPort -Port $checkPort
+        if ($portOwner) {
+            Write-Host "  WARNING: Port $checkPort is already in use by $($portOwner.Name) (PID $($portOwner.PID)). Vite will try the next available port." -ForegroundColor Yellow
+        }
+
+        Write-Host "`n  ===================================" -ForegroundColor Cyan
+        Write-Host "  Starting Vite dev server..." -ForegroundColor Green
+        Write-Host "  ===================================`n" -ForegroundColor Cyan
+
+        & $manager.Command @devArgs
     }
-
-    # Install dependencies
-    if (-not $SkipInstall) {
-        Write-DevKitStep "Installing dependencies"
-        Invoke-DevKitPackageInstall -Path .
-        Write-DevKitDone
-    }
-
-    # Build dev args
-    $devArgs = @("run", "dev")
-    $viteArgs = @()
-    if ($Port -gt 0) { $viteArgs += @("--port", $Port) }
-    if ($ExposeHost) { $viteArgs += "--host" }
-    if ($viteArgs.Count -gt 0) { $devArgs += @("--") + $viteArgs }
-
-    Write-Host "`n  ===================================" -ForegroundColor Cyan
-    Write-Host "  Starting Vite dev server..." -ForegroundColor Green
-    Write-Host "  ===================================`n" -ForegroundColor Cyan
-
-    & $manager.Command @devArgs
+} catch {
+    Write-DevKitError $_
+    exit 1
 }

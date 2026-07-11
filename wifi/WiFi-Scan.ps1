@@ -15,6 +15,78 @@
 $CommonModule = Join-Path (Join-Path (Split-Path -Parent $PSScriptRoot) "lib") "DevKit-Common.ps1"
 if (Test-Path $CommonModule) { . $CommonModule }
 
+function ConvertFrom-DevKitWlanScan {
+    <#
+    .SYNOPSIS
+        Parses "netsh wlan show networks mode=Bssid" text output into network objects.
+    .DESCRIPTION
+        Line-classification parser for netsh WLAN scan output, extracted into its own
+        function so it can be unit tested against fixture text without real WiFi
+        hardware or netsh.exe.
+
+        The BSSID line check runs BEFORE the SSID line check on purpose: the SSID
+        pattern ("SSID\s+\d+\s+:\s+(.+)") is unanchored, so it also matches inside
+        "    BSSID 1  : aa:bb:cc:dd:ee:ff" lines (the substring "SSID" starts at
+        position 1 of "BSSID"). If SSID were tested first, every BSSID line would be
+        misclassified as the start of a brand-new network named after a MAC address,
+        and no network would ever get its BSSID/Signal/Channel data recorded.
+    .PARAMETER RawOutput
+        The raw text captured from `netsh wlan show networks mode=Bssid`.
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string]$RawOutput
+    )
+
+    $lines = $RawOutput -split "`r`n"
+    $currentNet = $null
+    $results = @()
+
+    foreach ($line in $lines) {
+        if ($line -match "BSSID\s+\d+\s+:\s+(.+)") {
+            if ($currentNet) {
+                $currentNet.CurrentBSSID = @{ MAC = $matches[1].Trim(); Signal = 0; Channel = 0 }
+            }
+        }
+        elseif ($line -match "SSID\s+\d+\s+:\s+(.+)") {
+            $currentNet = @{ SSID = $matches[1].Trim(); BSSIDs = @() }
+        }
+        elseif ($line -match "Authentication\s+:\s+(.+)") {
+            if ($currentNet) { $currentNet.Auth = $matches[1].Trim() }
+        }
+        elseif ($line -match "Signal\s+:\s+(\d+)") {
+            if ($currentNet -and $currentNet.CurrentBSSID) {
+                $currentNet.CurrentBSSID.Signal = [int]$matches[1]
+            }
+        }
+        elseif ($line -match "Channel\s+:\s+(\d+)") {
+            if ($currentNet -and $currentNet.CurrentBSSID) {
+                $currentNet.CurrentBSSID.Channel = [int]$matches[1]
+                $currentNet.BSSIDs += $currentNet.CurrentBSSID
+            }
+        }
+        elseif ($line -match "^$" -and $currentNet -and $currentNet.BSSIDs.Count -gt 0) {
+            $results += $currentNet
+            $currentNet = $null
+        }
+    }
+
+    if ($currentNet -and $currentNet.BSSIDs.Count -gt 0) {
+        $results += $currentNet
+    }
+
+    return $results
+}
+
+# Skip the interactive scan when this script is dot-sourced (e.g. by
+# tests/Unit/WiFiScan-Parser.Tests.ps1, which dot-sources this file purely to
+# unit test ConvertFrom-DevKitWlanScan) so tests never need real WiFi hardware,
+# netsh.exe, or hit the Read-Host prompt below.
+if ($MyInvocation.InvocationName -eq '.') {
+    return
+}
+
 Write-Host ""
 Write-Host "   NORTHSTAR DevKit - WiFi SCANNER" -ForegroundColor Cyan
 Write-Host "     https://www.northstarcoding.com" -ForegroundColor Gray
@@ -34,42 +106,7 @@ if ($networks -match "There is no wireless interface on the system") {
 Write-DevKitDone
 
 # Parse networks
-$lines = $networks -split "`r`n"
-$currentNet = $null
-$results = @()
-
-foreach ($line in $lines) {
-    if ($line -match "SSID\s+\d+\s+:\s+(.+)") {
-        $currentNet = @{ SSID = $matches[1].Trim(); BSSIDs = @() }
-    }
-    elseif ($line -match "Authentication\s+:\s+(.+)") {
-        if ($currentNet) { $currentNet.Auth = $matches[1].Trim() }
-    }
-    elseif ($line -match "BSSID\s+\d+\s+:\s+(.+)") {
-        if ($currentNet) { 
-            $currentNet.CurrentBSSID = @{ MAC = $matches[1].Trim(); Signal = 0; Channel = 0 }
-        }
-    }
-    elseif ($line -match "Signal\s+:\s+(\d+)") {
-        if ($currentNet -and $currentNet.CurrentBSSID) { 
-            $currentNet.CurrentBSSID.Signal = [int]$matches[1]
-        }
-    }
-    elseif ($line -match "Channel\s+:\s+(\d+)") {
-        if ($currentNet -and $currentNet.CurrentBSSID) { 
-            $currentNet.CurrentBSSID.Channel = [int]$matches[1]
-            $currentNet.BSSIDs += $currentNet.CurrentBSSID
-        }
-    }
-    elseif ($line -match "^$" -and $currentNet -and $currentNet.BSSIDs.Count -gt 0) {
-        $results += $currentNet
-        $currentNet = $null
-    }
-}
-
-if ($currentNet -and $currentNet.BSSIDs.Count -gt 0) {
-    $results += $currentNet
-}
+$results = ConvertFrom-DevKitWlanScan -RawOutput $networks
 
 if ($results.Count -eq 0) {
     Write-Host "  No WiFi networks parsed." -ForegroundColor Yellow

@@ -5,7 +5,7 @@
 .DESCRIPTION
     Finds and terminates all running node processes.
     Shows what will be killed before acting.
-    
+
     Created by Northstar Software Development
     Website: https://www.northstarcoding.com
 .PARAMETER Force
@@ -20,7 +20,12 @@ param(
 )
 
 $CommonModule = Join-Path (Join-Path (Split-Path -Parent $PSScriptRoot) "lib") "DevKit-Common.ps1"
-if (Test-Path $CommonModule) { . $CommonModule }
+if (Test-Path $CommonModule) {
+    . $CommonModule
+} else {
+    Write-Host "ERROR: Required module not found: $CommonModule" -ForegroundColor Red
+    exit 1
+}
 
 Write-DevKitHeader "Kill All Node Processes"
 
@@ -55,6 +60,25 @@ if (-not $Force) {
 $killed = 0
 $failed = 0
 foreach ($proc in $nodeProcesses) {
+    # TOCTOU guard: the confirmation prompt above can take an arbitrary amount
+    # of time, during which the OS could reuse this PID for a different
+    # process. Re-fetch immediately before killing and confirm identity.
+    $originalStart = try { $proc.StartTime } catch { $null }
+
+    $current = Get-Process -Id $proc.Id -ErrorAction SilentlyContinue
+    if (-not $current) {
+        Write-Host "  WARNING: PID $($proc.Id) is no longer running. Skipping." -ForegroundColor Yellow
+        $failed++
+        continue
+    }
+
+    $currentStart = try { $current.StartTime } catch { $null }
+    if ($current.ProcessName -ne $proc.ProcessName -or $currentStart -ne $originalStart) {
+        Write-Host "  WARNING: PID $($proc.Id) identity changed since scan (now '$($current.ProcessName)'). Skipping for safety." -ForegroundColor Yellow
+        $failed++
+        continue
+    }
+
     try {
         Stop-Process -Id $proc.Id -Force
         $killed++
@@ -68,4 +92,10 @@ if ($failed -eq 0) {
     Write-Host "  DONE: All node processes killed.`n" -ForegroundColor Green
 } else {
     Write-Host "  DONE: Killed $killed process(es), $failed failed.`n" -ForegroundColor Yellow
+}
+
+if ($failed -gt 0) {
+    exit 1
+} else {
+    exit 0
 }

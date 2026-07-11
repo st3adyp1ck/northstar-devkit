@@ -42,35 +42,52 @@ Write-DevKitInfo "Path: $targetPath"
 
 $nmPath = Join-Path $targetPath "node_modules"
 if (-not (Test-Path $nmPath)) {
-    Write-DevKitError "node_modules not found."
-    exit 1
-}
-
-# Calculate size before deletion
-$size = (Get-ChildItem $nmPath -Recurse -ErrorAction SilentlyContinue | 
-    Measure-Object -Property Length -Sum).Sum
-$sizeMB = [math]::Round($size / 1MB, 2)
-
-Write-Host "  Size: $sizeMB MB" -ForegroundColor Yellow
-
-if (-not $Force) {
-    $confirm = Read-Host "  Delete node_modules? (y/n)"
-    if ($confirm -ne 'y') {
-        Write-DevKitInfo "Cancelled."
-        exit 0
-    }
-}
-
-Write-DevKitStep "Deleting node_modules"
-try {
-    if (Remove-DevKitNodeModules -Path $targetPath) {
-        Write-DevKitDone
-    } else {
+    if ($Reinstall) {
+        # Nothing to delete (e.g. a fresh clone), but the caller explicitly
+        # asked to reinstall - skip the delete step and fall through instead
+        # of hard-exiting on them.
+        Write-DevKitInfo "node_modules not found - nothing to delete."
+        Write-DevKitStep "Deleting node_modules"
         Write-DevKitSkip
+    } else {
+        Write-DevKitError "node_modules not found."
+        exit 1
     }
-} catch {
-    Write-DevKitError $_
-    exit 1
+} else {
+    # Calculate size before deletion. Get-ChildItem is not long-path safe and
+    # silently swallows PathTooLongException via -ErrorAction, which can
+    # understate the reported size - flag the number as an estimate when
+    # that happens rather than reporting it as exact.
+    $sizeErrors = $null
+    $size = (Get-ChildItem $nmPath -Recurse -ErrorAction SilentlyContinue -ErrorVariable sizeErrors |
+        Measure-Object -Property Length -Sum).Sum
+    $sizeMB = [math]::Round($size / 1MB, 2)
+
+    if ($sizeErrors -and $sizeErrors.Count -gt 0) {
+        Write-Host "  Size: ~$sizeMB MB (estimate - some paths could not be read, e.g. long paths)" -ForegroundColor Yellow
+    } else {
+        Write-Host "  Size: $sizeMB MB" -ForegroundColor Yellow
+    }
+
+    if (-not $Force) {
+        $confirm = Read-Host "  Delete node_modules? (y/n)"
+        if ($confirm -ne 'y') {
+            Write-DevKitInfo "Cancelled."
+            exit 0
+        }
+    }
+
+    Write-DevKitStep "Deleting node_modules"
+    try {
+        if (Remove-DevKitNodeModules -Path $targetPath) {
+            Write-DevKitDone
+        } else {
+            Write-DevKitSkip
+        }
+    } catch {
+        Write-DevKitError $_
+        exit 1
+    }
 }
 
 if ($Reinstall) {

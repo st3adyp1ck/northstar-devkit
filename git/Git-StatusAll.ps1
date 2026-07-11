@@ -35,14 +35,15 @@ $CommonModule = Join-Path (Join-Path (Split-Path -Parent $PSScriptRoot) "lib") "
 if (Test-Path $CommonModule) { . $CommonModule }
 
 
-Write-Host "`nNorthstar DevKit - Git Status All`n" -ForegroundColor Cyan
-
-if (-not (Test-Path $Path)) {
-    Write-Host "  ERROR: Path not found: $Path`n" -ForegroundColor Red
+try {
+    $targetPath = Resolve-DevKitDirectory -Path $Path
+} catch {
+    Write-DevKitHeader "Git Status All"
+    Write-DevKitError $_
     exit 1
 }
-$targetPath = (Resolve-Path $Path).Path
 
+Write-DevKitHeader "Git Status All"
 Write-Host "  Scanning: $targetPath" -ForegroundColor Gray
 Write-Host "  Depth: $Depth levels" -ForegroundColor Gray
 Write-Host "  Fetch: $(if($Fetch){'Yes'}else{'No'})" -ForegroundColor Gray
@@ -62,11 +63,22 @@ try {
 # Find Git repositories
 Write-Host "  Scanning for repositories..." -ForegroundColor Yellow
 
+$excludedDirNames = @('node_modules', 'dist', '.next', '.turbo', 'bin', 'obj')
+
 $gitRepos = @()
 if (Test-Path (Join-Path $targetPath ".git")) {
     $gitRepos += Get-Item -Path $targetPath
 }
-$gitRepos += Get-ChildItem -Path $targetPath -Directory -Recurse -Depth $Depth | 
+# Note: Get-ChildItem's own -Exclude only filters the matched directory name
+# out of the *output*, it does not stop recursion from descending into it, so
+# we additionally filter out anything nested inside an excluded directory
+# (relative to the scan root) to avoid noise trees like node_modules.
+$gitRepos += Get-ChildItem -Path $targetPath -Directory -Recurse -Depth $Depth -Exclude $excludedDirNames -ErrorAction SilentlyContinue |
+    Where-Object {
+        $relative = $_.FullName.Substring($targetPath.Length).TrimStart('\', '/')
+        $segments = $relative -split '[\\/]'
+        -not ($segments | Where-Object { $excludedDirNames -contains $_ })
+    } |
     Where-Object { Test-Path (Join-Path $_.FullName ".git") }
 
 if (-not $gitRepos) {
@@ -90,9 +102,16 @@ foreach ($repo in $gitRepos) {
     $repoName = $repo.Name
     $repoPath = $repo.FullName
     $relPath = $repoPath.Substring($targetPath.Length).TrimStart('\', '/')
-    
-    Push-Location $repoPath -ErrorAction SilentlyContinue
-    
+
+    try {
+        Push-Location $repoPath -ErrorAction Stop
+    } catch {
+        Write-Host "  $relPath" -ForegroundColor Red -NoNewline
+        Write-Host " [ERROR: could not enter directory: $_]" -ForegroundColor DarkGray
+        $summary.Error++
+        continue
+    }
+
     try {
         # Fetch if requested
         if ($Fetch) {
@@ -110,17 +129,25 @@ foreach ($repo in $gitRepos) {
         $modified = git status --porcelain 2>$null | 
             Where-Object { $_ -notmatch '^\?\?' }
         
-        # Check ahead/behind
-        $aheadBehind = git rev-list --left-right --count HEAD..."@{u}" 2>$null
+        # Check ahead/behind (only meaningful when an upstream is configured;
+        # verify @{u} resolves first instead of letting a missing upstream
+        # silently masquerade as 0 ahead / 0 behind)
+        $null = git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>$null
+        $hasUpstream = ($LASTEXITCODE -eq 0)
+        $noUpstream = -not $hasUpstream
         $ahead = 0
         $behind = 0
-        if ($aheadBehind -match '(\d+)\s+(\d+)') {
-            $ahead = [int]$matches[1]
-            $behind = [int]$matches[2]
+        if ($hasUpstream) {
+            $aheadBehind = git rev-list --left-right --count 'HEAD...@{u}' 2>$null
+            if ($LASTEXITCODE -eq 0 -and $aheadBehind -match '(\d+)\s+(\d+)') {
+                $ahead = [int]$matches[1]
+                $behind = [int]$matches[2]
+            }
         }
-        
-        # Determine status
-        $isClean = -not $status -and $ahead -eq 0 -and $behind -eq 0
+
+        # Determine status - a repo with no upstream is never silently treated
+        # as clean, since it may hold unpushed commits we have no way to count.
+        $isClean = -not $status -and $ahead -eq 0 -and $behind -eq 0 -and -not $noUpstream
         
         if ($isClean -and -not $ShowClean) {
             $summary.Clean++
@@ -139,23 +166,27 @@ foreach ($repo in $gitRepos) {
             
             # Status indicators
             $indicators = @()
-            if ($modified) { 
+            if ($noUpstream) {
+                $indicators += "no-upstream"
+            }
+            if ($modified) {
                 $indicators += "M:$($modified.Count)"
-                $summary.Modified++
             }
-            if ($untracked) { 
+            if ($untracked) {
                 $indicators += "U:$($untracked.Count)"
+            }
+            if ($modified -or $untracked) {
                 $summary.Modified++
             }
-            if ($ahead -gt 0) { 
+            if ($ahead -gt 0) {
                 $indicators += "A:$ahead"
                 $summary.Ahead++
             }
-            if ($behind -gt 0) { 
+            if ($behind -gt 0) {
                 $indicators += "B:$behind"
                 $summary.Behind++
             }
-            
+
             Write-Host " $($indicators -join ' ')" -ForegroundColor Yellow
             
             # Show specific files if there are changes

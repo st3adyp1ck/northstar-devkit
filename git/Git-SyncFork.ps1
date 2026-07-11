@@ -40,15 +40,16 @@ $CommonModule = Join-Path (Join-Path (Split-Path -Parent $PSScriptRoot) "lib") "
 if (Test-Path $CommonModule) { . $CommonModule }
 
 
-Write-Host "`nNorthstar DevKit - Git Sync Fork`n" -ForegroundColor Cyan
-
-if (-not (Test-Path $Path)) {
-    Write-Host "  ERROR: Path not found: $Path`n" -ForegroundColor Red
+try {
+    $targetPath = Resolve-DevKitDirectory -Path $Path
+} catch {
+    Write-DevKitHeader "Git Sync Fork"
+    Write-DevKitError $_
     exit 1
 }
-$targetPath = (Resolve-Path $Path).Path
 
-Write-Host "  Path: $targetPath" -ForegroundColor Gray
+Write-DevKitHeader "Git Sync Fork"
+Write-DevKitInfo "Path: $targetPath"
 
 try {
     Push-Location $targetPath
@@ -88,6 +89,32 @@ try {
     Write-Host "  Branch: $Branch" -ForegroundColor Gray
     Write-Host "  Strategy: $(if($Rebase){'Rebase'}else{'Merge'})" -ForegroundColor Gray
     Write-Host ""
+
+    # Check for an in-progress merge/rebase left over from a prior failed
+    # sync before the generic dirty-tree check, so we can give targeted
+    # continue/abort guidance instead of a misleading "commit or stash" nudge.
+    $gitDir = Join-Path $targetPath ".git"
+    $mergeHeadPath = Join-Path $gitDir "MERGE_HEAD"
+    $rebaseMergePath = Join-Path $gitDir "rebase-merge"
+    $rebaseApplyPath = Join-Path $gitDir "rebase-apply"
+
+    if (Test-Path $mergeHeadPath) {
+        Write-Host "  WARNING: A merge is already in progress in this repository!" -ForegroundColor Red
+        Write-Host "  Resolve it before syncing:" -ForegroundColor Yellow
+        Write-Host "    git merge --continue   (after resolving conflicts)" -ForegroundColor Yellow
+        Write-Host "    git merge --abort      (to cancel it)" -ForegroundColor Yellow
+        Write-Host ""
+        exit 1
+    }
+
+    if ((Test-Path $rebaseMergePath) -or (Test-Path $rebaseApplyPath)) {
+        Write-Host "  WARNING: A rebase is already in progress in this repository!" -ForegroundColor Red
+        Write-Host "  Resolve it before syncing:" -ForegroundColor Yellow
+        Write-Host "    git rebase --continue  (after resolving conflicts)" -ForegroundColor Yellow
+        Write-Host "    git rebase --abort     (to cancel it)" -ForegroundColor Yellow
+        Write-Host ""
+        exit 1
+    }
 
     # Check for uncommitted changes
     $status = git status --porcelain 2>$null
@@ -181,15 +208,34 @@ try {
     # Step 4: Push to origin
     Write-Host "`n  [4/4] Pushing to $OriginRemote..." -ForegroundColor Yellow
     if ($Rebase) {
-        Write-Host "  WARNING: Force-pushing rebased branch!" -ForegroundColor Yellow
-        $pushOutput = git push "$OriginRemote" "$Branch" -f 2>&1
+        # We never fetched $OriginRemote before this point (only $UpstreamRemote),
+        # so refresh our view of it now - --force-with-lease needs a fresh
+        # remote-tracking ref to compare against before it will allow the push.
+        Write-Host "  Fetching latest $OriginRemote/$Branch before force-pushing..." -ForegroundColor Yellow
+        $originFetchOutput = git fetch $OriginRemote $Branch 2>&1
+        $originFetchExit = $LASTEXITCODE
+        $originFetchOutput | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
+        if ($originFetchExit -ne 0) {
+            Write-Host "`n  ERROR: Failed to fetch $OriginRemote/$Branch before force-pushing.`n" -ForegroundColor Red
+            exit 1
+        }
+
+        Write-Host "  WARNING: Force-pushing rebased branch (using --force-with-lease)!" -ForegroundColor Yellow
+        $pushOutput = git push "$OriginRemote" "$Branch" --force-with-lease 2>&1
     } else {
         $pushOutput = git push "$OriginRemote" "$Branch" 2>&1
     }
     $pushExit = $LASTEXITCODE
     $pushOutput | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
     if ($pushExit -ne 0) {
-        Write-Host "`n  ERROR: Failed to push.`n" -ForegroundColor Red
+        if ($Rebase) {
+            Write-Host "`n  ERROR: Force-push rejected by --force-with-lease." -ForegroundColor Red
+            Write-Host "  Someone else may have pushed to $OriginRemote/$Branch since you last synced." -ForegroundColor Yellow
+            Write-Host "  Fetch and inspect $OriginRemote/$Branch, then re-run the sync." -ForegroundColor Yellow
+            Write-Host "  Not retrying with a plain -f push.`n" -ForegroundColor Yellow
+        } else {
+            Write-Host "`n  ERROR: Failed to push.`n" -ForegroundColor Red
+        }
         exit 1
     }
     Write-Host "  DONE: Pushed to $OriginRemote." -ForegroundColor Green

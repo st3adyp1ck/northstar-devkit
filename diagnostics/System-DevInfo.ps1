@@ -9,23 +9,50 @@
     Created by Northstar Software Development
     Website: https://www.northstarcoding.com
 .PARAMETER Export
-    Export the information to a JSON file.
+    Export the information to a JSON file. Includes username, computer name,
+    and local IP/gateway - review the file before sharing it.
 .PARAMETER Clipboard
     Copy the summary to clipboard.
+.PARAMETER Redact
+    When combined with -Export, replaces Username/ComputerName/IPAddress/
+    Gateway in the exported JSON with a short non-reversible hash.
 .EXAMPLE
     .\System-DevInfo.ps1
     .\System-DevInfo.ps1 -Export
+    .\System-DevInfo.ps1 -Export -Redact
     .\System-DevInfo.ps1 -Clipboard
 #>[CmdletBinding()]
 param(
     [switch]$Export,
-    [switch]$Clipboard
+    [switch]$Clipboard,
+    [switch]$Redact
 )
 
 
 $CommonModule = Join-Path (Join-Path (Split-Path -Parent $PSScriptRoot) "lib") "DevKit-Common.ps1"
 if (Test-Path $CommonModule) { . $CommonModule }
 
+function Protect-DevKitValue {
+    <#
+    .SYNOPSIS
+        Replaces a sensitive string with a short, non-reversible hash so
+        exported data can still be compared/deduplicated without leaking
+        the underlying username/computer name/IP address.
+    #>
+    param([string]$Value)
+
+    if ([string]::IsNullOrEmpty($Value)) { return $Value }
+
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($Value)
+        $hashBytes = $sha256.ComputeHash($bytes)
+        $hash = [System.BitConverter]::ToString($hashBytes).Replace('-', '').Substring(0, 12)
+        return "REDACTED-$hash"
+    } finally {
+        $sha256.Dispose()
+    }
+}
 
 Write-Host "`nNorthstar DevKit - System Dev Info`n" -ForegroundColor Cyan
 
@@ -39,22 +66,34 @@ $info = @{
 
 # System Info
 Write-Host "  System Information:" -ForegroundColor Yellow
-$os = Get-CimInstance Win32_OperatingSystem
-$computerSystem = Get-CimInstance Win32_ComputerSystem
+try {
+    $os = Get-CimInstance Win32_OperatingSystem -ErrorAction Stop
+    $computerSystem = Get-CimInstance Win32_ComputerSystem -ErrorAction Stop
 
-$info.System = @{
-    OS = $os.Caption
-    Version = [System.Environment]::OSVersion.Version.ToString()
-    Architecture = $os.OSArchitecture
-    ComputerName = $env:COMPUTERNAME
-    Username = $env:USERNAME
+    $info.System = @{
+        OS = $os.Caption
+        Version = [System.Environment]::OSVersion.Version.ToString()
+        Architecture = $os.OSArchitecture
+        ComputerName = $env:COMPUTERNAME
+        Username = $env:USERNAME
+    }
+
+    Write-Host "    OS:        $($info.System.OS)" -ForegroundColor Gray
+    Write-Host "    Version:   $($info.System.Version)" -ForegroundColor Gray
+    Write-Host "    Arch:      $($info.System.Architecture)" -ForegroundColor Gray
+    Write-Host "    Computer:  $($info.System.ComputerName)" -ForegroundColor Gray
+    Write-Host "    User:      $($info.System.Username)" -ForegroundColor Gray
+} catch {
+    Write-Host "    [FAIL] Could not query WMI/CIM for system information" -ForegroundColor Red
+    $computerSystem = $null
+    $info.System = @{
+        OS = "Unknown"
+        Version = [System.Environment]::OSVersion.Version.ToString()
+        Architecture = "Unknown"
+        ComputerName = $env:COMPUTERNAME
+        Username = $env:USERNAME
+    }
 }
-
-Write-Host "    OS:        $($info.System.OS)" -ForegroundColor Gray
-Write-Host "    Version:   $($info.System.Version)" -ForegroundColor Gray
-Write-Host "    Arch:      $($info.System.Architecture)" -ForegroundColor Gray
-Write-Host "    Computer:  $($info.System.ComputerName)" -ForegroundColor Gray
-Write-Host "    User:      $($info.System.Username)" -ForegroundColor Gray
 
 # Tools Info
 Write-Host "`n  Development Tools:" -ForegroundColor Yellow
@@ -125,15 +164,9 @@ $commonPorts = @(3000, 3001, 5173, 8000, 8080, 9000, 4200, 5000, 5500)
 $usedPorts = @()
 
 foreach ($port in $commonPorts) {
-    $connection = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($connection) {
-        try {
-            $process = Get-Process -Id $connection.OwningProcess -ErrorAction SilentlyContinue
-            $procName = if ($process) { $process.ProcessName } else { "Unknown" }
-            $usedPorts += @{ Port = $port; Process = $procName }
-        } catch {
-            $usedPorts += @{ Port = $port; Process = "Unknown" }
-        }
+    $procInfo = Get-DevKitProcessByPort -Port $port
+    if ($procInfo) {
+        $usedPorts += @{ Port = $port; Process = $procInfo.Name }
     }
 }
 
@@ -150,27 +183,36 @@ $info.Network.UsedPorts = $usedPorts
 # Resources
 Write-Host "`n  Resources:" -ForegroundColor Yellow
 
-$disks = Get-CimInstance Win32_LogicalDisk | Where-Object { $_.DriveType -eq 3 }
-foreach ($disk in $disks) {
-    $freeGB = [math]::Round($disk.FreeSpace / 1GB, 1)
-    $totalGB = [math]::Round($disk.Size / 1GB, 1)
-    $usedPercent = [math]::Round((($disk.Size - $disk.FreeSpace) / $disk.Size) * 100, 0)
-    $color = if ($usedPercent -gt 90) { "Red" } elseif ($usedPercent -gt 70) { "Yellow" } else { "Green" }
-    
-    Write-Host "    Disk $($disk.DeviceID) " -NoNewline -ForegroundColor Gray
-    Write-Host "$freeGB GB free / $totalGB GB total ($usedPercent% used)" -ForegroundColor $color
-    
-    $info.Resources["Disk$($disk.DeviceID)"] = @{
-        FreeGB = $freeGB
-        TotalGB = $totalGB
-        UsedPercent = $usedPercent
+try {
+    $disks = Get-CimInstance Win32_LogicalDisk -ErrorAction Stop | Where-Object { $_.DriveType -eq 3 }
+    foreach ($disk in $disks) {
+        $freeGB = [math]::Round($disk.FreeSpace / 1GB, 1)
+        $totalGB = [math]::Round($disk.Size / 1GB, 1)
+        $usedPercent = [math]::Round((($disk.Size - $disk.FreeSpace) / $disk.Size) * 100, 0)
+        $color = if ($usedPercent -gt 90) { "Red" } elseif ($usedPercent -gt 70) { "Yellow" } else { "Green" }
+
+        Write-Host "    Disk $($disk.DeviceID) " -NoNewline -ForegroundColor Gray
+        Write-Host "$freeGB GB free / $totalGB GB total ($usedPercent% used)" -ForegroundColor $color
+
+        $info.Resources["Disk$($disk.DeviceID)"] = @{
+            FreeGB = $freeGB
+            TotalGB = $totalGB
+            UsedPercent = $usedPercent
+        }
     }
+} catch {
+    Write-Host "    [FAIL] Could not query WMI/CIM for disk information" -ForegroundColor Red
 }
 
 # Memory
-$totalRAM = [math]::Round($computerSystem.TotalPhysicalMemory / 1GB, 1)
-Write-Host "    RAM:        $totalRAM GB total" -ForegroundColor Gray
-$info.Resources.RAM_GB = $totalRAM
+if ($computerSystem) {
+    $totalRAM = [math]::Round($computerSystem.TotalPhysicalMemory / 1GB, 1)
+    Write-Host "    RAM:        $totalRAM GB total" -ForegroundColor Gray
+    $info.Resources.RAM_GB = $totalRAM
+} else {
+    Write-Host "    [FAIL] Could not query WMI/CIM for memory information" -ForegroundColor Red
+    $info.Resources.RAM_GB = $null
+}
 
 # Environment
 Write-Host "`n  Environment:" -ForegroundColor Yellow
@@ -187,16 +229,38 @@ try {
 Write-Host "    Execution Policy: $execPolicy" -ForegroundColor Gray
 $info.Resources.ExecutionPolicy = $execPolicy
 
-$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+$isAdmin = Test-DevKitAdmin
 Write-Host "    Admin Rights: $(if($isAdmin){'Yes'}else{'No'})" -ForegroundColor Gray
 $info.Resources.IsAdmin = $isAdmin
 
 # Export
 try {
     if ($Export) {
+        $exportInfo = $info
+        if ($Redact) {
+            # Clone so the console/clipboard output above is unaffected.
+            $exportInfo = $info.Clone()
+
+            $exportSystem = $info.System.Clone()
+            $exportSystem.ComputerName = Protect-DevKitValue $info.System.ComputerName
+            $exportSystem.Username = Protect-DevKitValue $info.System.Username
+            $exportInfo.System = $exportSystem
+
+            $exportNetwork = $info.Network.Clone()
+            if ($exportNetwork.ContainsKey('IPAddress')) {
+                $exportNetwork.IPAddress = Protect-DevKitValue $info.Network.IPAddress
+            }
+            if ($exportNetwork.ContainsKey('Gateway')) {
+                $exportNetwork.Gateway = Protect-DevKitValue $info.Network.Gateway
+            }
+            $exportInfo.Network = $exportNetwork
+        }
+
+        Write-Host "`n  Note: this export includes your username, computer name, and local IP address - review before sharing." -ForegroundColor Yellow
         $exportFile = "devinfo-$(Get-Date -Format 'yyyyMMdd_HHmmss_fff').json"
-        $info | ConvertTo-Json -Depth 5 | Out-File $exportFile
-        Write-Host "`n  Exported to: $exportFile" -ForegroundColor Green
+        $exportInfo | ConvertTo-Json -Depth 5 | Out-File $exportFile
+        $exportPath = Join-Path (Get-Location) $exportFile
+        Write-Host "  Exported to: $exportPath" -ForegroundColor Green
     }
 } catch {
     Write-Host "`n  ERROR: Failed to export: $_" -ForegroundColor Red

@@ -33,24 +33,79 @@ param(
 $CommonModule = Join-Path (Join-Path (Split-Path -Parent $PSScriptRoot) "lib") "DevKit-Common.ps1"
 if (Test-Path $CommonModule) { . $CommonModule }
 
+function Find-DevKitCursorCommand {
+    <#
+    .SYNOPSIS
+        Locate the Cursor editor CLI.
+    .DESCRIPTION
+        Cursor (unlike VS Code) does not add its CLI to PATH automatically
+        at install time, so a bare `Get-Command cursor` misses most real
+        Cursor installs. This also checks Cursor's well-known per-user
+        install locations and the Windows App Paths registry key.
+    #>
+    [CmdletBinding()]
+    param()
+
+    $onPath = Get-Command cursor -ErrorAction SilentlyContinue
+    if ($onPath) { return $onPath.Source }
+
+    $candidates = @()
+    if ($env:LOCALAPPDATA) {
+        $candidates += Join-Path $env:LOCALAPPDATA "Programs\cursor\resources\app\bin\cursor.cmd"
+        $candidates += Join-Path $env:LOCALAPPDATA "Programs\cursor\bin\cursor.cmd"
+        $candidates += Join-Path $env:LOCALAPPDATA "Programs\cursor\Cursor.exe"
+    }
+
+    foreach ($candidate in $candidates) {
+        if (Test-Path $candidate) {
+            return $candidate
+        }
+    }
+
+    $appPathsKeys = @(
+        "HKCU:\Software\Microsoft\Windows\CurrentVersion\App Paths\Cursor.exe",
+        "HKLM:\Software\Microsoft\Windows\CurrentVersion\App Paths\Cursor.exe",
+        "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\Cursor.exe"
+    )
+
+    foreach ($key in $appPathsKeys) {
+        try {
+            if (Test-Path $key) {
+                $exePath = (Get-Item -Path $key -ErrorAction Stop).GetValue('')
+                if ($exePath -and (Test-Path $exePath)) {
+                    return $exePath
+                }
+            }
+        } catch {
+            # Ignore registry access errors and keep checking other locations
+        }
+    }
+
+    return $null
+}
 
 Write-Host "`nNorthstar DevKit - Code Here`n" -ForegroundColor Cyan
 
 # Detect available editors
 $vsCodePath = Get-Command code -ErrorAction SilentlyContinue
-$cursorPath = Get-Command cursor -ErrorAction SilentlyContinue
+$cursorCmd = Find-DevKitCursorCommand
 
-if ($Cursor -and $cursorPath) {
+if ($Cursor -and $cursorCmd) {
     $editorName = "Cursor"
-    $editorCmd = "cursor"
+    $editorCmd = $cursorCmd
+} elseif ($Cursor -and -not $cursorCmd -and $vsCodePath) {
+    Write-Host "  WARNING: Cursor was requested but could not be found (checked PATH, common install locations, and the registry)." -ForegroundColor Yellow
+    Write-Host "  Falling back to VS Code.`n" -ForegroundColor Yellow
+    $editorName = "VS Code"
+    $editorCmd = "code"
 } elseif ($vsCodePath) {
     $editorName = "VS Code"
     $editorCmd = "code"
-} elseif ($cursorPath) {
+} elseif ($cursorCmd) {
     $editorName = "Cursor"
-    $editorCmd = "cursor"
+    $editorCmd = $cursorCmd
 } else {
-    Write-Host "  ERROR: Neither VS Code nor Cursor found in PATH.`n" -ForegroundColor Red
+    Write-Host "  ERROR: Neither VS Code nor Cursor found.`n" -ForegroundColor Red
     Write-Host "  Please install VS Code or Cursor and ensure it's in your PATH.`n" -ForegroundColor Yellow
     exit 1
 }
@@ -138,11 +193,12 @@ if ($Recent) {
 }
 
 # Resolve and validate path
-if (-not (Test-Path $Path)) {
-    Write-Host "  ERROR: Path not found: $Path`n" -ForegroundColor Red
+try {
+    $targetPath = Resolve-DevKitDirectory -Path $Path
+} catch {
+    Write-Host "  ERROR: $_`n" -ForegroundColor Red
     exit 1
 }
-$targetPath = (Resolve-Path $Path).Path
 
 Write-Host "  Opening: $targetPath" -ForegroundColor Gray
 Write-Host ""
@@ -151,6 +207,15 @@ Write-Host ""
 $editorArgs = @($targetPath)
 if ($Wait) { $editorArgs += "--wait" }
 
-& $editorCmd @editorArgs
+try {
+    & $editorCmd @editorArgs
+    if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) {
+        Write-Host "  ERROR: $editorName exited with code $LASTEXITCODE.`n" -ForegroundColor Red
+        exit 1
+    }
+} catch {
+    Write-Host "  ERROR: Failed to launch $editorName - $_`n" -ForegroundColor Red
+    exit 1
+}
 
 Write-Host "  Launched $editorName.`n" -ForegroundColor Green

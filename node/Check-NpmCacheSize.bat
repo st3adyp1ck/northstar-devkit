@@ -1,9 +1,6 @@
 @echo off
 setlocal
 
-echo Git SyncFork - Sync fork with upstream
-echo.
-
 where pwsh >nul 2>&1
 if %ERRORLEVEL% EQU 0 (
     set PSH=pwsh
@@ -18,8 +15,7 @@ if %ERRORLEVEL% EQU 0 (
     )
 )
 
-%PSH% -NoProfile -ExecutionPolicy Bypass -File "%~dp0Git-SyncFork.ps1" %*
+%PSH% -NoProfile -ExecutionPolicy Bypass -File "%~dp0Check-NpmCacheSize.ps1" %*
 set PS_EXIT=%ERRORLEVEL%
-echo.
-pause
+if %PS_EXIT% NEQ 0 pause
 exit /b %PS_EXIT%

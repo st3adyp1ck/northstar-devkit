@@ -29,6 +29,36 @@ param(
 $CommonModule = Join-Path (Join-Path (Split-Path -Parent $PSScriptRoot) "lib") "DevKit-Common.ps1"
 if (Test-Path $CommonModule) { . $CommonModule }
 
+function Get-DevKitDedupedPathEntries {
+    <#
+        Normalizes and deduplicates a list of PATH entries.
+        Normalization: trim whitespace, strip a single trailing backslash,
+        and compare case-insensitively. Preserves the first-seen original
+        (non-normalized) entry for each unique normalized key, in order.
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [string[]]$Entries
+    )
+
+    $seen = @{}
+    $result = @()
+    foreach ($entry in $Entries) {
+        if ($null -eq $entry) { continue }
+        $normalized = $entry.Trim()
+        if ($normalized.EndsWith('\')) {
+            $normalized = $normalized.Substring(0, $normalized.Length - 1)
+        }
+        $key = $normalized.ToLowerInvariant()
+        if (-not $seen.ContainsKey($key)) {
+            $seen[$key] = $true
+            $result += $entry
+        }
+    }
+    return $result
+}
+
 Write-DevKitHeader "Shell Reload"
 
 # Store original values for comparison
@@ -45,7 +75,8 @@ if (-not $ProfileOnly) {
     # Refresh PATH from registry
     $userPath = [Environment]::GetEnvironmentVariable("PATH", "User")
     $machinePath = [Environment]::GetEnvironmentVariable("PATH", "Machine")
-    $pathEntries = @($machinePath, $userPath) | Where-Object { $_ } | ForEach-Object { $_ -split ';' | Where-Object { $_ } } | Select-Object -Unique
+    $rawPathEntries = @($machinePath, $userPath) | Where-Object { $_ } | ForEach-Object { $_ -split ';' | Where-Object { $_ } }
+    $pathEntries = Get-DevKitDedupedPathEntries -Entries $rawPathEntries
     $env:PATH = $pathEntries -join ';'
 
     # Refresh other common environment variables
@@ -62,6 +93,10 @@ if (-not $ProfileOnly) {
         $newVal = if ($userVal) { $userVal } elseif ($machineVal) { $machineVal } else { $null }
         if ($newVal) {
             Set-Item -Path "Env:$var" -Value $newVal
+        } else {
+            # Both User and Machine values are gone - don't leave a stale
+            # copy behind in this process's environment.
+            Remove-Item -Path "Env:$var" -ErrorAction SilentlyContinue
         }
     }
 

@@ -3,44 +3,58 @@
 .SYNOPSIS
     Clear NPM Cache - Northstar DevKit
 .DESCRIPTION
-    Cleans the NPM cache and optionally verifies it.
-    
-    Created by Northstar Software Development
-    Website: https://www.northstarcoding.com
+    Cleans the local package manager cache for the project at -Path.
+    Auto-detects npm/yarn/pnpm/bun from lock files (same detection used
+    across the rest of DevKit) and dispatches to the matching cache-clean
+    command, so this works on non-npm projects too.
+.PARAMETER Path
+    The project directory whose package manager cache to clean.
+    Defaults to current directory.
 .PARAMETER Verify
-    Also run cache verification after cleaning.
+    Also run cache verification after cleaning (npm only - other package
+    managers do not expose an equivalent verify command).
 .EXAMPLE
     .\Clear-NpmCache.ps1
+    .\Clear-NpmCache.ps1 -Path "C:\my-project"
     .\Clear-NpmCache.ps1 -Verify
 #>
 [CmdletBinding()]
 param(
+    [string]$Path = ".",
     [switch]$Verify
 )
 
 $CommonModule = Join-Path (Join-Path (Split-Path -Parent $PSScriptRoot) "lib") "DevKit-Common.ps1"
 if (Test-Path $CommonModule) { . $CommonModule }
 
-Write-DevKitHeader "Clear NPM Cache"
+Write-DevKitHeader "Clear Package Manager Cache"
 
-if (-not (Test-DevKitCommand npm)) {
-    Write-DevKitError "npm is not installed or not in PATH."
+try {
+    $targetPath = Resolve-DevKitDirectory -Path $Path
+} catch {
+    Write-DevKitError $_
     exit 1
 }
 
-Write-DevKitStep "Running npm cache clean --force"
-npm cache clean --force | Out-Null
+$manager = Get-DevKitPackageManager -Path $targetPath
+Write-DevKitInfo "Package manager: $($manager.Command)"
 
-if ($LASTEXITCODE -ne 0) {
-    Write-DevKitError "npm cache clean failed."
+Write-DevKitStep "Cleaning $($manager.Command) cache"
+try {
+    Invoke-DevKitPackageCacheClean -Path $targetPath -Manager $manager
+    Write-DevKitDone
+} catch {
+    Write-DevKitError $_
     exit 1
 }
-
-Write-DevKitDone
 
 if ($Verify) {
-    Write-DevKitStep "Running npm cache verify"
-    npm cache verify
+    if ($manager.Command -eq "npm") {
+        Write-DevKitStep "Running npm cache verify"
+        npm cache verify
+    } else {
+        Write-DevKitInfo "-Verify is only supported for npm; $($manager.Command) has no equivalent command."
+    }
 }
 
 Write-Host ""

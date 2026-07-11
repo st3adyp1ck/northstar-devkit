@@ -40,12 +40,12 @@ Write-Host "  WARNING: This will remove ALL Docker resources!" -ForegroundColor 
 Write-Host ""
 
 # Check if Docker is available
-$dockerVersion = docker --version 2>$null
-if ($LASTEXITCODE -ne 0) {
+if (-not (Test-DevKitCommand "docker")) {
     Write-Host "  ERROR: Docker not found in PATH.`n" -ForegroundColor Red
     Write-Host "  Please install Docker Desktop or Docker Engine.`n" -ForegroundColor Yellow
     exit 1
 }
+$dockerVersion = docker --version 2>$null
 Write-Host "  Docker: $dockerVersion" -ForegroundColor Gray
 
 # Check Docker daemon
@@ -70,7 +70,11 @@ $networkCount = ($networks | Measure-Object).Count
 # Show what will be affected
 Write-Host "  Resources to be deleted:" -ForegroundColor Yellow
 Write-Host "    Containers: $containerCount" -ForegroundColor $(if($containerCount -gt 0){'Red'}else{'Green'})
-Write-Host "    Images:     $imageCount" -ForegroundColor $(if($imageCount -gt 0){'Red'}else{'Green'})
+if (-not $KeepImages) {
+    Write-Host "    Images:     $imageCount" -ForegroundColor $(if($imageCount -gt 0){'Red'}else{'Green'})
+} else {
+    Write-Host "    Images:     KEPT (KeepImages specified)" -ForegroundColor Green
+}
 if (-not $KeepVolumes) {
     Write-Host "    Volumes:    $volumeCount" -ForegroundColor $(if($volumeCount -gt 0){'Red'}else{'Green'})
 } else {
@@ -111,7 +115,7 @@ if ($DryRun) {
 if (-not $Force) {
     Write-Host "  Type 'NUKE' to confirm destruction of all Docker resources:" -ForegroundColor Red -NoNewline
     $confirm = Read-Host
-    if ($confirm -ne 'NUKE') {
+    if ($confirm -cne 'NUKE') {
         Write-Host "`n  Cancelled. Wise choice!`n" -ForegroundColor Gray
         exit 0
     }
@@ -119,27 +123,51 @@ if (-not $Force) {
 
 # Execute the nuke
 $step = 1
-$totalSteps = 3 + $(if(-not $KeepImages){1}else{0}) + $(if(-not $KeepVolumes){1}else{0})
+
+# Build the total step count from the same conditions the steps below
+# actually branch on, so the displayed "[n/total]" progress cannot drift
+# out of sync with the number of increments that really happen.
+$containerSteps = if ($containerCount -gt 0) { 2 } else { 1 }
+$imageSteps = 1
+$volumeSteps = 1
+$networkSteps = 1
+$totalSteps = $containerSteps + $imageSteps + $volumeSteps + $networkSteps
 
 # Step 1: Stop all containers
 if ($containerCount -gt 0) {
     Write-Host "`n  [$step/$totalSteps] Stopping all containers..." -ForegroundColor Yellow
-    docker stop $(docker ps -aq) 2>&1 | ForEach-Object { 
-        if ($_ -match 'error|Error') {
-            Write-Host "    ERROR: $_" -ForegroundColor Red
+    $stopHadErrors = $false
+    $stopOutput = @(docker stop $(docker ps -aq) 2>&1)
+    foreach ($line in $stopOutput) {
+        if ($line -match 'error|Error') {
+            Write-Host "    ERROR: $line" -ForegroundColor Red
+            $stopHadErrors = $true
         }
     }
-    Write-Host "  DONE: All containers stopped." -ForegroundColor Green
+    if ($stopHadErrors -or $LASTEXITCODE -ne 0) {
+        Write-Host "  WARNING: Some containers may not have stopped cleanly." -ForegroundColor Yellow
+    } else {
+        Write-Host "  DONE: All containers stopped." -ForegroundColor Green
+    }
     $step++
-    
+
     # Step 2: Remove all containers
     Write-Host "`n  [$step/$totalSteps] Removing all containers..." -ForegroundColor Yellow
-    docker rm -f $(docker ps -aq) 2>&1 | ForEach-Object {
-        if ($_ -match '^[a-f0-9]') {
-            Write-Host "    Removed: $($_.Substring(0,12))" -ForegroundColor DarkGray
+    $removeHadErrors = $false
+    $removeOutput = @(docker rm -f $(docker ps -aq) 2>&1)
+    foreach ($line in $removeOutput) {
+        if ($line -match '^[a-f0-9]') {
+            Write-Host "    Removed: $($line.Substring(0,12))" -ForegroundColor DarkGray
+        } elseif ($line -match 'error|Error') {
+            Write-Host "    ERROR: $line" -ForegroundColor Red
+            $removeHadErrors = $true
         }
     }
-    Write-Host "  DONE: All containers removed." -ForegroundColor Green
+    if ($removeHadErrors -or $LASTEXITCODE -ne 0) {
+        Write-Host "  WARNING: Some containers may not have been removed cleanly." -ForegroundColor Yellow
+    } else {
+        Write-Host "  DONE: All containers removed." -ForegroundColor Green
+    }
     $step++
 } else {
     Write-Host "`n  [$step/$totalSteps] No containers to remove." -ForegroundColor Green
@@ -149,12 +177,21 @@ if ($containerCount -gt 0) {
 # Step 3: Remove images (unless KeepImages)
 if (-not $KeepImages -and $imageCount -gt 0) {
     Write-Host "`n  [$step/$totalSteps] Removing all images..." -ForegroundColor Yellow
-    docker rmi -f $(docker images -q) 2>&1 | ForEach-Object {
-        if ($_ -match 'Untagged|Deleted') {
-            Write-Host "    $_" -ForegroundColor DarkGray
+    $imagesHadErrors = $false
+    $imagesOutput = @(docker rmi -f $(docker images -q) 2>&1)
+    foreach ($line in $imagesOutput) {
+        if ($line -match 'Untagged|Deleted') {
+            Write-Host "    $line" -ForegroundColor DarkGray
+        } elseif ($line -match 'error|Error') {
+            Write-Host "    ERROR: $line" -ForegroundColor Red
+            $imagesHadErrors = $true
         }
     }
-    Write-Host "  DONE: All images removed." -ForegroundColor Green
+    if ($imagesHadErrors -or $LASTEXITCODE -ne 0) {
+        Write-Host "  WARNING: Some images may not have been removed cleanly." -ForegroundColor Yellow
+    } else {
+        Write-Host "  DONE: All images removed." -ForegroundColor Green
+    }
     $step++
 } elseif ($KeepImages) {
     Write-Host "`n  [$step/$totalSteps] Skipping images (KeepImages specified)." -ForegroundColor Green
@@ -167,12 +204,21 @@ if (-not $KeepImages -and $imageCount -gt 0) {
 # Step 4: Remove volumes (unless KeepVolumes)
 if (-not $KeepVolumes -and $volumeCount -gt 0) {
     Write-Host "`n  [$step/$totalSteps] Removing all volumes..." -ForegroundColor Yellow
-    docker volume rm $(docker volume ls -q) 2>&1 | ForEach-Object {
-        if ($_ -match '^[a-f0-9]') {
-            Write-Host "    Removed: $($_.Substring(0,12))..." -ForegroundColor DarkGray
+    $volumesHadErrors = $false
+    $volumesOutput = @(docker volume rm $(docker volume ls -q) 2>&1)
+    foreach ($line in $volumesOutput) {
+        if ($line -match '^[a-f0-9]') {
+            Write-Host "    Removed: $($line.Substring(0,12))..." -ForegroundColor DarkGray
+        } elseif ($line -match 'error|Error') {
+            Write-Host "    ERROR: $line" -ForegroundColor Red
+            $volumesHadErrors = $true
         }
     }
-    Write-Host "  DONE: All volumes removed." -ForegroundColor Green
+    if ($volumesHadErrors -or $LASTEXITCODE -ne 0) {
+        Write-Host "  WARNING: Some volumes may not have been removed cleanly." -ForegroundColor Yellow
+    } else {
+        Write-Host "  DONE: All volumes removed." -ForegroundColor Green
+    }
     $step++
 } elseif ($KeepVolumes) {
     Write-Host "`n  [$step/$totalSteps] Skipping volumes (KeepVolumes specified)." -ForegroundColor Green
@@ -188,11 +234,22 @@ docker network prune -f 2>&1 | Out-Null
 docker builder prune -f 2>&1 | Out-Null
 Write-Host "  DONE: Networks and build cache pruned." -ForegroundColor Green
 
-# Final system prune to clean up everything else
-Write-Host "`n  Final cleanup with system prune..." -ForegroundColor Yellow
-$pruneArgs = @("system", "prune", "-f")
-if (-not $KeepVolumes) { $pruneArgs += "--volumes" }
-docker @pruneArgs 2>&1 | Out-Null
+# Final system prune to clean up everything else. NOTE: `docker system prune -f`
+# (without -a) still removes DANGLING images even though -a was not passed, so
+# when -KeepImages is set we must skip this step's image-cleaning side effect
+# entirely rather than running the unscoped prune.
+if ($KeepImages) {
+    Write-Host "`n  Skipping final system prune (KeepImages specified - system prune still removes dangling images)." -ForegroundColor Green
+    if (-not $KeepVolumes) {
+        Write-Host "  Pruning remaining anonymous volumes..." -ForegroundColor Yellow
+        docker volume prune -f 2>&1 | Out-Null
+    }
+} else {
+    Write-Host "`n  Final cleanup with system prune..." -ForegroundColor Yellow
+    $pruneArgs = @("system", "prune", "-f")
+    if (-not $KeepVolumes) { $pruneArgs += "--volumes" }
+    docker @pruneArgs 2>&1 | Out-Null
+}
 
 Write-Host "`n  ===================================" -ForegroundColor Cyan
 Write-Host "  DOCKER NUKE COMPLETE!" -ForegroundColor Green

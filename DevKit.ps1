@@ -63,10 +63,11 @@ function Show-MainMenu {
 function Show-PortMenu {
     Show-Header "Port Tools"
     Write-Host "  [1] Scan Common Dev Ports"
-    Write-Host "  [2] Scan Specific Port"
+    Write-Host "  [2] Scan Specific Port (Read-Only)"
     Write-Host "  [3] Kill Process by PID"
     Write-Host "  [4] Kill All Node Processes"
-    Write-Host "  [5] Kill Process by Port Number"
+    Write-Host "  [5] Kill Process by Port Number (Force, No Confirm)"
+    Write-Host "  [6] Kill Process by Port Number (With Confirmation)"
     Write-Host ""
     Write-Host "  [0] Back"
     Write-Host ""
@@ -88,7 +89,7 @@ function Start-PortTools {
                 $port = Read-Host "Enter port number"
                 if ($port -match '^\d+$') {
                     $scriptPath = Join-Path (Join-Path $ScriptDir "ports") "Kill-Port.ps1"
-                    if (Test-Path $scriptPath) { & $scriptPath -Port ([int]$port) } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
+                    if (Test-Path $scriptPath) { & $scriptPath -Port ([int]$port) -InfoOnly } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
                 } else {
                     Write-Host "  ERROR: Invalid port number." -ForegroundColor Red
                 }
@@ -117,6 +118,17 @@ function Start-PortTools {
                 if ($port -match '^\d+$') {
                     $scriptPath = Join-Path (Join-Path $ScriptDir "ports") "Kill-Port.ps1"
                     if (Test-Path $scriptPath) { & $scriptPath -Port ([int]$port) -Force } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
+                } else {
+                    Write-Host "  ERROR: Invalid port number." -ForegroundColor Red
+                }
+                Read-Host "Press Enter to continue"
+            }
+            '6' {
+                Clear-Host
+                $port = Read-Host "Enter port number"
+                if ($port -match '^\d+$') {
+                    $scriptPath = Join-Path (Join-Path $ScriptDir "ports") "Kill-Port.ps1"
+                    if (Test-Path $scriptPath) { & $scriptPath -Port ([int]$port) } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
                 } else {
                     Write-Host "  ERROR: Invalid port number." -ForegroundColor Red
                 }

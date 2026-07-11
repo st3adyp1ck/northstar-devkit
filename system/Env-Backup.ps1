@@ -16,16 +16,26 @@
     Optional name for this backup.
 .PARAMETER IncludePath
     Include PATH variable in backup (default: true).
+.PARAMETER Redact
+    Mask the value of secret-like variables (TOKEN/KEY/SECRET/PASSWORD/
+    CREDENTIAL/CONNECTIONSTRING/API_KEY) in the backup file. Enabled by
+    default; pass -Redact:$false or -IncludeSecrets to store raw values.
+.PARAMETER IncludeSecrets
+    Store raw, unredacted values even for secret-like variable names.
+    Equivalent to -Redact:$false.
 .EXAMPLE
     .\Env-Backup.ps1
     .\Env-Backup.ps1 -OutputPath "C:\Backups"
     .\Env-Backup.ps1 -Name "BeforeProjectX"
+    .\Env-Backup.ps1 -IncludeSecrets
 #>
 [CmdletBinding()]
 param(
     [string]$OutputPath = ".",
     [string]$Name = "",
     [switch]$IncludePath = $true,
+    [switch]$Redact = $true,
+    [switch]$IncludeSecrets,
     [switch]$Force
 )
 
@@ -46,20 +56,40 @@ if (-not $Force) {
     }
 }
 
-# Resolve output path
-$backupDir = Resolve-Path $OutputPath -ErrorAction SilentlyContinue
-if (-not $backupDir) {
-    New-Item -ItemType Directory -Path $OutputPath -Force | Out-Null
-    $backupDir = Resolve-Path $OutputPath
+# Resolve output path (must be an existing or creatable directory, not a file)
+try {
+    if (-not (Test-Path -LiteralPath $OutputPath)) {
+        New-Item -ItemType Directory -Path $OutputPath -Force | Out-Null
+    }
+    $backupDir = Resolve-DevKitDirectory -Path $OutputPath
+} catch {
+    Write-DevKitError "Invalid output path '$OutputPath': $_"
+    exit 1
 }
 
-# Generate backup filename
+# Generate backup filename (sanitize -Name against filesystem-invalid characters)
 $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-$backupName = if ($Name) { "$Name-$timestamp" } else { "env-backup-$timestamp" }
+$safeName = if ($Name) { $Name -replace '[\\/:*?"<>|]', '_' } else { '' }
+$backupName = if ($safeName) { "$safeName-$timestamp" } else { "env-backup-$timestamp" }
 $backupFile = Join-Path $backupDir "$backupName.json"
 
-Write-DevKitStep "Creating backup"
+$effectiveRedact = $Redact -and -not $IncludeSecrets
+$secretPattern = '(TOKEN|KEY|SECRET|PASSWORD|CREDENTIAL|CONN(ECTION)?STRING|API_?KEY)'
+
+function Get-DevKitBackupValue {
+    param(
+        [string]$VarName,
+        [string]$VarValue
+    )
+    if ($effectiveRedact -and $VarName -match $secretPattern) {
+        return "***REDACTED***"
+    }
+    return $VarValue
+}
+
 Write-DevKitInfo "Target: $backupFile"
+Write-DevKitInfo "Redaction: $(if ($effectiveRedact) { 'ON (secret-like values masked)' } else { 'OFF (raw values included)' })"
+Write-DevKitStep "Creating backup"
 
 # Collect environment variables
 $backup = @{
@@ -77,7 +107,7 @@ Write-DevKitInfo "Backing up User environment variables"
 $userVars = [Environment]::GetEnvironmentVariables("User")
 foreach ($var in $userVars.GetEnumerator()) {
     if ($var.Key -eq "PATH" -and -not $IncludePath) { continue }
-    $backup.Variables.User[$var.Key] = $var.Value
+    $backup.Variables.User[$var.Key] = Get-DevKitBackupValue -VarName $var.Key -VarValue $var.Value
 }
 
 # Backup Machine variables (if admin)
@@ -86,14 +116,20 @@ if (Test-DevKitAdmin) {
     $machineVars = [Environment]::GetEnvironmentVariables("Machine")
     foreach ($var in $machineVars.GetEnumerator()) {
         if ($var.Key -eq "PATH" -and -not $IncludePath) { continue }
-        $backup.Variables.Machine[$var.Key] = $var.Value
+        $backup.Variables.Machine[$var.Key] = Get-DevKitBackupValue -VarName $var.Key -VarValue $var.Value
     }
 } else {
     Write-Host "  Skipping Machine variables (requires Admin)" -ForegroundColor Yellow
 }
 
 # Save to JSON
-$backup | ConvertTo-Json -Depth 10 | Out-File -FilePath $backupFile -Encoding UTF8
+try {
+    $backup | ConvertTo-Json -Depth 10 | Out-File -FilePath $backupFile -Encoding UTF8 -ErrorAction Stop
+    Write-DevKitDone
+} catch {
+    Write-DevKitError "Failed to write backup file: $_"
+    exit 1
+}
 
 # Summary
 $userCount = $backup.Variables.User.Count

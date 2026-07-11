@@ -50,7 +50,16 @@ if (-not $Force) {
 }
 
 Write-DevKitStep "Deleting .next folder"
-Remove-Item -Path $nextPath -Recurse -Force
-Write-DevKitDone
+try {
+    Remove-Item -Path $nextPath -Recurse -Force -ErrorAction Stop
+} catch {
+    # Fall through to the Test-Path check below to decide success.
+}
+
+if (-not (Test-Path $nextPath)) {
+    Write-DevKitDone
+} else {
+    Write-DevKitError "Could not fully delete .next folder. Stop the dev server and try again."
+}
 
 Write-Host ""

@@ -46,3 +46,17 @@ jobs:
             exit 1
           }
           Write-Host "All $($files.Count) PowerShell files passed syntax validation." -ForegroundColor Green
+
+      - name: Install Pester
+        shell: pwsh
+        run: Install-Module Pester -Force -SkipPublisherCheck -MinimumVersion 5.0.0
+
+      - name: Run Pester unit tests
+        shell: pwsh
+        run: |
+          Import-Module Pester -MinimumVersion 5.0.0
+          $config = New-PesterConfiguration
+          $config.Run.Path = "tests/Unit"
+          $config.Run.Exit = $true
+          $config.Output.Verbosity = "Detailed"
+          Invoke-Pester -Configuration $config

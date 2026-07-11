@@ -48,6 +48,55 @@ function Write-Check {
     }
 }
 
+function Get-DevKitToolVersion {
+    <#
+    .SYNOPSIS
+        Safely invokes `<Path> <ArgumentList>` (e.g. --version) and validates
+        the result instead of assuming success just because the binary resolved.
+    .DESCRIPTION
+        Wraps the native call in try/catch (a corrupted/non-executable binary
+        throws rather than crashing the caller) and only reports Responding =
+        $true when the process exits cleanly AND its output matches Pattern.
+        This lets callers distinguish "installed and healthy" from "resolves
+        via Get-Command but is a dangling/broken shim".
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+
+        [string[]]$ArgumentList = @('--version'),
+
+        [Parameter(Mandatory = $true)]
+        [string]$Pattern
+    )
+
+    $result = [PSCustomObject]@{
+        Responding = $false
+        ExitOk     = $false
+        Output     = $null
+        Version    = $null
+    }
+
+    try {
+        $rawOutput = & $Path @ArgumentList 2>&1
+        $exitCode = $LASTEXITCODE
+        $firstLine = $rawOutput | Select-Object -First 1
+        if ($null -ne $firstLine) { $result.Output = "$firstLine" }
+
+        $result.ExitOk = ($exitCode -eq 0 -or $null -eq $exitCode)
+
+        if ($result.ExitOk -and $result.Output -and ($result.Output -match $Pattern)) {
+            $result.Responding = $true
+            $result.Version = $matches[1]
+        }
+    } catch {
+        # Native invocation threw (corrupted / non-executable binary, etc.)
+        # Leave Responding/ExitOk = $false so callers report a clean failure.
+    }
+
+    return $result
+}
+
 Write-Host "`nNorthstar DevKit - Doctor`n" -ForegroundColor Cyan
 Write-Host "  Checking development environment health..." -ForegroundColor Yellow
 Write-Host ""
@@ -59,23 +108,48 @@ $warningsFound = 0
 Write-Host "  PowerShell:" -ForegroundColor Cyan
 $psVersion = $PSVersionTable.PSVersion
 $ps7Installed = $psVersion.Major -ge 7
-Write-Check "PowerShell Version" $ps7Installed "v$($psVersion.ToString())" "Install PowerShell 7 from https://aka.ms/powershell"
+$psMessage = "v$($psVersion.ToString())"
+if (-not $ps7Installed) {
+    # This host is running Windows PowerShell 5.1, but PS7 may still be
+    # installed system-wide (e.g. the .bat launcher didn't find pwsh).
+    # Only report the "install PS7" hint if pwsh truly isn't present.
+    $pwshCmd = Get-Command pwsh -ErrorAction SilentlyContinue
+    if ($pwshCmd) {
+        $ps7Installed = $true
+        $psMessage = "v$($psVersion.ToString()) (PowerShell 7 is installed, but this session launched under Windows PowerShell)"
+    }
+}
+Write-Check "PowerShell Version" $ps7Installed $psMessage "Install PowerShell 7 from https://aka.ms/powershell"
 if (-not $ps7Installed) { $issuesFound++ }
 
 # ==================== Node.js ====================
 Write-Host "`n  Node.js:" -ForegroundColor Cyan
 $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
 if ($nodeCmd) {
-    $nodeVersion = & node --version 2>$null
-    $nodeInstalled = $true
-    if ($nodeVersion -match '^v?(\d+\.\d+\.\d+)') {
-        $versionNum = [version]$matches[1]
-        $nodeCurrent = $versionNum.Major -ge 18
-        Write-Check "Node.js Installed" $true $nodeVersion
-        Write-Check "Node.js Version (18+)" $nodeCurrent "v$versionNum" "Update Node.js from https://nodejs.org"
+    $nodeCheck = Get-DevKitToolVersion -Path $nodeCmd.Source -ArgumentList @('--version') -Pattern '^v?(\d+\.\d+\.\d+)'
+    if ($nodeCheck.Responding) {
+        $versionNum = [version]$nodeCheck.Version
+        $nodeCurrent = $versionNum.Major -ge 20
+        Write-Check "Node.js Installed" $true "v$($nodeCheck.Version)"
+        Write-Check "Node.js Version (20+)" $nodeCurrent "v$versionNum" "Update Node.js from https://nodejs.org"
         if (-not $nodeCurrent) { $warningsFound++ }
+    } elseif ($nodeCheck.Output) {
+        # Node responded but the output didn't match the expected version
+        # pattern (e.g. a pre-release/RC build). Best-effort major-version
+        # extraction instead of silently skipping the adequacy check.
+        Write-Check "Node.js Installed" $true $nodeCheck.Output
+        if ($nodeCheck.Output -match '(\d+)\.\d+') {
+            $nodeMajor = [int]$matches[1]
+            $nodeCurrent = $nodeMajor -ge 20
+            Write-Check "Node.js Version (20+)" $nodeCurrent "v$($nodeCheck.Output)" "Update Node.js from https://nodejs.org"
+            if (-not $nodeCurrent) { $warningsFound++ }
+        } else {
+            Write-Check "Node.js Version (20+)" $false "Unknown - could not parse version" "Update Node.js from https://nodejs.org"
+            $warningsFound++
+        }
     } else {
-        Write-Check "Node.js Installed" $true $nodeVersion
+        Write-Check "Node.js Installed" $false "Found but not responding" "Reinstall Node.js from https://nodejs.org"
+        $issuesFound++
     }
 } else {
     Write-Check "Node.js Installed" $false "" "Install Node.js from https://nodejs.org"
@@ -85,8 +159,13 @@ if ($nodeCmd) {
 # NPM
 $npmCmd = Get-Command npm -ErrorAction SilentlyContinue
 if ($npmCmd) {
-    $npmVersion = & npm --version 2>$null
-    Write-Check "NPM Installed" $true "v$npmVersion"
+    $npmCheck = Get-DevKitToolVersion -Path $npmCmd.Source -ArgumentList @('--version') -Pattern '^(\d+\.\d+\.\d+)'
+    if ($npmCheck.Responding) {
+        Write-Check "NPM Installed" $true "v$($npmCheck.Version)"
+    } else {
+        Write-Check "NPM Installed" $false "Found but not responding" "Reinstall Node.js (includes NPM)"
+        $issuesFound++
+    }
 } else {
     Write-Check "NPM Installed" $false "" "Reinstall Node.js (includes NPM)"
     $issuesFound++
@@ -95,29 +174,46 @@ if ($npmCmd) {
 # Yarn/PNPM/Bun (optional but nice)
 $yarnCmd = Get-Command yarn -ErrorAction SilentlyContinue
 if ($yarnCmd) {
-    $yarnVersion = & yarn --version 2>$null
-    Write-Check "Yarn Installed" $true "v$yarnVersion"
+    $yarnCheck = Get-DevKitToolVersion -Path $yarnCmd.Source -ArgumentList @('--version') -Pattern '(\d+\.\d+\.\d+)'
+    if ($yarnCheck.Responding) {
+        Write-Check "Yarn Installed" $true "v$($yarnCheck.Version)"
+    } else {
+        Write-Check "Yarn Installed" $false "Found but not responding"
+    }
 }
 
 $pnpmCmd = Get-Command pnpm -ErrorAction SilentlyContinue
 if ($pnpmCmd) {
-    $pnpmVersion = & pnpm --version 2>$null
-    Write-Check "PNPM Installed" $true "v$pnpmVersion"
+    $pnpmCheck = Get-DevKitToolVersion -Path $pnpmCmd.Source -ArgumentList @('--version') -Pattern '(\d+\.\d+\.\d+)'
+    if ($pnpmCheck.Responding) {
+        Write-Check "PNPM Installed" $true "v$($pnpmCheck.Version)"
+    } else {
+        Write-Check "PNPM Installed" $false "Found but not responding"
+    }
 }
 
 $bunCmd = Get-Command bun -ErrorAction SilentlyContinue
 if ($bunCmd) {
-    $bunVersion = & bun --version 2>$null
-    Write-Check "Bun Installed" $true "v$bunVersion"
+    $bunCheck = Get-DevKitToolVersion -Path $bunCmd.Source -ArgumentList @('--version') -Pattern '(\d+\.\d+\.\d+)'
+    if ($bunCheck.Responding) {
+        Write-Check "Bun Installed" $true "v$($bunCheck.Version)"
+    } else {
+        Write-Check "Bun Installed" $false "Found but not responding"
+    }
 }
 
 # ==================== Git ====================
 Write-Host "`n  Git:" -ForegroundColor Cyan
 $gitCmd = Get-Command git -ErrorAction SilentlyContinue
 if ($gitCmd) {
-    $gitVersion = & git --version 2>$null
-    Write-Check "Git Installed" $true ($gitVersion -replace '^git version ','')
-    
+    $gitCheck = Get-DevKitToolVersion -Path $gitCmd.Source -ArgumentList @('--version') -Pattern 'git version (\d+\.\d+(?:\.\d+)?)'
+    if ($gitCheck.Responding) {
+        Write-Check "Git Installed" $true $gitCheck.Version
+    } else {
+        Write-Check "Git Installed" $false "Found but not responding" "Reinstall Git from https://git-scm.com"
+        $issuesFound++
+    }
+
     # Check Git config
     $gitName = & git config user.name 2>$null
     $gitEmail = & git config user.email 2>$null
@@ -146,9 +242,14 @@ if ($gitCmd) {
 Write-Host "`n  Docker:" -ForegroundColor Cyan
 $dockerCmd = Get-Command docker -ErrorAction SilentlyContinue
 if ($dockerCmd) {
-    $dockerVersion = & docker --version 2>$null
-    Write-Check "Docker CLI" $true ($dockerVersion -replace '^Docker version ','' -replace ',.*$','')
-    
+    $dockerCheck = Get-DevKitToolVersion -Path $dockerCmd.Source -ArgumentList @('--version') -Pattern 'Docker version (\d+\.\d+\.\d+)'
+    if ($dockerCheck.Responding) {
+        Write-Check "Docker CLI" $true $dockerCheck.Version
+    } else {
+        Write-Check "Docker CLI" $false "Found but not responding" "Reinstall Docker Desktop from https://docker.com"
+        $warningsFound++
+    }
+
     # Check if daemon is running
     $null = & docker info 2>$null
     $dockerRunning = $LASTEXITCODE -eq 0
@@ -175,8 +276,12 @@ if ($dockerCmd) {
 Write-Host "`n  Editors:" -ForegroundColor Cyan
 $codeCmd = Get-Command code -ErrorAction SilentlyContinue
 if ($codeCmd) {
-    $codeVersion = & code --version 2>$null | Select-Object -First 1
-    Write-Check "VS Code" $true $codeVersion
+    $codeCheck = Get-DevKitToolVersion -Path $codeCmd.Source -ArgumentList @('--version') -Pattern '(\d+\.\d+\.\d+)'
+    if ($codeCheck.Responding) {
+        Write-Check "VS Code" $true $codeCheck.Version
+    } else {
+        Write-Check "VS Code" $false "Found but not responding" "Install from https://code.visualstudio.com"
+    }
 } else {
     Write-Check "VS Code" $false "" "Install from https://code.visualstudio.com"
 }
@@ -207,11 +312,18 @@ Write-Host "`n  Python:" -ForegroundColor Cyan
 $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
 if (-not $pythonCmd) { $pythonCmd = Get-Command python3 -ErrorAction SilentlyContinue }
 if ($pythonCmd) {
-    $pythonVersion = & $pythonCmd.Source --version 2>&1
-    if ($pythonVersion -match 'Python (\d+\.\d+\.\d+)') {
-        Write-Check "Python Installed" $true $matches[1]
-    } else {
+    $pythonCheck = Get-DevKitToolVersion -Path $pythonCmd.Source -ArgumentList @('--version') -Pattern 'Python (\d+\.\d+\.\d+)'
+    if ($pythonCheck.Responding) {
+        Write-Check "Python Installed" $true $pythonCheck.Version
+    } elseif ($pythonCheck.ExitOk) {
+        # Ran cleanly but the output didn't look like a Python version banner.
         Write-Check "Python Installed" $true "Unknown version"
+    } else {
+        # Non-zero exit code - most likely the Windows "App Execution Alias"
+        # stub at %LOCALAPPDATA%\Microsoft\WindowsApps\python.exe, which
+        # exists even when Python is NOT installed and just prints a
+        # Microsoft Store redirect message instead of a version string.
+        Write-Check "Python" $false "" "Optional - Install from https://python.org if needed"
     }
 } else {
     Write-Check "Python" $false "" "Optional - Install from https://python.org if needed"
@@ -221,13 +333,18 @@ if ($pythonCmd) {
 Write-Host "`n  System:" -ForegroundColor Cyan
 
 # Windows version
-$osInfo = Get-CimInstance Win32_OperatingSystem
-$windowsVersion = $osInfo.Caption
-$windowsBuild = [System.Environment]::OSVersion.Version
-Write-Check "Windows Version" ($windowsBuild.Major -ge 10) $windowsVersion
+try {
+    $osInfo = Get-CimInstance Win32_OperatingSystem -ErrorAction Stop
+    $windowsVersion = $osInfo.Caption
+    $windowsBuild = [System.Environment]::OSVersion.Version
+    Write-Check "Windows Version" ($windowsBuild.Major -ge 10) $windowsVersion
+} catch {
+    Write-Check "Windows Version" $false "Could not query WMI/CIM" "Check that the WMI/Winmgmt service is running"
+    $warningsFound++
+}
 
 # Admin check
-$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+$isAdmin = Test-DevKitAdmin
 Write-Check "Administrator Rights" $isAdmin "" "Some features require admin - Run as Administrator if needed"
 
 # Execution policy
@@ -241,17 +358,28 @@ Write-Check "Execution Policy" $execPolicyOk $execPolicy "Run: Set-ExecutionPoli
 if (-not $execPolicyOk) { $warningsFound++ }
 
 # Disk space
-$systemDrive = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='$($env:SystemDrive)'"
-$freeSpaceGB = [math]::Round($systemDrive.FreeSpace / 1GB, 1)
-$totalSpaceGB = [math]::Round($systemDrive.Size / 1GB, 1)
-$diskOk = $freeSpaceGB -gt 10
-Write-Check "Disk Space (C:)" $diskOk "$freeSpaceGB GB free / $totalSpaceGB GB total" "Free up disk space"
-if (-not $diskOk) { $warningsFound++ }
+try {
+    $systemDrive = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='$($env:SystemDrive)'" -ErrorAction Stop
+    if (-not $systemDrive) { throw "No disk information returned for $($env:SystemDrive)" }
+    $freeSpaceGB = [math]::Round($systemDrive.FreeSpace / 1GB, 1)
+    $totalSpaceGB = [math]::Round($systemDrive.Size / 1GB, 1)
+    $diskOk = $freeSpaceGB -gt 10
+    Write-Check "Disk Space (C:)" $diskOk "$freeSpaceGB GB free / $totalSpaceGB GB total" "Free up disk space"
+    if (-not $diskOk) { $warningsFound++ }
+} catch {
+    Write-Check "Disk Space (C:)" $false "Could not query WMI/CIM" "Check that the WMI/Winmgmt service is running"
+    $warningsFound++
+}
 
 # RAM
-$totalRAM = [math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB, 1)
-Write-Check "Memory (RAM)" ($totalRAM -ge 8) "$totalRAM GB total" "Consider upgrading to 16GB+ for development"
-if ($totalRAM -lt 8) { $warningsFound++ }
+try {
+    $totalRAM = [math]::Round((Get-CimInstance Win32_ComputerSystem -ErrorAction Stop).TotalPhysicalMemory / 1GB, 1)
+    Write-Check "Memory (RAM)" ($totalRAM -ge 8) "$totalRAM GB total" "Consider upgrading to 16GB+ for development"
+    if ($totalRAM -lt 8) { $warningsFound++ }
+} catch {
+    Write-Check "Memory (RAM)" $false "Could not query WMI/CIM" "Check that the WMI/Winmgmt service is running"
+    $warningsFound++
+}
 
 # WSL
 $wslCheck = Get-Command wsl -ErrorAction SilentlyContinue

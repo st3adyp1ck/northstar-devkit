@@ -35,33 +35,47 @@ try {
 
 Write-DevKitHeader "Clear Turbopack Cache"
 
-$cachePaths = @(
-    (Join-Path (Join-Path $targetPath ".next") "cache"),
+# Detection mirrors what Clear-DevKitNodeCaches -IncludeTurbo actually
+# targets (.next, node_modules\.cache, node_modules\.vite, .turbo). This is
+# used only to decide whether to prompt / report "nothing found" - the
+# actual deletion below is fully delegated to the shared helper so this
+# script can never diverge from what the other cache-clearing entry points
+# consider "a Turbopack/Next.js cache".
+$checkPaths = @(
+    (Join-Path $targetPath ".next"),
     (Join-Path (Join-Path $targetPath "node_modules") ".cache"),
+    (Join-Path (Join-Path $targetPath "node_modules") ".vite"),
     (Join-Path $targetPath ".turbo")
 )
 
-$found = $false
-foreach ($cachePath in $cachePaths) {
-    if (Test-Path $cachePath) {
-        if (-not $found) {
-            $found = $true
-            if (-not $Force) {
-                $confirm = Read-Host "  Delete Turbopack caches? (y/n)"
-                if ($confirm -ne 'y') {
-                    Write-DevKitInfo "Cancelled."
-                    exit 0
-                }
-            }
-        }
-        Write-DevKitStep "Deleting $cachePath"
-        Remove-Item -Path $cachePath -Recurse -Force
-        Write-DevKitDone
-    }
-}
+$found = [bool]($checkPaths | Where-Object { Test-Path $_ })
 
 if (-not $found) {
     Write-DevKitInfo "No Turbopack caches found."
+    Write-Host ""
+    exit 0
+}
+
+if (-not $Force) {
+    $confirm = Read-Host "  Delete Turbopack caches? (y/n)"
+    if ($confirm -ne 'y') {
+        Write-DevKitInfo "Cancelled."
+        exit 0
+    }
+}
+
+Write-DevKitStep "Deleting Turbopack caches"
+try {
+    Clear-DevKitNodeCaches -Path $targetPath -IncludeTurbo | Out-Null
+} catch {
+    # Fall through to the Test-Path verification below to decide success.
+}
+
+$remaining = $checkPaths | Where-Object { Test-Path $_ }
+if (-not $remaining) {
+    Write-DevKitDone
+} else {
+    Write-DevKitError "Could not fully clear Turbopack caches. Stop the dev server and try again."
 }
 
 Write-Host ""

@@ -97,13 +97,13 @@ Invoke-DevKitInDirectory -Path $targetPath -ScriptBlock {
     if (-not $SkipCacheClear) {
         $steps += @{
             Name = "Clear package manager cache"
-            Action = { Invoke-DevKitPackageCacheClean -Path . }
+            Action = { Invoke-DevKitPackageCacheClean -Path . -Manager $manager }
         }
     }
 
     $steps += @{
         Name = "Install dependencies"
-        Action = { Invoke-DevKitPackageInstall -Path . }
+        Action = { Invoke-DevKitPackageInstall -Path . -Manager $manager }
     }
 
     $stepNum = 1

@@ -68,6 +68,39 @@ $danglingCount = ($danglingImages | Measure-Object).Count
 $volumeCount = ($unusedVolumes | Measure-Object).Count
 $networkCount = ($unusedNetworks | Measure-Object).Count
 
+# When -AllUnused is set, compute a REAL "all unused images" count instead of
+# reusing $danglingCount - dangling only covers untagged images, so a tagged
+# image that simply isn't referenced by any container would otherwise never
+# be counted, letting the early-exit gate wrongly report "nothing to clean".
+$unusedImageCount = $danglingCount
+if ($AllUnused) {
+    $allImageIds = @(docker image ls -q 2>$null | Where-Object { $_ })
+    $imageRepoTagLines = @(docker image ls --format "{{.ID}} {{.Repository}}:{{.Tag}}" 2>$null | Where-Object { $_ })
+
+    # Map "repo:tag" -> image ID so we can resolve container image references
+    # (which are usually a tag, not an ID) down to the same ID space as
+    # `docker image ls -q` before diffing.
+    $imageIdByRef = @{}
+    foreach ($line in $imageRepoTagLines) {
+        $parts = $line -split ' ', 2
+        if ($parts.Count -eq 2) { $imageIdByRef[$parts[1]] = $parts[0] }
+    }
+
+    $usedImageRefs = @(docker ps -a --format "{{.Image}}" 2>$null | Where-Object { $_ })
+    $usedImageIds = @()
+    foreach ($ref in $usedImageRefs) {
+        if ($imageIdByRef.ContainsKey($ref)) {
+            $usedImageIds += $imageIdByRef[$ref]
+        } else {
+            # Already an ID (or digest reference) - use as-is
+            $usedImageIds += $ref
+        }
+    }
+
+    $unusedImageIds = @($allImageIds | Where-Object { $usedImageIds -notcontains $_ })
+    $unusedImageCount = $unusedImageIds.Count
+}
+
 # Calculate reclaimable space
 $df = docker system df 2>$null
 $reclaimable = "Unknown"
@@ -82,6 +115,9 @@ if ($df) {
 Write-Host "  Resources available for cleanup:" -ForegroundColor Yellow
 Write-Host "    Stopped containers: $containerCount" -ForegroundColor $(if($containerCount -gt 0){'Yellow'}else{'Green'})
 Write-Host "    Dangling images:    $danglingCount" -ForegroundColor $(if($danglingCount -gt 0){'Yellow'}else{'Green'})
+if ($AllUnused) {
+    Write-Host "    All unused images:  $unusedImageCount" -ForegroundColor $(if($unusedImageCount -gt 0){'Yellow'}else{'Green'})
+}
 if ($Volumes -or $AllUnused) {
     Write-Host "    Unused volumes:     $volumeCount" -ForegroundColor $(if($volumeCount -gt 0){'Yellow'}else{'Green'})
 }
@@ -92,8 +128,8 @@ Write-Host "    Estimated reclaimable: $reclaimable" -ForegroundColor Cyan
 Write-Host ""
 
 # Check if there's anything to clean
-if ($containerCount -eq 0 -and $danglingCount -eq 0 -and 
-    (-not $Volumes -or $volumeCount -eq 0) -and 
+if ($containerCount -eq 0 -and $unusedImageCount -eq 0 -and
+    (-not $Volumes -or $volumeCount -eq 0) -and
     (-not $AllUnused -or $networkCount -eq 0)) {
     Write-Host "  OK: Nothing to clean up!`n" -ForegroundColor Green
     exit 0
@@ -133,59 +169,101 @@ if (-not $Force) {
 # Execute cleanup
 Write-Host ""
 $step = 1
+$hadErrors = $false
 
 # Step 1: Remove stopped containers
 if ($containerCount -gt 0) {
     Write-Host "  [$step] Removing stopped containers..." -ForegroundColor Yellow
-    docker container prune -f 2>&1 | ForEach-Object {
-        if ($_ -match 'Deleted Containers') {
-            Write-Host "    $_" -ForegroundColor Green
+    $containersOutput = @(docker container prune -f 2>&1)
+    foreach ($line in $containersOutput) {
+        if ($line -match 'Deleted Containers') {
+            Write-Host "    $line" -ForegroundColor Green
+        } elseif ($line -match 'error|Error') {
+            Write-Host "    ERROR: $line" -ForegroundColor Red
+            $hadErrors = $true
         }
     }
+    if ($LASTEXITCODE -ne 0) { $hadErrors = $true }
     $step++
 }
 
-# Step 2: Remove images (dangling or all unused)
-if ($danglingCount -gt 0 -or ($AllUnused -and $df)) {
+# Step 2: Remove images (dangling, or all unused images when -AllUnused) -
+# gated on the real $unusedImageCount computed above rather than the mere
+# non-emptiness of `docker system df` text output.
+if ($unusedImageCount -gt 0) {
     Write-Host "  [$step] Removing unused images..." -ForegroundColor Yellow
     if ($AllUnused) {
-        docker image prune -a -f 2>&1 | ForEach-Object {
-            if ($_ -match 'Deleted Images|Total reclaimed') {
-                Write-Host "    $_" -ForegroundColor Green
-            }
-        }
+        $imagesOutput = @(docker image prune -a -f 2>&1)
     } else {
-        docker image prune -f 2>&1 | ForEach-Object {
-            if ($_ -match 'Deleted Images|Total reclaimed') {
-                Write-Host "    $_" -ForegroundColor Green
-            }
+        $imagesOutput = @(docker image prune -f 2>&1)
+    }
+    foreach ($line in $imagesOutput) {
+        if ($line -match 'Deleted Images|Total reclaimed') {
+            Write-Host "    $line" -ForegroundColor Green
+        } elseif ($line -match 'error|Error') {
+            Write-Host "    ERROR: $line" -ForegroundColor Red
+            $hadErrors = $true
         }
     }
+    if ($LASTEXITCODE -ne 0) { $hadErrors = $true }
     $step++
 }
 
 # Step 3: Remove volumes if requested
 if ($Volumes -and $volumeCount -gt 0) {
     Write-Host "  [$step] Removing unused volumes..." -ForegroundColor Yellow
-    docker volume prune -f 2>&1 | ForEach-Object {
-        if ($_ -match 'Deleted Volumes|Total reclaimed') {
-            Write-Host "    $_" -ForegroundColor Green
+    $volumesOutput = @(docker volume prune -f 2>&1)
+    foreach ($line in $volumesOutput) {
+        if ($line -match 'Deleted Volumes|Total reclaimed') {
+            Write-Host "    $line" -ForegroundColor Green
+        } elseif ($line -match 'error|Error') {
+            Write-Host "    ERROR: $line" -ForegroundColor Red
+            $hadErrors = $true
         }
     }
+    if ($LASTEXITCODE -ne 0) { $hadErrors = $true }
     $step++
 }
 
-# Step 4: Build cache
-Write-Host "  [$step] Cleaning build cache..." -ForegroundColor Yellow
-docker builder prune -f 2>&1 | ForEach-Object {
-    if ($_ -match 'Total reclaimed') {
-        Write-Host "    $_" -ForegroundColor Green
+# Step 4: Remove unused custom networks (AllUnused only). The docstring/
+# summary already claimed -AllUnused cleans up networks, but no step ever
+# actually called `docker network prune` - this closes that gap.
+if ($AllUnused -and $networkCount -gt 0) {
+    Write-Host "  [$step] Removing unused networks..." -ForegroundColor Yellow
+    $networksOutput = @(docker network prune -f 2>&1)
+    foreach ($line in $networksOutput) {
+        if ($line -match 'Deleted Networks|Total reclaimed') {
+            Write-Host "    $line" -ForegroundColor Green
+        } elseif ($line -match 'error|Error') {
+            Write-Host "    ERROR: $line" -ForegroundColor Red
+            $hadErrors = $true
+        }
     }
+    if ($LASTEXITCODE -ne 0) { $hadErrors = $true }
+    $step++
 }
 
-# Final summary
+# Step 5: Build cache
+Write-Host "  [$step] Cleaning build cache..." -ForegroundColor Yellow
+$builderOutput = @(docker builder prune -f 2>&1)
+foreach ($line in $builderOutput) {
+    if ($line -match 'Total reclaimed') {
+        Write-Host "    $line" -ForegroundColor Green
+    } elseif ($line -match 'error|Error') {
+        Write-Host "    ERROR: $line" -ForegroundColor Red
+        $hadErrors = $true
+    }
+}
+if ($LASTEXITCODE -ne 0) { $hadErrors = $true }
+
+# Final summary - only claim success if every preceding prune step actually
+# came back clean.
 Write-Host "`n  ===================================" -ForegroundColor Cyan
-Write-Host "  Docker cleanup complete!" -ForegroundColor Green
+if ($hadErrors) {
+    Write-Host "  Docker cleanup finished with errors - see above." -ForegroundColor Yellow
+} else {
+    Write-Host "  Docker cleanup complete!" -ForegroundColor Green
+}
 $finalDf = docker system df --format "{{.Type}}: {{.Size}}" 2>$null
 if ($finalDf) {
     Write-Host "  Current usage:" -ForegroundColor Gray
