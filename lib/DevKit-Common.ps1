@@ -9,12 +9,221 @@
     Created by Northstar Software Development
     Website: https://www.northstarcoding.com
 .VERSION
-    2.1.0
+    3.0.0
 #>
 
 # Prevent double-loading
 if ($global:DevKitCommonLoaded) { return }
 $global:DevKitCommonLoaded = $true
+
+# ==================== MODULE MENU DISPATCHER ====================
+#
+# DevKit.ps1's ten tool-category submenus (Port/Node/Next.js/Vite/Git/
+# Docker/System/Workflow/Diagnostics/WiFi Tools) previously each hand-coded
+# their own Show-XMenu + Start-XTools function pair, all following the exact
+# same recipe: print numbered options, read a choice, switch on it, build a
+# script path via Join-Path, Test-Path it, invoke it. That ~33x-duplicated
+# recipe is exactly what caused two real regressions in this repo's history
+# (see commits ecfff84, 776e166). The functions below replace all ten pairs
+# with one generic implementation driven by a small "_module.psd1" manifest
+# per tool folder. (The Main Menu and the Projects menu are deliberately
+# NOT manifest-driven: Main Menu is a single hand-written function with
+# intentional category groupings, not a duplicated pattern, and Projects
+# manages the picker system itself rather than dispatching to a leaf
+# script - neither fits this generic "run a script for a chosen project"
+# shape, so forcing them into it would add risk without removing any real
+# duplication.)
+
+function Get-DevKitModule {
+    <#
+    .SYNOPSIS
+        Loads a tool category's _module.psd1 manifest.
+    .PARAMETER FolderPath
+        Full path to the category folder (e.g. .../ports).
+    #>
+    param([Parameter(Mandatory = $true)][string]$FolderPath)
+
+    $manifestPath = Join-Path $FolderPath "_module.psd1"
+    if (-not (Test-Path $manifestPath)) {
+        throw "No _module.psd1 manifest found in '$FolderPath'"
+    }
+    # Import-PowerShellDataFile only ever parses literal data (hashtables,
+    # arrays, strings, numbers, booleans) - safe to load with no code
+    # execution risk, unlike dot-sourcing an arbitrary .ps1.
+    $module = Import-PowerShellDataFile -Path $manifestPath
+    $module.FolderPath = $FolderPath
+    return $module
+}
+
+function Read-DevKitTypedValue {
+    <#
+    .SYNOPSIS
+        Prompts for and validates one typed value from a manifest Item's
+        Prompts entry, replicating the exact validation each menu option
+        used to hand-code (e.g. Kill-Port's "ERROR: Invalid port number.").
+    .PARAMETER Spec
+        A single Prompts hashtable: @{ Name; Type ('Int'|'YesNo'|'String');
+        Prompt; Optional; Min; Max; InvalidMessage }.
+    .OUTPUTS
+        The typed value, or $null if the input was blank/invalid. For
+        Type='YesNo' this never returns $null (blank/anything-but-'y' is a
+        real, valid "no" answer, matching the original hand-coded behavior
+        of only ever adding the arg when the answer was literally 'y').
+    #>
+    param([Parameter(Mandatory = $true)][hashtable]$Spec)
+
+    switch ($Spec.Type) {
+        'Int' {
+            $promptText = $Spec.Prompt
+            $raw = Read-Host $promptText
+            if ([string]::IsNullOrWhiteSpace($raw)) { return $null }
+            if ($raw -notmatch '^\d+$') { return $null }
+            $val = [int64]$raw
+            if ($Spec.Min -and $val -lt [int64]$Spec.Min) { return $null }
+            if ($Spec.Max -and $val -gt [int64]$Spec.Max) { return $null }
+            return [int]$val
+        }
+        'YesNo' {
+            $raw = Read-Host "$($Spec.Prompt) (y/n)"
+            return ($raw -eq 'y')
+        }
+        'String' {
+            $raw = Read-Host $Spec.Prompt
+            if ([string]::IsNullOrWhiteSpace($raw)) { return $null }
+            return $raw
+        }
+        default {
+            throw "Unknown prompt type '$($Spec.Type)' in module manifest."
+        }
+    }
+}
+
+function Invoke-DevKitTool {
+    <#
+    .SYNOPSIS
+        Generic dispatcher: resolves whatever a manifest Item needs (a
+        project path, a file path, typed prompt values, static args) and
+        invokes the item's script - replacing the hand-coded
+        Join-Path/Test-Path/prompt/invoke block that used to be repeated at
+        every single menu option across all ten tool categories.
+    .PARAMETER FolderPath
+        The tool category's folder (e.g. .../ports), containing the item's script.
+    .PARAMETER Item
+        One entry from a module manifest's Items array.
+    .PARAMETER ForceReprompt
+        Passed through to Select-DevKitProject for RequiresProject items,
+        so a menu choice like "2p" can override the active project for one
+        run without disturbing it.
+    #>
+    param(
+        [Parameter(Mandatory = $true)][string]$FolderPath,
+        [Parameter(Mandatory = $true)][hashtable]$Item,
+        [switch]$ForceReprompt
+    )
+
+    $callArgs = @{}
+
+    if ($Item.RequiresProject) {
+        $targetPath = Select-DevKitProject -Prompt $Item.Label -ForceReprompt:$ForceReprompt
+        if ($null -eq $targetPath) {
+            Write-Host "  Cancelled -- no project selected." -ForegroundColor Yellow
+            return
+        }
+        $argName = if ($Item.ProjectArgName) { $Item.ProjectArgName } else { 'Path' }
+        $callArgs[$argName] = $targetPath
+    } elseif ($Item.RequiresFile) {
+        Write-Host "  [B] Browse for a file..."
+        Write-Host "  [T] Type a path manually"
+        Write-Host "  [0] Cancel"
+        $pickMode = Read-Host "Select option"
+        $filePath = $null
+        if ($pickMode -eq 'B' -or $pickMode -eq 'b') {
+            $filePath = Show-DevKitFileBrowser -Description $Item.RequiresFile.Description -Filter $Item.RequiresFile.Filter
+        } elseif ($pickMode -eq 'T' -or $pickMode -eq 't') {
+            $filePath = Read-Host $Item.RequiresFile.TypePrompt
+        }
+        if ([string]::IsNullOrWhiteSpace($filePath)) {
+            Write-Host "  Cancelled -- no file selected." -ForegroundColor Yellow
+            return
+        }
+        $callArgs[$Item.RequiresFile.ParamName] = $filePath
+    }
+
+    if ($Item.Prompts) {
+        foreach ($promptSpec in $Item.Prompts) {
+            $value = Read-DevKitTypedValue -Spec $promptSpec
+            if ($null -eq $value) {
+                if ($promptSpec.Optional) { continue }
+                $msg = if ($promptSpec.InvalidMessage) { $promptSpec.InvalidMessage } else { "Invalid value for $($promptSpec.Name)." }
+                Write-Host "  ERROR: $msg" -ForegroundColor Red
+                return
+            }
+            if ($promptSpec.Type -eq 'YesNo' -and -not $value) { continue }
+            $callArgs[$promptSpec.Name] = $value
+        }
+    }
+
+    if ($Item.StaticArgs) {
+        foreach ($key in $Item.StaticArgs.Keys) { $callArgs[$key] = $Item.StaticArgs[$key] }
+    }
+
+    $scriptPath = Join-Path $FolderPath $Item.Script
+    if (-not (Test-Path $scriptPath)) {
+        Write-DevKitError "Script not found: $scriptPath"
+        return
+    }
+
+    & $scriptPath @callArgs
+}
+
+function Show-DevKitModuleMenu {
+    param([Parameter(Mandatory = $true)]$Module)
+    Show-Header $Module.Name
+    foreach ($item in $Module.Items) {
+        Write-Host "  [$($item.Key)] $($item.Label)"
+    }
+    Write-Host ""
+    Write-Host "  [0] Back"
+    Write-Host ""
+}
+
+function Start-DevKitModuleTools {
+    <#
+    .SYNOPSIS
+        Generic submenu loop for any manifest-backed tool category.
+    .PARAMETER FolderPath
+        Full path to the category folder (e.g. .../ports).
+    #>
+    param([Parameter(Mandatory = $true)][string]$FolderPath)
+
+    $module = Get-DevKitModule -FolderPath $FolderPath
+
+    while ($true) {
+        Show-DevKitModuleMenu -Module $module
+        $choice = Read-Host "Select option"
+        $trimmed = $choice.Trim()
+
+        if ($trimmed -eq '0') { return }
+
+        $forceReprompt = $false
+        $keyToMatch = $trimmed
+        if ($trimmed -match '^(.+)p$') {
+            $keyToMatch = $matches[1]
+            $forceReprompt = $true
+        }
+
+        $item = $module.Items | Where-Object { $_.Key -eq $keyToMatch } | Select-Object -First 1
+        if (-not $item) {
+            Write-Host "  Invalid option. Press Enter to continue." -ForegroundColor Red
+            Read-Host
+            continue
+        }
+
+        Clear-Host
+        Invoke-DevKitTool -FolderPath $FolderPath -Item $item -ForceReprompt:$forceReprompt
+        Read-Host "Press Enter to continue"
+    }
+}
 
 # ==================== OUTPUT HELPERS ====================
 
