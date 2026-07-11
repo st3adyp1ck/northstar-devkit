@@ -377,6 +377,641 @@ function Get-DevKitProcessByPort {
     }
 }
 
+# ==================== FOLDER / FILE BROWSER ====================
+
+# One-time native interop for a real console-window owner (so a dialog
+# z-orders correctly above the console instead of floating globally topmost).
+# Guarded by -as [type] (Add-Type -TypeDefinition throws "type already
+# exists" on a second compile in the same process) combined with the file's
+# own $global:DevKitCommonLoaded guard above.
+if (-not ('DevKit.NativeMethods' -as [type])) {
+    Add-Type -AssemblyName System.Windows.Forms -ErrorAction SilentlyContinue
+    Add-Type -ReferencedAssemblies 'System.Windows.Forms' -TypeDefinition @'
+using System;
+using System.Windows.Forms;
+namespace DevKit {
+    public static class NativeMethods {
+        [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+        public static extern IntPtr GetConsoleWindow();
+    }
+    public class Win32Window : IWin32Window {
+        private IntPtr _handle;
+        public Win32Window(IntPtr handle) { _handle = handle; }
+        public IntPtr Handle { get { return _handle; } }
+    }
+}
+'@ -ErrorAction SilentlyContinue
+}
+
+function Show-DevKitFolderBrowser {
+    <#
+    .SYNOPSIS
+        Shows a folder-browse dialog from a console host, regardless of the
+        host's own apartment state.
+    .DESCRIPTION
+        Windows PowerShell 5.1's console host defaults to STA; pwsh's
+        console host defaults to MTA. FolderBrowserDialog is OLE-based and
+        requires STA. Rather than depend on whichever apartment state the
+        calling host happens to be in (which silently varies by which
+        PowerShell launched DevKit), this spins up a dedicated Runspace with
+        ApartmentState=STA, shows the dialog there, and marshals only the
+        resulting path string back out.
+    .PARAMETER Description
+        Text shown at the top of the dialog.
+    .PARAMETER InitialDirectory
+        Directory the dialog should start in, if it exists.
+    .OUTPUTS
+        [string] the chosen full path, or $null if the user cancelled or the
+        folder browser is unavailable on this machine.
+    #>
+    [CmdletBinding()]
+    param(
+        [string]$Description = "Select a project folder",
+        [string]$InitialDirectory
+    )
+
+    try {
+        $iss = [System.Management.Automation.Runspaces.InitialSessionState]::CreateDefault()
+        $rs = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspace($iss)
+        $rs.ApartmentState = [System.Threading.ApartmentState]::STA
+        $rs.ThreadOptions = [System.Management.Automation.Runspaces.PSThreadOptions]::ReuseThread
+        $rs.Open()
+    } catch {
+        Write-DevKitError "Could not start a folder-browser session: $_"
+        return $null
+    }
+
+    $ps = [System.Management.Automation.PowerShell]::Create()
+    $ps.Runspace = $rs
+
+    [void]$ps.AddScript({
+        param($Description, $InitialDirectory)
+
+        try {
+            Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
+        } catch {
+            return @{ Ok = $false; Error = "Folder browser unavailable on this PowerShell install (Desktop Runtime not found). Type the path manually, or reinstall PowerShell via the official MSI/winget package." }
+        }
+
+        $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+        $dialog.Description = $Description
+        $dialog.ShowNewFolderButton = $true
+        if ($InitialDirectory -and (Test-Path $InitialDirectory)) {
+            $dialog.SelectedPath = $InitialDirectory
+        }
+
+        $consoleHwnd = [DevKit.NativeMethods]::GetConsoleWindow()
+        $owner = $null
+        if ($consoleHwnd -ne [IntPtr]::Zero) {
+            $owner = New-Object DevKit.Win32Window ($consoleHwnd)
+        }
+
+        $result = if ($owner) { $dialog.ShowDialog($owner) } else { $dialog.ShowDialog() }
+
+        if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
+            return @{ Ok = $true; Path = $dialog.SelectedPath }
+        }
+        return @{ Ok = $true; Path = $null }
+    }).AddArgument($Description).AddArgument($InitialDirectory)
+
+    try {
+        $outcome = ($ps.Invoke() | Select-Object -First 1)
+    } catch {
+        Write-DevKitError "Folder browser failed: $_"
+        $ps.Dispose(); $rs.Close(); $rs.Dispose()
+        return $null
+    }
+    $ps.Dispose()
+    $rs.Close()
+    $rs.Dispose()
+
+    if (-not $outcome -or -not $outcome.Ok) {
+        if ($outcome -and $outcome.Error) { Write-DevKitError $outcome.Error }
+        return $null
+    }
+    return $outcome.Path
+}
+
+function Show-DevKitFileBrowser {
+    <#
+    .SYNOPSIS
+        Shows a file-open dialog from a console host, regardless of the
+        host's own apartment state. Same STA-runspace approach as
+        Show-DevKitFolderBrowser.
+    .PARAMETER Filter
+        Standard Windows Forms file-dialog filter string, e.g.
+        "JSON files (*.json)|*.json|All files (*.*)|*.*"
+    .OUTPUTS
+        [string] the chosen full file path, or $null if cancelled/unavailable.
+    #>
+    [CmdletBinding()]
+    param(
+        [string]$Description = "Select a file",
+        [string]$InitialDirectory,
+        [string]$Filter = "All files (*.*)|*.*"
+    )
+
+    try {
+        $iss = [System.Management.Automation.Runspaces.InitialSessionState]::CreateDefault()
+        $rs = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspace($iss)
+        $rs.ApartmentState = [System.Threading.ApartmentState]::STA
+        $rs.ThreadOptions = [System.Management.Automation.Runspaces.PSThreadOptions]::ReuseThread
+        $rs.Open()
+    } catch {
+        Write-DevKitError "Could not start a file-browser session: $_"
+        return $null
+    }
+
+    $ps = [System.Management.Automation.PowerShell]::Create()
+    $ps.Runspace = $rs
+
+    [void]$ps.AddScript({
+        param($Description, $InitialDirectory, $Filter)
+
+        try {
+            Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
+        } catch {
+            return @{ Ok = $false; Error = "File browser unavailable on this PowerShell install (Desktop Runtime not found). Type the path manually." }
+        }
+
+        $dialog = New-Object System.Windows.Forms.OpenFileDialog
+        $dialog.Title = $Description
+        $dialog.Filter = $Filter
+        $dialog.Multiselect = $false
+        if ($InitialDirectory -and (Test-Path $InitialDirectory)) {
+            $dialog.InitialDirectory = $InitialDirectory
+        }
+
+        $consoleHwnd = [DevKit.NativeMethods]::GetConsoleWindow()
+        $owner = $null
+        if ($consoleHwnd -ne [IntPtr]::Zero) {
+            $owner = New-Object DevKit.Win32Window ($consoleHwnd)
+        }
+
+        $result = if ($owner) { $dialog.ShowDialog($owner) } else { $dialog.ShowDialog() }
+
+        if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
+            return @{ Ok = $true; Path = $dialog.FileName }
+        }
+        return @{ Ok = $true; Path = $null }
+    }).AddArgument($Description).AddArgument($InitialDirectory).AddArgument($Filter)
+
+    try {
+        $outcome = ($ps.Invoke() | Select-Object -First 1)
+    } catch {
+        Write-DevKitError "File browser failed: $_"
+        $ps.Dispose(); $rs.Close(); $rs.Dispose()
+        return $null
+    }
+    $ps.Dispose()
+    $rs.Close()
+    $rs.Dispose()
+
+    if (-not $outcome -or -not $outcome.Ok) {
+        if ($outcome -and $outcome.Error) { Write-DevKitError $outcome.Error }
+        return $null
+    }
+    return $outcome.Path
+}
+
+# ==================== PROJECT REGISTRY ====================
+
+function Get-DevKitProjectsFile {
+    $dir = Join-Path $env:LOCALAPPDATA "NorthstarDevKit"
+    if (-not (Test-Path $dir)) {
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    }
+    return Join-Path $dir "projects.json"
+}
+
+function Save-DevKitProjectRegistry {
+    param([Parameter(Mandatory = $true)]$Registry)
+
+    $path = Get-DevKitProjectsFile
+    $tempPath = "$path.tmp.$PID"
+    try {
+        $Registry | ConvertTo-Json -Depth 6 | Set-Content -Path $tempPath -Encoding UTF8
+        Move-Item -Path $tempPath -Destination $path -Force
+    } catch {
+        if (Test-Path $tempPath) { Remove-Item $tempPath -Force -ErrorAction SilentlyContinue }
+        throw "Failed to save project registry: $_"
+    }
+}
+
+function Get-DevKitProjectRegistry {
+    <# .OUTPUTS PSCustomObject with .schemaVersion / .activeProjectId / .projects (array, always) #>
+    $path = Get-DevKitProjectsFile
+    $empty = [PSCustomObject]@{ schemaVersion = 1; activeProjectId = $null; projects = @() }
+
+    if (-not (Test-Path $path)) { return $empty }
+
+    try {
+        $raw = Get-Content -Path $path -Raw -ErrorAction Stop
+        if ([string]::IsNullOrWhiteSpace($raw)) { return $empty }
+        $data = $raw | ConvertFrom-Json -ErrorAction Stop
+        # ConvertFrom-Json returns a bare PSCustomObject (not a 1-item array)
+        # when "projects" has exactly one element - always wrap with @().
+        $projects = @($data.projects)
+        return [PSCustomObject]@{
+            schemaVersion   = $data.schemaVersion
+            activeProjectId = $data.activeProjectId
+            projects        = $projects
+        }
+    } catch {
+        # A corrupt/hand-edited file must never crash DevKit.ps1 - Show-Header
+        # reads the registry on every menu redraw. Quarantine and start clean.
+        $backupPath = "$path.corrupt-$([DateTime]::UtcNow.ToString('yyyyMMddHHmmss'))"
+        try { Move-Item -Path $path -Destination $backupPath -Force -ErrorAction SilentlyContinue } catch {}
+        Write-DevKitError "Project registry was corrupted and has been reset. Backup: $backupPath"
+        return $empty
+    }
+}
+
+function Get-DevKitLinkedProjects {
+    <# .OUTPUTS array of project PSCustomObjects, each with an extra computed .Missing [bool] #>
+    $registry = Get-DevKitProjectRegistry
+    $result = @()
+    foreach ($p in $registry.projects) {
+        $missing = -not (Test-Path -LiteralPath $p.path)
+        $result += ($p | Select-Object *, @{ Name = 'Missing'; Expression = { $missing } })
+    }
+    return $result
+}
+
+function Get-DevKitProjectTags {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    $tags = @()
+    if (Test-Path (Join-Path $Path "package.json")) { $tags += "node" }
+    if (Test-Path (Join-Path $Path ".git")) { $tags += "git" }
+    if ((Test-Path (Join-Path $Path "next.config.js")) -or
+        (Test-Path (Join-Path $Path "next.config.mjs")) -or
+        (Test-Path (Join-Path $Path "next.config.ts"))) { $tags += "nextjs" }
+    if ((Test-Path (Join-Path $Path "vite.config.js")) -or
+        (Test-Path (Join-Path $Path "vite.config.ts"))) { $tags += "vite" }
+    if ((Test-Path (Join-Path $Path "Dockerfile")) -or
+        (Test-Path (Join-Path $Path "docker-compose.yml"))) { $tags += "docker" }
+    return $tags
+}
+
+function Add-DevKitLinkedProject {
+    <#
+    .PARAMETER Path  Folder to link (must exist).
+    .PARAMETER Name  Display name; defaults to the leaf folder name.
+    .OUTPUTS the (new or matched-existing) project PSCustomObject.
+    #>
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [string]$Name
+    )
+
+    $resolved = Resolve-DevKitDirectory -Path $Path
+    $registry = Get-DevKitProjectRegistry
+    $projects = @($registry.projects)
+
+    $existing = $projects | Where-Object {
+        [string]::Equals($_.path.TrimEnd('\'), $resolved.TrimEnd('\'), [System.StringComparison]::OrdinalIgnoreCase)
+    } | Select-Object -First 1
+
+    if ($existing) {
+        return (Update-DevKitProjectLastUsed -Id $existing.id)
+    }
+
+    if (-not $Name) { $Name = Split-Path -Path $resolved -Leaf }
+
+    $newProject = [PSCustomObject]@{
+        id          = [guid]::NewGuid().ToString()
+        name        = $Name
+        path        = $resolved
+        tags        = @(Get-DevKitProjectTags -Path $resolved)
+        pinned      = $false
+        addedUtc    = [DateTime]::UtcNow.ToString("o")
+        lastUsedUtc = [DateTime]::UtcNow.ToString("o")
+        useCount    = 1
+    }
+
+    $registry.projects = @($projects + $newProject)
+    Save-DevKitProjectRegistry -Registry $registry
+    return $newProject
+}
+
+function Update-DevKitProjectLastUsed {
+    param([Parameter(Mandatory = $true)][string]$Id)
+    $registry = Get-DevKitProjectRegistry
+    $projects = @($registry.projects)
+    $match = $null
+    foreach ($p in $projects) {
+        if ($p.id -eq $Id) {
+            $p.lastUsedUtc = [DateTime]::UtcNow.ToString("o")
+            $p.useCount = [int]$p.useCount + 1
+            $match = $p
+        }
+    }
+    $registry.projects = $projects
+    Save-DevKitProjectRegistry -Registry $registry
+    return $match
+}
+
+function Remove-DevKitLinkedProject {
+    param([Parameter(Mandatory = $true)][string]$Id)
+    $registry = Get-DevKitProjectRegistry
+    $registry.projects = @($registry.projects | Where-Object { $_.id -ne $Id })
+    if ($registry.activeProjectId -eq $Id) { $registry.activeProjectId = $null }
+    Save-DevKitProjectRegistry -Registry $registry
+}
+
+function Rename-DevKitLinkedProject {
+    param([Parameter(Mandatory = $true)][string]$Id, [Parameter(Mandatory = $true)][string]$NewName)
+    $registry = Get-DevKitProjectRegistry
+    foreach ($p in $registry.projects) { if ($p.id -eq $Id) { $p.name = $NewName } }
+    Save-DevKitProjectRegistry -Registry $registry
+}
+
+function Set-DevKitProjectPinned {
+    param([Parameter(Mandatory = $true)][string]$Id, [Parameter(Mandatory = $true)][bool]$Pinned)
+    $registry = Get-DevKitProjectRegistry
+    foreach ($p in $registry.projects) { if ($p.id -eq $Id) { $p.pinned = $Pinned } }
+    Save-DevKitProjectRegistry -Registry $registry
+}
+
+function Repair-DevKitLinkedProject {
+    <# Relinks an existing entry (keeps id/name/tags/history) to a new path. #>
+    param([Parameter(Mandatory = $true)][string]$Id, [Parameter(Mandatory = $true)][string]$NewPath)
+    $resolved = Resolve-DevKitDirectory -Path $NewPath
+    $registry = Get-DevKitProjectRegistry
+    foreach ($p in $registry.projects) {
+        if ($p.id -eq $Id) {
+            $p.path = $resolved
+            $p.tags = @(Get-DevKitProjectTags -Path $resolved)
+            $p.lastUsedUtc = [DateTime]::UtcNow.ToString("o")
+        }
+    }
+    Save-DevKitProjectRegistry -Registry $registry
+}
+
+function Get-DevKitActiveProject {
+    <# .OUTPUTS the active project PSCustomObject (with computed .Missing), or $null #>
+    $registry = Get-DevKitProjectRegistry
+    if (-not $registry.activeProjectId) { return $null }
+    $match = $registry.projects | Where-Object { $_.id -eq $registry.activeProjectId } | Select-Object -First 1
+    if (-not $match) { return $null }
+    $missing = -not (Test-Path -LiteralPath $match.path)
+    return ($match | Select-Object *, @{ Name = 'Missing'; Expression = { $missing } })
+}
+
+function Set-DevKitActiveProject {
+    param([Parameter(Mandatory = $true)][string]$Id)
+    $registry = Get-DevKitProjectRegistry
+    $registry.activeProjectId = $Id
+    Save-DevKitProjectRegistry -Registry $registry
+    Update-DevKitProjectLastUsed -Id $Id | Out-Null
+    $global:DevKitActiveProjectCache = $null
+}
+
+function Clear-DevKitActiveProject {
+    $registry = Get-DevKitProjectRegistry
+    $registry.activeProjectId = $null
+    Save-DevKitProjectRegistry -Registry $registry
+    $global:DevKitActiveProjectCache = $null
+}
+
+function Resolve-DevKitMissingActiveProject {
+    <#
+    .SYNOPSIS
+        Interactively resolves a linked/active project whose saved path no
+        longer exists on disk (moved, renamed, or deleted).
+    .OUTPUTS
+        The repaired project PSCustomObject, or $null if the caller should
+        fall through to the normal interactive picker.
+    #>
+    param([Parameter(Mandatory = $true)]$Project)
+
+    Write-Host ""
+    Write-Host "  ! Project '$($Project.name)' points to a path that no longer exists:" -ForegroundColor DarkYellow
+    Write-Host "      $($Project.path)" -ForegroundColor DarkYellow
+    Write-Host "    It may have been moved, renamed, or deleted." -ForegroundColor DarkYellow
+    Write-Host ""
+    Write-Host "    [1] Locate it now (browse to the new location and relink)"
+    Write-Host "    [2] Unlink it and pick a different project"
+    Write-Host "    [3] Type the corrected path manually"
+    Write-Host "    [0] Cancel"
+    $c = Read-Host "Select option"
+
+    switch ($c) {
+        '1' {
+            $seed = Split-Path -Path $Project.path -Parent
+            if (-not (Test-Path $seed)) { $seed = $null }
+            $newPath = Show-DevKitFolderBrowser -Description "Locate '$($Project.name)'" -InitialDirectory $seed
+            if ($newPath) {
+                Repair-DevKitLinkedProject -Id $Project.id -NewPath $newPath
+                Set-DevKitActiveProject -Id $Project.id
+                return (Get-DevKitActiveProject)
+            }
+            return $null
+        }
+        '2' {
+            Remove-DevKitLinkedProject -Id $Project.id
+            return $null
+        }
+        '3' {
+            $typed = Read-Host "Enter corrected path"
+            if (Test-Path $typed) {
+                Repair-DevKitLinkedProject -Id $Project.id -NewPath $typed
+                Set-DevKitActiveProject -Id $Project.id
+                return (Get-DevKitActiveProject)
+            }
+            Write-Host "  ERROR: Path not found: $typed" -ForegroundColor Red
+            return $null
+        }
+        default { return $null }
+    }
+}
+
+function Invoke-DevKitManageProjects {
+    <#
+    .SYNOPSIS
+        Rename / pin / unlink / relink submenu for the linked-projects list.
+    #>
+    while ($true) {
+        Clear-Host
+        Write-Host "=============================================" -ForegroundColor Cyan
+        Write-Host "  Manage Linked Projects" -ForegroundColor Cyan
+        Write-Host "=============================================" -ForegroundColor Cyan
+        Write-Host ""
+
+        $linked = @(Get-DevKitLinkedProjects | Sort-Object -Property @{Expression = 'pinned'; Descending = $true }, @{Expression = 'lastUsedUtc'; Descending = $true })
+
+        if ($linked.Count -eq 0) {
+            Write-Host "  No linked projects yet." -ForegroundColor Gray
+            Read-Host "Press Enter to go back"
+            return
+        }
+
+        for ($i = 0; $i -lt $linked.Count; $i++) {
+            $p = $linked[$i]
+            $pin = if ($p.pinned) { "*" } else { " " }
+            if ($p.Missing) {
+                Write-Host ("    [{0}] {1} {2,-22} {3,-30} !! MISSING" -f ($i + 1), $pin, $p.name, $p.path) -ForegroundColor DarkYellow
+            } else {
+                Write-Host ("    [{0}] {1} {2,-22} {3,-30} [{4}]" -f ($i + 1), $pin, $p.name, $p.path, ($p.tags -join ', '))
+            }
+        }
+        Write-Host ""
+        Write-Host "  Select a number to manage, or [0] to go back."
+        $choice = Read-Host "Select project"
+
+        if ($choice -eq '0' -or [string]::IsNullOrWhiteSpace($choice)) { return }
+        if (-not ($choice -match '^\d+$' -and [int]$choice -ge 1 -and [int]$choice -le $linked.Count)) { continue }
+
+        $picked = $linked[[int]$choice - 1]
+        Clear-Host
+        Write-Host "  $($picked.name)  ($($picked.path))" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "    [R] Rename"
+        Write-Host "    [P] Toggle pinned (currently: $($picked.pinned))"
+        Write-Host "    [L] Relink to a new folder"
+        Write-Host "    [U] Unlink"
+        Write-Host "    [0] Back"
+        $action = Read-Host "Select action"
+
+        switch ($action) {
+            { $_ -eq 'R' -or $_ -eq 'r' } {
+                $newName = Read-Host "New name"
+                if (-not [string]::IsNullOrWhiteSpace($newName)) {
+                    Rename-DevKitLinkedProject -Id $picked.id -NewName $newName
+                }
+            }
+            { $_ -eq 'P' -or $_ -eq 'p' } {
+                Set-DevKitProjectPinned -Id $picked.id -Pinned (-not $picked.pinned)
+            }
+            { $_ -eq 'L' -or $_ -eq 'l' } {
+                $newPath = Show-DevKitFolderBrowser -Description "Relink '$($picked.name)'"
+                if ($newPath) { Repair-DevKitLinkedProject -Id $picked.id -NewPath $newPath }
+            }
+            { $_ -eq 'U' -or $_ -eq 'u' } {
+                $confirm = Read-Host "Unlink '$($picked.name)'? (y/N)"
+                if ($confirm -eq 'y') { Remove-DevKitLinkedProject -Id $picked.id }
+            }
+        }
+    }
+}
+
+function Select-DevKitProject {
+    <#
+    .SYNOPSIS
+        The shared "which project?" picker used everywhere DevKit.ps1 needs
+        a project directory, replacing bare Read-Host path prompts.
+    .DESCRIPTION
+        Fast path: if an Active Project is set and its path still resolves,
+        returns it immediately with no prompting at all. Otherwise shows an
+        interactive picker: pick a linked project by number, browse for a
+        new folder, use the current directory, or type a path manually.
+        Whatever is chosen (other than "type manually" without linking)
+        becomes the new Active Project.
+    .PARAMETER Prompt
+        Label shown at the top of the picker (e.g. the menu option's name).
+    .PARAMETER ForceReprompt
+        Bypass the silent "use Active Project" fast path even if one is set.
+    .OUTPUTS
+        [string] resolved project path, or $null if the user cancelled.
+    #>
+    [CmdletBinding()]
+    param(
+        [string]$Prompt = "Select a project",
+        [switch]$ForceReprompt
+    )
+
+    if (-not $ForceReprompt) {
+        $active = Get-DevKitActiveProject
+        if ($active -and -not $active.Missing) {
+            Write-Host "  Using active project: $($active.name)  ($($active.path))" -ForegroundColor Green
+            Update-DevKitProjectLastUsed -Id $active.id | Out-Null
+            return $active.path
+        }
+        if ($active -and $active.Missing) {
+            $resolved = Resolve-DevKitMissingActiveProject -Project $active
+            if ($resolved) { return $resolved.path }
+            # falls through to the interactive picker below
+        }
+    }
+
+    while ($true) {
+        Clear-Host
+        Write-Host "=============================================" -ForegroundColor Cyan
+        Write-Host "  Select Project -- $Prompt" -ForegroundColor Cyan
+        Write-Host "=============================================" -ForegroundColor Cyan
+        Write-Host ""
+
+        $linked = @(Get-DevKitLinkedProjects | Sort-Object -Property @{Expression = 'pinned'; Descending = $true }, @{Expression = 'lastUsedUtc'; Descending = $true })
+
+        if ($linked.Count -gt 0) {
+            Write-Host "  Linked Projects (most recently used first):" -ForegroundColor Magenta
+            for ($i = 0; $i -lt $linked.Count; $i++) {
+                $p = $linked[$i]
+                $pin = if ($p.pinned) { "*" } else { " " }
+                if ($p.Missing) {
+                    Write-Host ("    [{0}] {1} {2,-22} {3,-30} !! MISSING" -f ($i + 1), $pin, $p.name, $p.path) -ForegroundColor DarkYellow
+                } else {
+                    Write-Host ("    [{0}] {1} {2,-22} {3,-30} [{4}]" -f ($i + 1), $pin, $p.name, $p.path, ($p.tags -join ', '))
+                }
+            }
+            Write-Host ""
+        }
+
+        Write-Host "  ---------------------------------------------"
+        Write-Host "    [B] Browse for folder..."
+        Write-Host "    [C] Use current directory ($((Get-Location).Path))"
+        Write-Host "    [T] Type a path manually"
+        if ($linked.Count -gt 0) { Write-Host "    [M] Manage list (rename / pin / unlink / relink)" }
+        Write-Host "    [0] Cancel"
+        Write-Host "  ---------------------------------------------"
+        $choice = Read-Host "Select project"
+
+        if ($choice -eq '0' -or [string]::IsNullOrWhiteSpace($choice)) { return $null }
+
+        if ($choice -match '^\d+$' -and [int]$choice -ge 1 -and [int]$choice -le $linked.Count) {
+            $picked = $linked[[int]$choice - 1]
+            if ($picked.Missing) {
+                $picked = Resolve-DevKitMissingActiveProject -Project $picked
+                if (-not $picked) { continue }
+            }
+            Set-DevKitActiveProject -Id $picked.id
+            return $picked.path
+        }
+
+        if ($choice -eq 'B' -or $choice -eq 'b') {
+            $chosenPath = Show-DevKitFolderBrowser -Description "Select a project folder"
+            if (-not $chosenPath) { continue }
+            $project = Add-DevKitLinkedProject -Path $chosenPath
+            Set-DevKitActiveProject -Id $project.id
+            return $project.path
+        }
+
+        if ($choice -eq 'C' -or $choice -eq 'c') {
+            $cur = (Get-Location).Path
+            $project = Add-DevKitLinkedProject -Path $cur
+            Set-DevKitActiveProject -Id $project.id
+            return $project.path
+        }
+
+        if ($choice -eq 'T' -or $choice -eq 't') {
+            $typed = Read-Host "Enter project path"
+            if ([string]::IsNullOrWhiteSpace($typed) -or -not (Test-Path $typed)) {
+                Write-Host "  ERROR: Path not found: $typed" -ForegroundColor Red
+                Read-Host "Press Enter to continue"
+                continue
+            }
+            $project = Add-DevKitLinkedProject -Path $typed
+            Set-DevKitActiveProject -Id $project.id
+            return $project.path
+        }
+
+        if (($choice -eq 'M' -or $choice -eq 'm') -and $linked.Count -gt 0) {
+            Invoke-DevKitManageProjects
+            continue
+        }
+    }
+}
+
 function Stop-DevKitNodeProcesses {
     <#
     .SYNOPSIS

@@ -11,7 +11,7 @@
     Website: https://www.northstarcoding.com
     
 .VERSION
-    2.1.0
+    3.0.0
 .NOTES
     Requires PowerShell 5.1 or PowerShell 7+
     Run as Administrator for full network optimization features
@@ -22,16 +22,32 @@
 #>
 
 $ScriptDir = $PSScriptRoot
-$CommonPorts = @(3000, 3001, 5173, 8000, 8080, 9000, 4200, 5000, 5500)
+. (Join-Path $ScriptDir "lib\DevKit-Common.ps1")
+
+# Cache of the active project for this session, so Show-Header doesn't hit
+# disk on every menu redraw. Invalidated by Set-/Clear-DevKitActiveProject.
+$global:DevKitActiveProjectCache = $null
 
 function Show-Header {
     param([string]$Title)
     Clear-Host
     Write-Host "=============================================" -ForegroundColor Cyan
-    Write-Host "       Northstar DevKit v2.1.0            " -ForegroundColor Cyan
+    Write-Host "       Northstar DevKit v3.0.0             " -ForegroundColor Cyan
     Write-Host "    Developer Toolkit by northstarcoding.com" -ForegroundColor Cyan
     Write-Host "=============================================" -ForegroundColor Cyan
-    Write-Host "  Current: $Title" -ForegroundColor Yellow
+    Write-Host "  Menu: $Title" -ForegroundColor Yellow
+
+    if ($null -eq $global:DevKitActiveProjectCache) {
+        $global:DevKitActiveProjectCache = Get-DevKitActiveProject
+    }
+    $activeProject = $global:DevKitActiveProjectCache
+    if ($activeProject -and -not $activeProject.Missing) {
+        Write-Host "  Active Project: $($activeProject.name)  ($($activeProject.path))" -ForegroundColor Green
+    } elseif ($activeProject -and $activeProject.Missing) {
+        Write-Host "  Active Project: $($activeProject.name)  -- PATH MISSING (will prompt to relink)" -ForegroundColor DarkYellow
+    } else {
+        Write-Host "  Active Project: <none linked yet - use option [10] or any tool that needs a project>" -ForegroundColor DarkGray
+    }
     Write-Host ""
 }
 
@@ -52,8 +68,9 @@ function Show-MainMenu {
     Write-Host "    [8] Workflow       - IDE & Utils"
     Write-Host "    [9] Diagnostics    - Health Check"
     Write-Host ""
-    Write-Host "  Network:" -ForegroundColor Magenta
-    Write-Host "    [10] WiFi Tools    - Optimize and Scan"
+    Write-Host "  Projects & Network:" -ForegroundColor Magenta
+    Write-Host "    [10] Projects      - Link, Switch, Manage"
+    Write-Host "    [11] WiFi Tools    - Optimize and Scan"
     Write-Host ""
     Write-Host "    [0] Exit"
     Write-Host ""
@@ -163,20 +180,26 @@ function Start-NodeTools {
                 if (Test-Path $scriptPath) { & $scriptPath } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
                 Read-Host "Press Enter to continue"
             }
-            '2' {
+            { $_ -eq '2' -or $_ -eq '2p' } {
                 Clear-Host
-                $targetPath = Read-Host "Enter project path (or '.' for current)"
-                if ($targetPath -eq '.') { $targetPath = (Get-Location).Path }
-                $scriptPath = Join-Path (Join-Path $ScriptDir "node") "Remove-NodeModules.ps1"
-                if (Test-Path $scriptPath) { & $scriptPath -Path $targetPath } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
+                $targetPath = Select-DevKitProject -Prompt "Delete node_modules" -ForceReprompt:($choice -eq '2p')
+                if ($null -eq $targetPath) {
+                    Write-Host "  Cancelled -- no project selected." -ForegroundColor Yellow
+                } else {
+                    $scriptPath = Join-Path (Join-Path $ScriptDir "node") "Remove-NodeModules.ps1"
+                    if (Test-Path $scriptPath) { & $scriptPath -Path $targetPath } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
+                }
                 Read-Host "Press Enter to continue"
             }
-            '3' {
+            { $_ -eq '3' -or $_ -eq '3p' } {
                 Clear-Host
-                $targetPath = Read-Host "Enter project path (or '.' for current)"
-                if ($targetPath -eq '.') { $targetPath = (Get-Location).Path }
-                $scriptPath = Join-Path (Join-Path $ScriptDir "node") "Nuke-And-Reinstall.ps1"
-                if (Test-Path $scriptPath) { & $scriptPath -Path $targetPath } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
+                $targetPath = Select-DevKitProject -Prompt "Delete node_modules + Lock + Reinstall" -ForceReprompt:($choice -eq '3p')
+                if ($null -eq $targetPath) {
+                    Write-Host "  Cancelled -- no project selected." -ForegroundColor Yellow
+                } else {
+                    $scriptPath = Join-Path (Join-Path $ScriptDir "node") "Nuke-And-Reinstall.ps1"
+                    if (Test-Path $scriptPath) { & $scriptPath -Path $targetPath } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
+                }
                 Read-Host "Press Enter to continue"
             }
             '4' {
@@ -208,44 +231,56 @@ function Start-NextJsTools {
         Show-NextJsMenu
         $choice = Read-Host "Select option"
         switch ($choice) {
-            '1' {
+            { $_ -eq '1' -or $_ -eq '1p' } {
                 Clear-Host
-                $targetPath = Read-Host "Enter project path (or '.' for current)"
-                if ($targetPath -eq '.') { $targetPath = (Get-Location).Path }
-                $scriptPath = Join-Path (Join-Path $ScriptDir "nextjs") "Clear-NextCache.ps1"
-                if (Test-Path $scriptPath) { & $scriptPath -Path $targetPath } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
-                Read-Host "Press Enter to continue"
-            }
-            '2' {
-                Clear-Host
-                $targetPath = Read-Host "Enter project path (or '.' for current)"
-                if ($targetPath -eq '.') { $targetPath = (Get-Location).Path }
-                $scriptPath = Join-Path (Join-Path $ScriptDir "nextjs") "Clear-TurboCache.ps1"
-                if (Test-Path $scriptPath) { & $scriptPath -Path $targetPath } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
-                Read-Host "Press Enter to continue"
-            }
-            '3' {
-                Clear-Host
-                $targetPath = Read-Host "Enter project path (or '.' for current)"
-                if ($targetPath -eq '.') { $targetPath = (Get-Location).Path }
-                $scriptPath = Join-Path (Join-Path $ScriptDir "nextjs") "Next-FullClean.ps1"
-                if (Test-Path $scriptPath) { & $scriptPath -Path $targetPath } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
-                Read-Host "Press Enter to continue"
-            }
-            '4' {
-                Clear-Host
-                $targetPath = Read-Host "Enter project path (or '.' for current)"
-                if ($targetPath -eq '.') { $targetPath = (Get-Location).Path }
-                $scriptPath = Join-Path (Join-Path $ScriptDir "nextjs") "Next-DevFresh.ps1"
-                if (Test-Path $scriptPath) {
-                    $turbo = Read-Host "Clear Turbopack cache too? (y/n)"
-                    $port = Read-Host "Port (press Enter for default)"
-                    $args = @{ Path = $targetPath }
-                    if ($turbo -eq 'y') { $args['Turbo'] = $true }
-                    if ($port -match '^\d+$') { $args['Port'] = [int]$port }
-                    & $scriptPath @args
+                $targetPath = Select-DevKitProject -Prompt "Clear .next Build Cache" -ForceReprompt:($choice -eq '1p')
+                if ($null -eq $targetPath) {
+                    Write-Host "  Cancelled -- no project selected." -ForegroundColor Yellow
                 } else {
-                    Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red
+                    $scriptPath = Join-Path (Join-Path $ScriptDir "nextjs") "Clear-NextCache.ps1"
+                    if (Test-Path $scriptPath) { & $scriptPath -Path $targetPath } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
+                }
+                Read-Host "Press Enter to continue"
+            }
+            { $_ -eq '2' -or $_ -eq '2p' } {
+                Clear-Host
+                $targetPath = Select-DevKitProject -Prompt "Clear Turbopack Cache" -ForceReprompt:($choice -eq '2p')
+                if ($null -eq $targetPath) {
+                    Write-Host "  Cancelled -- no project selected." -ForegroundColor Yellow
+                } else {
+                    $scriptPath = Join-Path (Join-Path $ScriptDir "nextjs") "Clear-TurboCache.ps1"
+                    if (Test-Path $scriptPath) { & $scriptPath -Path $targetPath } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
+                }
+                Read-Host "Press Enter to continue"
+            }
+            { $_ -eq '3' -or $_ -eq '3p' } {
+                Clear-Host
+                $targetPath = Select-DevKitProject -Prompt "Full Clean (.next + node_modules + reinstall)" -ForceReprompt:($choice -eq '3p')
+                if ($null -eq $targetPath) {
+                    Write-Host "  Cancelled -- no project selected." -ForegroundColor Yellow
+                } else {
+                    $scriptPath = Join-Path (Join-Path $ScriptDir "nextjs") "Next-FullClean.ps1"
+                    if (Test-Path $scriptPath) { & $scriptPath -Path $targetPath } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
+                }
+                Read-Host "Press Enter to continue"
+            }
+            { $_ -eq '4' -or $_ -eq '4p' } {
+                Clear-Host
+                $targetPath = Select-DevKitProject -Prompt "Next.js Dev Server (Fresh Start)" -ForceReprompt:($choice -eq '4p')
+                if ($null -eq $targetPath) {
+                    Write-Host "  Cancelled -- no project selected." -ForegroundColor Yellow
+                } else {
+                    $scriptPath = Join-Path (Join-Path $ScriptDir "nextjs") "Next-DevFresh.ps1"
+                    if (Test-Path $scriptPath) {
+                        $turbo = Read-Host "Clear Turbopack cache too? (y/n)"
+                        $port = Read-Host "Port (press Enter for default)"
+                        $devArgs = @{ Path = $targetPath }
+                        if ($turbo -eq 'y') { $devArgs['Turbo'] = $true }
+                        if ($port -match '^\d+$') { $devArgs['Port'] = [int]$port }
+                        & $scriptPath @devArgs
+                    } else {
+                        Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red
+                    }
                 }
                 Read-Host "Press Enter to continue"
             }
@@ -270,20 +305,26 @@ function Start-ViteTools {
         Show-ViteMenu
         $choice = Read-Host "Select option"
         switch ($choice) {
-            '1' { 
+            { $_ -eq '1' -or $_ -eq '1p' } {
                 Clear-Host
-                $targetPath = Read-Host "Enter project path (or '.' for current)"
-                if ($targetPath -eq '.') { $targetPath = (Get-Location).Path }
-                $scriptPath = Join-Path (Join-Path $ScriptDir "vite") "Vite-DevFresh.ps1"
-                if (Test-Path $scriptPath) { & $scriptPath -Path $targetPath } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
+                $targetPath = Select-DevKitProject -Prompt "Vite Dev Server (Fresh Start)" -ForceReprompt:($choice -eq '1p')
+                if ($null -eq $targetPath) {
+                    Write-Host "  Cancelled -- no project selected." -ForegroundColor Yellow
+                } else {
+                    $scriptPath = Join-Path (Join-Path $ScriptDir "vite") "Vite-DevFresh.ps1"
+                    if (Test-Path $scriptPath) { & $scriptPath -Path $targetPath } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
+                }
                 Read-Host "Press Enter to continue"
             }
-            '2' { 
+            { $_ -eq '2' -or $_ -eq '2p' } {
                 Clear-Host
-                $targetPath = Read-Host "Enter project path (or '.' for current)"
-                if ($targetPath -eq '.') { $targetPath = (Get-Location).Path }
-                $scriptPath = Join-Path (Join-Path $ScriptDir "vite") "Vite-PreviewBuild.ps1"
-                if (Test-Path $scriptPath) { & $scriptPath -Path $targetPath } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
+                $targetPath = Select-DevKitProject -Prompt "Build and Preview" -ForceReprompt:($choice -eq '2p')
+                if ($null -eq $targetPath) {
+                    Write-Host "  Cancelled -- no project selected." -ForegroundColor Yellow
+                } else {
+                    $scriptPath = Join-Path (Join-Path $ScriptDir "vite") "Vite-PreviewBuild.ps1"
+                    if (Test-Path $scriptPath) { & $scriptPath -Path $targetPath } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
+                }
                 Read-Host "Press Enter to continue"
             }
             '0' { return }
@@ -308,28 +349,37 @@ function Start-GitTools {
         Show-GitMenu
         $choice = Read-Host "Select option"
         switch ($choice) {
-            '1' { 
+            { $_ -eq '1' -or $_ -eq '1p' } {
                 Clear-Host
-                $targetPath = Read-Host "Enter project path (or '.' for current)"
-                if ($targetPath -eq '.') { $targetPath = (Get-Location).Path }
-                $scriptPath = Join-Path (Join-Path $ScriptDir "git") "Git-Cleanup.ps1"
-                if (Test-Path $scriptPath) { & $scriptPath -Path $targetPath } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
+                $targetPath = Select-DevKitProject -Prompt "Git Cleanup" -ForceReprompt:($choice -eq '1p')
+                if ($null -eq $targetPath) {
+                    Write-Host "  Cancelled -- no project selected." -ForegroundColor Yellow
+                } else {
+                    $scriptPath = Join-Path (Join-Path $ScriptDir "git") "Git-Cleanup.ps1"
+                    if (Test-Path $scriptPath) { & $scriptPath -Path $targetPath } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
+                }
                 Read-Host "Press Enter to continue"
             }
-            '2' { 
+            { $_ -eq '2' -or $_ -eq '2p' } {
                 Clear-Host
-                $targetPath = Read-Host "Enter root path to scan (or '.' for current)"
-                if ($targetPath -eq '.') { $targetPath = (Get-Location).Path }
-                $scriptPath = Join-Path (Join-Path $ScriptDir "git") "Git-StatusAll.ps1"
-                if (Test-Path $scriptPath) { & $scriptPath -Path $targetPath } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
+                $targetPath = Select-DevKitProject -Prompt "Git Status All (scan root)" -ForceReprompt:($choice -eq '2p')
+                if ($null -eq $targetPath) {
+                    Write-Host "  Cancelled -- no scan root selected." -ForegroundColor Yellow
+                } else {
+                    $scriptPath = Join-Path (Join-Path $ScriptDir "git") "Git-StatusAll.ps1"
+                    if (Test-Path $scriptPath) { & $scriptPath -Path $targetPath } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
+                }
                 Read-Host "Press Enter to continue"
             }
-            '3' { 
+            { $_ -eq '3' -or $_ -eq '3p' } {
                 Clear-Host
-                $targetPath = Read-Host "Enter project path (or '.' for current)"
-                if ($targetPath -eq '.') { $targetPath = (Get-Location).Path }
-                $scriptPath = Join-Path (Join-Path $ScriptDir "git") "Git-SyncFork.ps1"
-                if (Test-Path $scriptPath) { & $scriptPath -Path $targetPath } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
+                $targetPath = Select-DevKitProject -Prompt "Sync Fork with Upstream" -ForceReprompt:($choice -eq '3p')
+                if ($null -eq $targetPath) {
+                    Write-Host "  Cancelled -- no project selected." -ForegroundColor Yellow
+                } else {
+                    $scriptPath = Join-Path (Join-Path $ScriptDir "git") "Git-SyncFork.ps1"
+                    if (Test-Path $scriptPath) { & $scriptPath -Path $targetPath } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
+                }
                 Read-Host "Press Enter to continue"
             }
             '0' { return }
@@ -401,19 +451,35 @@ function Start-SystemTools {
                 if (Test-Path $scriptPath) { & $scriptPath } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
                 Read-Host "Press Enter to continue"
             }
-            '2' { 
+            { $_ -eq '2' -or $_ -eq '2p' } {
                 Clear-Host
-                $targetPath = Read-Host "Enter backup output path (or '.' for current)"
-                if ($targetPath -eq '.') { $targetPath = (Get-Location).Path }
-                $scriptPath = Join-Path (Join-Path $ScriptDir "system") "Env-Backup.ps1"
-                if (Test-Path $scriptPath) { & $scriptPath -OutputPath $targetPath } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
+                $targetPath = Select-DevKitProject -Prompt "Backup Environment Variables (output folder)" -ForceReprompt:($choice -eq '2p')
+                if ($null -eq $targetPath) {
+                    Write-Host "  Cancelled -- no output folder selected." -ForegroundColor Yellow
+                } else {
+                    $scriptPath = Join-Path (Join-Path $ScriptDir "system") "Env-Backup.ps1"
+                    if (Test-Path $scriptPath) { & $scriptPath -OutputPath $targetPath } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
+                }
                 Read-Host "Press Enter to continue"
             }
-            '3' { 
+            '3' {
                 Clear-Host
-                $backupFile = Read-Host "Enter backup file path to restore"
-                $scriptPath = Join-Path (Join-Path $ScriptDir "system") "Env-Restore.ps1"
-                if (Test-Path $scriptPath) { & $scriptPath -BackupFile $backupFile } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
+                Write-Host "  [B] Browse for a backup file..."
+                Write-Host "  [T] Type a path manually"
+                Write-Host "  [0] Cancel"
+                $pickMode = Read-Host "Select option"
+                $backupFile = $null
+                if ($pickMode -eq 'B' -or $pickMode -eq 'b') {
+                    $backupFile = Show-DevKitFileBrowser -Description "Select an environment backup to restore" -Filter "DevKit backups (*.json)|*.json|All files (*.*)|*.*"
+                } elseif ($pickMode -eq 'T' -or $pickMode -eq 't') {
+                    $backupFile = Read-Host "Enter backup file path to restore"
+                }
+                if ([string]::IsNullOrWhiteSpace($backupFile)) {
+                    Write-Host "  Cancelled -- no backup file selected." -ForegroundColor Yellow
+                } else {
+                    $scriptPath = Join-Path (Join-Path $ScriptDir "system") "Env-Restore.ps1"
+                    if (Test-Path $scriptPath) { & $scriptPath -BackupFile $backupFile } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
+                }
                 Read-Host "Press Enter to continue"
             }
             '4' { 
@@ -444,28 +510,37 @@ function Start-WorkflowTools {
         Show-WorkflowMenu
         $choice = Read-Host "Select option"
         switch ($choice) {
-            '1' { 
+            { $_ -eq '1' -or $_ -eq '1p' } {
                 Clear-Host
-                $targetPath = Read-Host "Enter project path (or '.' for current)"
-                if ($targetPath -eq '.') { $targetPath = (Get-Location).Path }
-                $scriptPath = Join-Path (Join-Path $ScriptDir "workflow") "Code-Here.ps1"
-                if (Test-Path $scriptPath) { & $scriptPath -Path $targetPath } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
+                $targetPath = Select-DevKitProject -Prompt "Code Here (open VS Code/Cursor)" -ForceReprompt:($choice -eq '1p')
+                if ($null -eq $targetPath) {
+                    Write-Host "  Cancelled -- no project selected." -ForegroundColor Yellow
+                } else {
+                    $scriptPath = Join-Path (Join-Path $ScriptDir "workflow") "Code-Here.ps1"
+                    if (Test-Path $scriptPath) { & $scriptPath -Path $targetPath } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
+                }
                 Read-Host "Press Enter to continue"
             }
-            '2' { 
+            { $_ -eq '2' -or $_ -eq '2p' } {
                 Clear-Host
-                $targetPath = Read-Host "Enter project path (or '.' for current)"
-                if ($targetPath -eq '.') { $targetPath = (Get-Location).Path }
-                $scriptPath = Join-Path (Join-Path $ScriptDir "workflow") "Open-Repo.ps1"
-                if (Test-Path $scriptPath) { & $scriptPath -Path $targetPath } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
+                $targetPath = Select-DevKitProject -Prompt "Open Repo in Browser" -ForceReprompt:($choice -eq '2p')
+                if ($null -eq $targetPath) {
+                    Write-Host "  Cancelled -- no project selected." -ForegroundColor Yellow
+                } else {
+                    $scriptPath = Join-Path (Join-Path $ScriptDir "workflow") "Open-Repo.ps1"
+                    if (Test-Path $scriptPath) { & $scriptPath -Path $targetPath } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
+                }
                 Read-Host "Press Enter to continue"
             }
-            '3' { 
+            { $_ -eq '3' -or $_ -eq '3p' } {
                 Clear-Host
-                $targetPath = Read-Host "Enter project path (or '.' for current)"
-                if ($targetPath -eq '.') { $targetPath = (Get-Location).Path }
-                $scriptPath = Join-Path (Join-Path $ScriptDir "workflow") "Copy-EnvTemplate.ps1"
-                if (Test-Path $scriptPath) { & $scriptPath -Path $targetPath } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
+                $targetPath = Select-DevKitProject -Prompt "Copy .env Template" -ForceReprompt:($choice -eq '3p')
+                if ($null -eq $targetPath) {
+                    Write-Host "  Cancelled -- no project selected." -ForegroundColor Yellow
+                } else {
+                    $scriptPath = Join-Path (Join-Path $ScriptDir "workflow") "Copy-EnvTemplate.ps1"
+                    if (Test-Path $scriptPath) { & $scriptPath -Path $targetPath } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
+                }
                 Read-Host "Press Enter to continue"
             }
             '0' { return }
@@ -500,6 +575,47 @@ function Start-DiagnosticsTools {
                 $scriptPath = Join-Path (Join-Path $ScriptDir "diagnostics") "System-DevInfo.ps1"
                 if (Test-Path $scriptPath) { & $scriptPath } else { Write-Host "  ERROR: Script not found: $scriptPath" -ForegroundColor Red }
                 Read-Host "Press Enter to continue"
+            }
+            '0' { return }
+            default { Write-Host "  Invalid option. Press Enter to continue." -ForegroundColor Red; Read-Host }
+        }
+    }
+}
+
+# ==================== PROJECTS ====================
+function Show-ProjectsMenu {
+    Show-Header "Projects"
+    Write-Host "  [1] Set Active Project (pick / browse / link)"
+    Write-Host "  [2] Clear Active Project"
+    Write-Host "  [3] Manage Linked Projects (rename / pin / unlink / relink)"
+    Write-Host ""
+    Write-Host "  [0] Back"
+    Write-Host ""
+}
+
+function Start-ProjectTools {
+    while ($true) {
+        Show-ProjectsMenu
+        $choice = Read-Host "Select option"
+        switch ($choice) {
+            '1' {
+                Clear-Host
+                $picked = Select-DevKitProject -Prompt "Set Active Project" -ForceReprompt
+                if ($picked) {
+                    Write-Host "  DONE: Active project set." -ForegroundColor Green
+                } else {
+                    Write-Host "  Cancelled -- no project selected." -ForegroundColor Yellow
+                }
+                Read-Host "Press Enter to continue"
+            }
+            '2' {
+                Clear-Host
+                Clear-DevKitActiveProject
+                Write-Host "  DONE: Active project cleared." -ForegroundColor Green
+                Read-Host "Press Enter to continue"
+            }
+            '3' {
+                Invoke-DevKitManageProjects
             }
             '0' { return }
             default { Write-Host "  Invalid option. Press Enter to continue." -ForegroundColor Red; Read-Host }
@@ -567,7 +683,8 @@ while ($true) {
         '7' { Start-SystemTools }
         '8' { Start-WorkflowTools }
         '9' { Start-DiagnosticsTools }
-        '10' { Start-WiFiTools }
+        '10' { Start-ProjectTools }
+        '11' { Start-WiFiTools }
         '0' { exit }
         default { Write-Host "  Invalid option. Press Enter to continue." -ForegroundColor Red; Read-Host }
     }
