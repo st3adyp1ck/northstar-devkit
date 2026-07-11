@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="https://img.shields.io/badge/Northstar-DevKit-3.0.0-blue?style=for-the-badge&logo=powershell&logoColor=white" alt="Northstar DevKit">
+<img src="https://img.shields.io/badge/Northstar-DevKit-3.1.0-blue?style=for-the-badge&logo=powershell&logoColor=white" alt="Northstar DevKit">
 
 <h3>A powerful, dependency-free Windows toolkit for modern web developers</h3>
 
@@ -70,6 +70,12 @@ The interactive menu will guide you through every tool. For project-specific act
 
 ---
 
+## 🎉 New in 3.1
+
+- **Arrow-key navigation.** Every menu now supports Up/Down + Enter to move and select, Escape to go back — typing a number still works exactly as before, and it falls back automatically on a console that can't do raw key reads.
+- **`[12] Maintenance`** — 14 real Windows maintenance/tuning tools: disk & storage cleanup, startup & services tuning, SFC/DISM repair + Windows Update reset, scheduled tasks & event log triage, power/performance tuning, and hardware health. Every mutating tool defaults to a safe report and requires an explicit flag + confirmation to change anything.
+- **`[13] Agents & MCP`** — detect and update installed AI CLIs (claude, gh, codex, gemini, cursor-agent, aider) and manage Claude Code's MCP servers globally or per linked project.
+
 ## 🎉 New in 3.0
 
 - **Browsable project linking.** Link a project once (by browsing to it, or just using your current directory) and every tool reuses it silently for the rest of the session — no more retyping the same path over and over. Append `p` to any menu number (e.g. `4p`) to use a different project for a single run without disturbing your active one. Manage linked projects from the new `[10] Projects` menu.
@@ -95,6 +101,10 @@ The interactive menu will guide you through every tool. For project-specific act
 |---|---|---|
 | Health check & system info | Optimize DNS, scan networks, speed test | Link, switch, and manage project directories |
 
+| 🧰 **Maintenance** | 🤖 **Agents & MCP** |
+|---|---|
+| Disk cleanup, startup/services tuning, SFC/DISM repair, Windows Update reset, scheduled tasks & event logs, power/performance tuning, hardware health | Detect/update AI CLIs, manage Claude Code MCP servers globally or per project |
+
 </div>
 
 ---
@@ -106,7 +116,7 @@ Launch `DevKit.bat` and navigate with your keyboard:
 
 ```
 =============================================
-       Northstar DevKit v3.0.0
+       Northstar DevKit v3.1.0
     Developer Toolkit by northstarcoding.com
 =============================================
   Menu: Main Menu
@@ -127,13 +137,19 @@ Launch `DevKit.bat` and navigate with your keyboard:
     [8] Workflow       - IDE & Utils
     [9] Diagnostics    - Health Check
 
+  Maintenance & Agents:
+    [12] Maintenance   - Cleanup, Repair, Tuning
+    [13] Agents & MCP  - AI CLI & MCP Servers
+
   Projects & Network:
     [10] Projects      - Link, Switch, Manage
     [11] WiFi Tools    - Optimize and Scan
 
-    [0] Exit
     [/] Search tools
+    [0] Exit
 ```
+
+Use the arrow keys to move and Enter to select, or just type a number like before — both work everywhere.
 
 ### Run Individual Scripts
 You can also run any tool directly from PowerShell or Command Prompt:
@@ -226,6 +242,27 @@ You can also run any tool directly from PowerShell or Command Prompt:
 .\wifi\WiFi-Scan.ps1
 ```
 
+### Maintenance
+```powershell
+.\maintenance\Clear-DiskJunk.ps1                  # report only; add -Apply to actually clean
+.\maintenance\Manage-StartupPrograms.ps1          # list startup entries
+.\maintenance\Repair-SystemFiles.ps1 -DryRun      # preview the SFC/DISM plan
+.\maintenance\Reset-WindowsUpdate.ps1 -DryRun     # preview the WU reset plan
+.\maintenance\Get-ScheduledTasksReport.ps1 -NonMicrosoftOnly
+.\maintenance\Get-RecentEventErrors.ps1 -Hours 24
+.\maintenance\Set-PowerPlan.ps1 -List
+.\maintenance\Get-DiskHealthReport.ps1
+.\maintenance\Get-BatteryReport.ps1
+```
+
+### Agents & MCP
+```powershell
+.\agents\Get-InstalledAiClis.ps1
+.\agents\Update-AiClis.ps1 -DryRun
+.\agents\Get-McpServers.ps1
+.\agents\Add-McpServer.ps1 -Name myserver -Command npx -CommandArgs '-y','my-mcp-server' -Scope user
+```
+
 ---
 
 ## ⚡ Quick Reference
@@ -244,6 +281,13 @@ You can also run any tool directly from PowerShell or Command Prompt:
 | Environment health check | `diagnostics\DevKit-Doctor.bat` |
 | Retyping the same project path every time | `DevKit.bat` → any tool → link it once, it's remembered |
 | Can't remember which menu a tool is in | `DevKit.bat` → `/` → type a keyword |
+| Disk filling up | `maintenance\Clear-DiskJunk.bat` |
+| Windows Update stuck | `maintenance\Reset-WindowsUpdate.bat -DryRun` first, then for real |
+| "Files or folders are corrupted" | `maintenance\Repair-SystemFiles.bat` |
+| Want to know what's slowing down boot | `maintenance\Manage-StartupPrograms.bat` |
+| Check drive/battery health | `maintenance\Get-DiskHealthReport.bat` / `Get-BatteryReport.bat` |
+| Which AI CLIs do I have installed | `agents\Get-InstalledAiClis.bat` |
+| Add/remove a Claude Code MCP server | `agents\Add-McpServer.bat` / `Remove-McpServer.bat` |
 
 ---
 
@@ -274,6 +318,8 @@ DevKit/
 ├── workflow/                # Developer workflow     (+ _module.psd1)
 ├── diagnostics/            # Health checks           (+ _module.psd1)
 ├── wifi/                   # WiFi optimization       (+ _module.psd1)
+├── maintenance/            # Windows maintenance/tuning (+ _module.psd1)
+├── agents/                 # AI CLI & MCP management   (+ _module.psd1)
 └── tests/Unit/             # Pester tests (run via `Invoke-Pester -Path tests/Unit`)
 ```
 

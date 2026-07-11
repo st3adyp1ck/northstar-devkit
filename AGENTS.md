@@ -8,7 +8,7 @@
 - **Website:** https://www.northstarcoding.com
 - **License:** MIT
 - **Language:** English (all comments and documentation)
-- **Version:** 3.0.0
+- **Version:** 3.1.0
 
 ## Technology Stack
 
@@ -106,13 +106,38 @@ DevKit/
 │   ├── System-DevInfo.ps1      # System info summary
 │   └── System-DevInfo.bat
 │
-└── wifi/                   # WiFi optimization tools (+ _module.psd1)
-    ├── WiFi-Optimize.ps1   # Full optimization (DNS, TCP/IP, speed test)
-    ├── WiFi-Optimize.bat   # Batch wrapper
-    ├── WiFi-FastMode.ps1   # Quick optimization (no speed test)
-    ├── WiFi-FastMode.bat   # Batch wrapper
-    ├── WiFi-Scan.ps1       # Network scanner with signal analysis
-    └── WiFi-Scan.bat       # Batch wrapper
+├── wifi/                   # WiFi optimization tools (+ _module.psd1)
+│   ├── WiFi-Optimize.ps1   # Full optimization (DNS, TCP/IP, speed test)
+│   ├── WiFi-Optimize.bat   # Batch wrapper
+│   ├── WiFi-FastMode.ps1   # Quick optimization (no speed test)
+│   ├── WiFi-FastMode.bat   # Batch wrapper
+│   ├── WiFi-Scan.ps1       # Network scanner with signal analysis
+│   └── WiFi-Scan.bat       # Batch wrapper
+│
+├── maintenance/            # Windows maintenance/tuning (+ _module.psd1)
+│   ├── Clear-DiskJunk.ps1          # Report/-Apply: temp, WU cache, Recycle Bin, WinSxS
+│   ├── Show-DiskUsageReport.ps1    # Largest subfolders by size
+│   ├── Manage-StartupPrograms.ps1  # List/disable/enable Run-key + Startup-folder entries
+│   ├── Manage-Services.ps1         # Report/set StartType for a curated service list
+│   ├── Repair-SystemFiles.ps1      # SFC /scannow + DISM /RestoreHealth
+│   ├── Reset-WindowsUpdate.ps1     # Classic WU cache/catalog reset
+│   ├── Get-ScheduledTasksReport.ps1 # List/disable scheduled tasks
+│   ├── Get-RecentEventErrors.ps1   # Recent Critical/Error events (System+Application)
+│   ├── Set-PowerPlan.ps1           # List/switch power plans, unlock Ultimate Performance
+│   ├── Set-VisualEffects.ps1       # Report/set VisualFXSetting (perf vs appearance)
+│   ├── Test-PageFileConfig.ps1     # Page file size/config report (read-only)
+│   ├── Get-DiskHealthReport.ps1    # SMART/StorageReliabilityCounter per physical disk
+│   ├── Get-BatteryReport.ps1       # powercfg /batteryreport wrapper
+│   ├── Invoke-MemoryDiagnostic.ps1 # Launches mdsched.exe (schedules a restart)
+│   └── *.bat                       # Batch wrapper per script
+│
+└── agents/                 # AI CLI & MCP management (+ _module.psd1)
+    ├── Get-InstalledAiClis.ps1  # Detect claude/gh/codex/gemini/cursor-agent/aider
+    ├── Update-AiClis.ps1        # Best-effort npm-based CLI updates
+    ├── Get-McpServers.ps1       # claude mcp list, optionally scoped to the active project
+    ├── Add-McpServer.ps1        # claude mcp add wrapper (local/project/user scope)
+    ├── Remove-McpServer.ps1     # claude mcp remove wrapper
+    └── *.bat                    # Batch wrapper per script
 ```
 
 Linked projects (`projects.json`) and settings (`settings.json`) live outside
@@ -255,6 +280,23 @@ try {
 - Speed test via Cloudflare's speed endpoint
 - Requires administrator privileges; warns about required reboot after TCP/IP reset
 
+### Maintenance (`maintenance/`)
+- Real Windows maintenance/tuning, distinct from `diagnostics/`'s dev-tool health check
+- Every mutating tool (disk cleanup, service/startup changes, SFC/DISM, Windows Update
+  reset, power plan, visual effects, memory diagnostic) defaults to a safe report/`-DryRun`
+  and requires an explicit flag plus `Confirm-DevKitDestructiveAction` to change anything
+- Admin-gated actions check `Test-DevKitAdmin` and fail with a clear message rather than a
+  stack trace when not elevated
+- Startup-entry disable/enable is reversible by design (registry value rename / shortcut
+  moved to a sibling folder), not a best-effort delete
+
+### Agents & MCP (`agents/`)
+- Detects AI coding-agent CLIs (claude, gh, codex, gemini, cursor-agent, aider) via
+  `Get-DevKitWindowsExecutable` (see below) rather than a bare `Get-Command`/`&` invocation
+- Wraps `claude mcp list/add/remove`; project-scoped operations resolve the active project
+  via `Get-DevKitActiveProject` (read-only) and `Push-Location`/`Pop-Location` around the
+  `claude` call, never via `Select-DevKitProject` (which can prompt/mutate the active project)
+
 ## Usage Patterns
 
 ### Interactive Menu Mode
@@ -296,6 +338,7 @@ Launches the main interactive menu for navigation via keyboard input.
 - Force flags (`-Force`) are available to skip confirmation prompts for automation
 - Docker Nuke requires explicit, case-sensitive confirmation (type `NUKE`) to prevent accidents - implemented via the shared `Confirm-DevKitDestructiveAction` helper in `lib/DevKit-Common.ps1`, which any new destructive script should call rather than hand-rolling its own y/n or typed-phrase prompt
 - `%LOCALAPPDATA%\NorthstarDevKit\settings.json`'s `preferences.confirmDestructive` (default `true`) gates that shared helper globally; it does not currently gate any script's own bespoke confirmation logic that predates the helper
+- **Never execute a destructive/mutating script's real path to "test" it - only its documented read-only/-DryRun/-WhatIf invocation.** Every script under `maintenance/` and `agents/` that mutates the system (deletes files, renames system folders, stops/starts services, writes the registry, runs SFC/DISM, mutates external CLI config) supports a safe, non-mutating invocation - use that one. This applies to a human tester and an AI agent equally: a 2026-07-11 incident had a build-time agent run `Reset-WindowsUpdate.ps1` for real (not `-DryRun`) while self-testing its own work; the safety system blocked it before any actual change landed, but it should never have been attempted in the first place.
 
 ## Testing
 
@@ -380,3 +423,4 @@ Since 3.0, adding a tool to an **existing** category (`ports/`, `node/`,
 - Scripts use consistent header format with Northstar branding
 - Version 2.1 unified the toolkit under a shared helper module (`lib/DevKit-Common.ps1`), added package-manager auto-detection, completed batch-wrapper coverage, and fixed PowerShell 7 / path-validation / process-killing bugs
 - Version 3.0 (see `CHANGELOG.md` for full detail) added browsable project linking (`Select-DevKitProject`, the linked-projects registry, `[10] Projects` menu), rewrote all ten tool-category submenus as a manifest-driven dispatcher (`_module.psd1` + `Start-DevKitModuleTools`) instead of ten hand-written function pairs, added `/` search-and-jump, added a Pester test suite, and fixed roughly 150 confirmed bugs from a full-repo review - including one (`system/Env-Restore.ps1`) that had been completely broken (could not run at all) since before 3.0 existed
+- Version 3.1 (see `CHANGELOG.md`) added arrow-key navigation (`Show-DevKitInteractiveMenu`) with automatic fallback to the classic typed-number flow, two new manifest-driven categories (`[12] Maintenance`, `[13] Agents & MCP`), and `Get-DevKitWindowsExecutable` - a defensive CLI-resolution helper added after a real bug where an ambiguously-resolved `gh` on PATH triggered a Windows ShellExecute "Select an app to open" dialog instead of failing cleanly

@@ -2,6 +2,59 @@
 
 All notable changes to Northstar DevKit are documented here.
 
+## [3.1.0] - 2026-07-11
+
+Arrow-key navigation across every menu, and two new tool categories: real
+Windows maintenance/tuning tools (not just a dev-environment health check),
+and an AI CLI & MCP server manager.
+
+### Added
+
+- **Arrow-key navigation** (`Show-DevKitInteractiveMenu` in
+  `lib\DevKit-Common.ps1`). Every menu - Main Menu, each tool category,
+  Projects, and Search results - now supports Up/Down + Enter to move and
+  select, Escape to go back, while typing a number (and the `p` suffix for
+  a one-off project override) still works exactly as before. On a console
+  that can't do raw key reads (redirected input, CI, some non-interactive
+  hosts), it transparently falls back to the classic `Read-Host` prompt -
+  every existing scripted/piped-input workflow keeps working unchanged.
+- **`[12] Maintenance`** - 14 real Windows maintenance/tuning tools across
+  six areas: disk & storage cleanup (`Clear-DiskJunk.ps1`,
+  `Show-DiskUsageReport.ps1`), startup & services tuning
+  (`Manage-StartupPrograms.ps1`, `Manage-Services.ps1`), system repair
+  (`Repair-SystemFiles.ps1` for SFC/DISM, `Reset-WindowsUpdate.ps1`),
+  scheduled tasks & event log triage (`Get-ScheduledTasksReport.ps1`,
+  `Get-RecentEventErrors.ps1`), power & performance tuning
+  (`Set-PowerPlan.ps1`, `Set-VisualEffects.ps1`, `Test-PageFileConfig.ps1`),
+  and hardware health (`Get-DiskHealthReport.ps1`, `Get-BatteryReport.ps1`,
+  `Invoke-MemoryDiagnostic.ps1`). Every mutating tool defaults to a safe
+  read-only report and requires an explicit flag plus confirmation
+  (`Confirm-DevKitDestructiveAction`) to actually change anything.
+- **`[13] Agents & MCP`** - manage AI coding-agent CLIs and Claude Code's
+  MCP servers, both globally and per linked project:
+  `Get-InstalledAiClis.ps1` (detect claude/gh/codex/gemini/cursor-agent/
+  aider), `Update-AiClis.ps1` (best-effort npm-based updates), and
+  `Get-McpServers.ps1` / `Add-McpServer.ps1` / `Remove-McpServer.ps1`
+  wrapping `claude mcp list/add/remove`, using the existing active-project
+  system to target a specific project's MCP scope.
+
+### Fixed
+
+- **A real "Select an app to open" dialog bug**, hit while building the
+  Agents & MCP pack: on a machine with more than one `gh` on PATH,
+  `Get-Command`'s first match can be an extension-less shim rather than a
+  `.exe`/`.cmd` wrapper, and invoking that with PowerShell's `&` operator
+  makes it fall back to ShellExecute, popping a real Windows dialog instead
+  of failing cleanly. Added `Get-DevKitWindowsExecutable` (`lib\DevKit-
+  Common.ps1`) - resolves to only a recognized Windows-executable match (or
+  a native PS command, which never hits ShellExecute) - and use it anywhere
+  this codebase invokes a user-installed CLI by name.
+- A background build-time agent for this release ran `Reset-WindowsUpdate.ps1`
+  for real instead of the instructed `-DryRun` while self-testing; the
+  safety system blocked it before any change landed (independently
+  confirmed via service-state event logs and folder timestamps). See
+  `AGENTS.md`'s Security Considerations for the guardrail this added.
+
 ## [3.0.0] - 2026-07-11
 
 A full review-driven overhaul: every confirmed critical/high bug fixed, a

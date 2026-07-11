@@ -11,7 +11,7 @@
     Website: https://www.northstarcoding.com
 
 .VERSION
-    3.0.0
+    3.1.0
 .NOTES
     Requires PowerShell 5.1 or PowerShell 7+
     Run as Administrator for full network optimization features
@@ -40,7 +40,7 @@ function Show-Header {
     param([string]$Title)
     Clear-Host
     Write-Host "=============================================" -ForegroundColor Cyan
-    Write-Host "       Northstar DevKit v3.0.0             " -ForegroundColor Cyan
+    Write-Host "       Northstar DevKit v3.1.0             " -ForegroundColor Cyan
     Write-Host "    Developer Toolkit by northstarcoding.com" -ForegroundColor Cyan
     Write-Host "=============================================" -ForegroundColor Cyan
     Write-Host "  Menu: $Title" -ForegroundColor Cyan
@@ -61,28 +61,38 @@ function Show-Header {
 
 function Show-MainMenu {
     Show-Header "Main Menu"
-    Write-Host "  Development Tools:" -ForegroundColor Magenta
-    Write-Host "    [1] Port Tools     - Scan and Kill"
-    Write-Host "    [2] Node.js Tools  - Cache & Modules"
-    Write-Host "    [3] Next.js Tools  - Build Cache"
-    Write-Host "    [4] Vite Tools     - Dev Server"
-    Write-Host ""
-    Write-Host "  Version Control & Containers:" -ForegroundColor Magenta
-    Write-Host "    [5] Git Tools      - Repo Management"
-    Write-Host "    [6] Docker Tools   - Container Cleanup"
-    Write-Host ""
-    Write-Host "  System & Workflow:" -ForegroundColor Magenta
-    Write-Host "    [7] System Tools   - PATH & Environment"
-    Write-Host "    [8] Workflow       - IDE & Utils"
-    Write-Host "    [9] Diagnostics    - Health Check"
-    Write-Host ""
-    Write-Host "  Projects & Network:" -ForegroundColor Magenta
-    Write-Host "    [10] Projects      - Link, Switch, Manage"
-    Write-Host "    [11] WiFi Tools    - Optimize and Scan"
-    Write-Host ""
-    Write-Host "    [0] Exit"
-    Write-Host "    [/] Search tools"
-    Write-Host ""
+}
+
+# Drives both the arrow-navigable Main Menu render and Get-DevKitSearchableCategories'
+# key labels; IsHeader entries are section labels only (skipped by arrow nav).
+function Get-DevKitMainMenuEntries {
+    return @(
+        @{ IsHeader = $true; Label = 'Development Tools:' }
+        @{ Key = '1'; Label = 'Port Tools     - Scan and Kill' }
+        @{ Key = '2'; Label = 'Node.js Tools  - Cache & Modules' }
+        @{ Key = '3'; Label = 'Next.js Tools  - Build Cache' }
+        @{ Key = '4'; Label = 'Vite Tools     - Dev Server' }
+        @{ IsHeader = $true; Label = '' }
+        @{ IsHeader = $true; Label = 'Version Control & Containers:' }
+        @{ Key = '5'; Label = 'Git Tools      - Repo Management' }
+        @{ Key = '6'; Label = 'Docker Tools   - Container Cleanup' }
+        @{ IsHeader = $true; Label = '' }
+        @{ IsHeader = $true; Label = 'System & Workflow:' }
+        @{ Key = '7'; Label = 'System Tools   - PATH & Environment' }
+        @{ Key = '8'; Label = 'Workflow       - IDE & Utils' }
+        @{ Key = '9'; Label = 'Diagnostics    - Health Check' }
+        @{ IsHeader = $true; Label = '' }
+        @{ IsHeader = $true; Label = 'Maintenance & Agents:' }
+        @{ Key = '12'; Label = 'Maintenance    - Cleanup, Repair, Tuning' }
+        @{ Key = '13'; Label = 'Agents & MCP   - AI CLI & MCP Servers' }
+        @{ IsHeader = $true; Label = '' }
+        @{ IsHeader = $true; Label = 'Projects & Network:' }
+        @{ Key = '10'; Label = 'Projects       - Link, Switch, Manage' }
+        @{ Key = '11'; Label = 'WiFi Tools     - Optimize and Scan' }
+        @{ IsHeader = $true; Label = '' }
+        @{ Key = '/'; Label = 'Search tools' }
+        @{ Key = '0'; Label = 'Exit' }
+    )
 }
 
 # Maps each manifest-backed category to its main-menu number, so search
@@ -103,6 +113,8 @@ function Get-DevKitSearchableCategories {
         @{ Folder = 'system'; MainMenuKey = '7' }
         @{ Folder = 'workflow'; MainMenuKey = '8' }
         @{ Folder = 'diagnostics'; MainMenuKey = '9' }
+        @{ Folder = 'maintenance'; MainMenuKey = '12' }
+        @{ Folder = 'agents'; MainMenuKey = '13' }
         @{ Folder = 'wifi'; MainMenuKey = '11' }
     )
 }
@@ -152,12 +164,12 @@ function Search-DevKitTools {
 
     Write-Host ""
     Write-Host "  Results for '$keyword':" -ForegroundColor Magenta
+    $entries = @()
     for ($i = 0; $i -lt $found.Count; $i++) {
-        Write-Host ("    [{0}] [{1}] {2} -> {3}" -f ($i + 1), $found[$i].MainMenuKey, $found[$i].ModuleName, $found[$i].Label)
+        $entries += @{ Key = "$($i + 1)"; Label = ("[{0}] {1} -> {2}" -f $found[$i].MainMenuKey, $found[$i].ModuleName, $found[$i].Label) }
     }
-    Write-Host ""
-    Write-Host "    [0] Cancel"
-    $choice = Read-Host "Jump to"
+    $entries += @{ Key = '0'; Label = 'Cancel' }
+    $choice = Show-DevKitInteractiveMenu -Entries $entries -PromptLabel 'Jump to'
     if ($choice -match '^\d+$' -and [int]$choice -ge 1 -and [int]$choice -le $found.Count) {
         $picked = $found[[int]$choice - 1]
         Clear-Host
@@ -174,18 +186,18 @@ function Search-DevKitTools {
 # shape Start-DevKitModuleTools expects.
 function Show-ProjectsMenu {
     Show-Header "Projects"
-    Write-Host "  [1] Set Active Project (pick / browse / link)"
-    Write-Host "  [2] Clear Active Project"
-    Write-Host "  [3] Manage Linked Projects (rename / pin / unlink / relink)"
-    Write-Host ""
-    Write-Host "  [0] Back"
-    Write-Host ""
 }
 
 function Start-ProjectTools {
     while ($true) {
         Show-ProjectsMenu
-        $choice = Read-Host "Select option"
+        $entries = @(
+            @{ Key = '1'; Label = 'Set Active Project (pick / browse / link)' }
+            @{ Key = '2'; Label = 'Clear Active Project' }
+            @{ Key = '3'; Label = 'Manage Linked Projects (rename / pin / unlink / relink)' }
+            @{ Key = '0'; Label = 'Back' }
+        )
+        $choice = Show-DevKitInteractiveMenu -Entries $entries -PromptLabel 'Select option'
         switch ($choice) {
             '1' {
                 Clear-Host
@@ -215,7 +227,7 @@ function Start-ProjectTools {
 # Entry Point
 while ($true) {
     Show-MainMenu
-    $mainChoice = Read-Host "Select option"
+    $mainChoice = Show-DevKitInteractiveMenu -Entries (Get-DevKitMainMenuEntries) -PromptLabel 'Select option'
     switch ($mainChoice.Trim()) {
         '1' { Start-DevKitModuleTools -FolderPath (Join-Path $ScriptDir "ports") }
         '2' { Start-DevKitModuleTools -FolderPath (Join-Path $ScriptDir "node") }
@@ -228,6 +240,8 @@ while ($true) {
         '9' { Start-DevKitModuleTools -FolderPath (Join-Path $ScriptDir "diagnostics") }
         '10' { Start-ProjectTools }
         '11' { Start-DevKitModuleTools -FolderPath (Join-Path $ScriptDir "wifi") }
+        '12' { Start-DevKitModuleTools -FolderPath (Join-Path $ScriptDir "maintenance") }
+        '13' { Start-DevKitModuleTools -FolderPath (Join-Path $ScriptDir "agents") }
         '/' { Search-DevKitTools }
         '0' { exit }
         default { Write-Host "  Invalid option. Press Enter to continue." -ForegroundColor Red; Read-Host }

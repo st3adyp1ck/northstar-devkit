@@ -9,7 +9,7 @@
     Created by Northstar Software Development
     Website: https://www.northstarcoding.com
 .VERSION
-    3.0.0
+    3.1.0
 #>
 
 # Prevent double-loading
@@ -285,15 +285,160 @@ function Invoke-DevKitTool {
     & $scriptPath @callArgs
 }
 
+function Show-DevKitInteractiveMenu {
+    <#
+    .SYNOPSIS
+        Renders a bracketed option list and reads the user's choice, adding
+        optional arrow-key navigation on top of the classic "type a number
+        and press Enter" flow every menu already used.
+    .DESCRIPTION
+        Each entry is either selectable (@{ Key; Label }) or a non-selectable
+        section heading (@{ IsHeader = $true; Label }) used for the Main
+        Menu's grouped layout. On a console that supports raw key reads,
+        UpArrow/DownArrow move a highlighted selection (skipping headings)
+        and Enter confirms it; typed digits/letters are still captured and
+        echoed like Read-Host, so existing conventions (typing "3p" to
+        force-reprompt a project, typing a bare search keyword) keep working
+        unchanged. On a console that can't do raw key reads (redirected
+        input, CI, some non-interactive hosts) this transparently falls back
+        to a plain Read-Host prompt - the exact behavior every menu had
+        before this function existed. Always returns the same raw trimmed
+        string a Read-Host call would, so callers (switch statements, regex
+        matches like '^(.+)p$') require no changes at all.
+    .PARAMETER Entries
+        Ordered list of @{ Key; Label } and/or @{ IsHeader = $true; Label }.
+    .PARAMETER PromptLabel
+        Text shown at the input line (matches the prior Read-Host prompts).
+    #>
+    param(
+        [Parameter(Mandatory = $true)][array]$Entries,
+        [string]$PromptLabel = 'Select option'
+    )
+
+    $selectable = @()
+    for ($i = 0; $i -lt $Entries.Count; $i++) {
+        if (-not $Entries[$i].IsHeader) { $selectable += $i }
+    }
+
+    # Checked (and guarded) before ANY Console API touches the actual
+    # screen buffer: on a redirected/piped host (CI, a plain pipe, some
+    # non-console hosts) even a read-only property like CursorTop can throw
+    # "handle is invalid" rather than just report redirected - so every
+    # probe here is wrapped, and failure at any step degrades straight to
+    # the classic Read-Host flow instead of crashing the menu.
+    $canNavigate = $selectable.Count -gt 0
+    if ($canNavigate) {
+        try {
+            $canNavigate = (-not [Console]::IsInputRedirected) -and (-not [Console]::IsOutputRedirected)
+        } catch {
+            $canNavigate = $false
+        }
+    }
+
+    $entryTop = $null
+    if ($canNavigate) {
+        try { $entryTop = [Console]::CursorTop } catch { $canNavigate = $false }
+    }
+
+    foreach ($e in $Entries) {
+        if ($e.IsHeader) {
+            Write-Host "  $($e.Label)" -ForegroundColor Magenta
+        } else {
+            Write-Host ("  [{0}] {1}" -f $e.Key, $e.Label)
+        }
+    }
+    Write-Host ""
+
+    if (-not $canNavigate) {
+        return (Read-Host $PromptLabel).Trim()
+    }
+
+    $promptTop = $null
+    try { $promptTop = [Console]::CursorTop } catch { $canNavigate = $false }
+    if (-not $canNavigate) {
+        return (Read-Host $PromptLabel).Trim()
+    }
+
+    try {
+        $bufferWidth = [Console]::BufferWidth
+        $maxLen = [Math]::Max($bufferWidth - 1, 1)
+        $selectedPos = 0
+        $typed = ''
+
+        $drawEntry = {
+            param($entryIndex, $isSelected)
+            [Console]::SetCursorPosition(0, $entryTop + $entryIndex)
+            $e = $Entries[$entryIndex]
+            $line = "  [{0}] {1}" -f $e.Key, $e.Label
+            if ($line.Length -gt $maxLen) { $line = $line.Substring(0, $maxLen) }
+            $padded = $line.PadRight($maxLen)
+            if ($isSelected) {
+                Write-Host ("> " + $padded.Substring(2)) -ForegroundColor Black -BackgroundColor Cyan -NoNewline
+            } else {
+                Write-Host $padded -NoNewline
+            }
+        }
+        $drawPrompt = {
+            [Console]::SetCursorPosition(0, $promptTop)
+            $line = "${PromptLabel}: $typed"
+            if ($line.Length -gt $maxLen) { $line = $line.Substring(0, $maxLen) }
+            Write-Host $line.PadRight($maxLen) -NoNewline
+            [Console]::SetCursorPosition([Math]::Min($line.Length, $maxLen), $promptTop)
+        }
+
+        & $drawEntry $selectable[$selectedPos] $true
+        & $drawPrompt
+
+        while ($true) {
+            $key = [Console]::ReadKey($true)
+            switch ($key.Key) {
+                'UpArrow' {
+                    & $drawEntry $selectable[$selectedPos] $false
+                    $selectedPos = if ($selectedPos -eq 0) { $selectable.Count - 1 } else { $selectedPos - 1 }
+                    & $drawEntry $selectable[$selectedPos] $true
+                    $typed = ''
+                    & $drawPrompt
+                }
+                'DownArrow' {
+                    & $drawEntry $selectable[$selectedPos] $false
+                    $selectedPos = ($selectedPos + 1) % $selectable.Count
+                    & $drawEntry $selectable[$selectedPos] $true
+                    $typed = ''
+                    & $drawPrompt
+                }
+                'Enter' {
+                    [Console]::SetCursorPosition(0, $promptTop + 1)
+                    if ([string]::IsNullOrWhiteSpace($typed)) { return $Entries[$selectable[$selectedPos]].Key }
+                    return $typed.Trim()
+                }
+                'Escape' {
+                    [Console]::SetCursorPosition(0, $promptTop + 1)
+                    return '0'
+                }
+                'Backspace' {
+                    if ($typed.Length -gt 0) {
+                        $typed = $typed.Substring(0, $typed.Length - 1)
+                        & $drawPrompt
+                    }
+                }
+                default {
+                    if ($key.KeyChar -and -not [char]::IsControl($key.KeyChar)) {
+                        $typed += $key.KeyChar
+                        & $drawPrompt
+                    }
+                }
+            }
+        }
+    } catch {
+        Write-Host ""
+        Write-Host "  (Arrow-key navigation unavailable in this console -- switched to typed input.)" -ForegroundColor DarkGray
+        return (Read-Host $PromptLabel).Trim()
+    }
+}
+
 function Show-DevKitModuleMenu {
     param([Parameter(Mandatory = $true)]$Module)
     Show-Header $Module.Name
-    foreach ($item in $Module.Items) {
-        Write-Host "  [$($item.Key)] $($item.Label)"
-    }
-    Write-Host ""
-    Write-Host "  [0] Back"
-    Write-Host ""
 }
 
 function Start-DevKitModuleTools {
@@ -309,7 +454,10 @@ function Start-DevKitModuleTools {
 
     while ($true) {
         Show-DevKitModuleMenu -Module $module
-        $choice = Read-Host "Select option"
+        $entries = @()
+        foreach ($item in $module.Items) { $entries += @{ Key = $item.Key; Label = $item.Label } }
+        $entries += @{ Key = '0'; Label = 'Back' }
+        $choice = Show-DevKitInteractiveMenu -Entries $entries -PromptLabel 'Select option'
         $trimmed = $choice.Trim()
 
         if ($trimmed -eq '0') { return }
@@ -377,6 +525,35 @@ function Test-DevKitAdmin {
 function Test-DevKitCommand {
     param([string]$Name)
     return [bool](Get-Command $Name -ErrorAction SilentlyContinue)
+}
+
+function Get-DevKitWindowsExecutable {
+    <#
+    .SYNOPSIS
+        Resolves a command name to something safe to invoke directly with "&".
+    .DESCRIPTION
+        A real bug hit while building the AI CLI tools: on a machine with more
+        than one "gh" on PATH, Get-Command's first match was an extension-less
+        POSIX shim (an npm-installed unrelated "gh" package, not GitHub CLI).
+        Invoking that directly with "&" makes PowerShell fall back to
+        ShellExecute, which pops a real "Select an app to open" Windows dialog
+        instead of failing cleanly - and can leave a caller waiting on GUI
+        input that never arrives. Only ever invoke a match with a recognized
+        Windows-executable extension (or a native PS command/function/alias,
+        which never hits ShellExecute); anything else should be treated as
+        "found but not safely runnable" rather than guessed at.
+    #>
+    param([Parameter(Mandatory = $true)][string]$Name)
+
+    $appMatches = @(Get-Command $Name -All -ErrorAction SilentlyContinue | Where-Object {
+        $_.CommandType -eq 'Application' -and $_.Source -match '\.(exe|cmd|bat)$'
+    })
+    if ($appMatches.Count -gt 0) { return $appMatches[0] }
+
+    $anyMatch = Get-Command $Name -ErrorAction SilentlyContinue
+    if ($anyMatch -and $anyMatch.CommandType -ne 'Application') { return $anyMatch }
+
+    return $null
 }
 
 # ==================== PATH HELPERS ====================
