@@ -99,7 +99,7 @@ try {
     $rebaseApplyPath = Join-Path $gitDir "rebase-apply"
 
     if (Test-Path $mergeHeadPath) {
-        Write-Host "  WARNING: A merge is already in progress in this repository!" -ForegroundColor Red
+        Write-Host "  ERROR: A merge is already in progress in this repository!" -ForegroundColor Red
         Write-Host "  Resolve it before syncing:" -ForegroundColor Yellow
         Write-Host "    git merge --continue   (after resolving conflicts)" -ForegroundColor Yellow
         Write-Host "    git merge --abort      (to cancel it)" -ForegroundColor Yellow
@@ -108,7 +108,7 @@ try {
     }
 
     if ((Test-Path $rebaseMergePath) -or (Test-Path $rebaseApplyPath)) {
-        Write-Host "  WARNING: A rebase is already in progress in this repository!" -ForegroundColor Red
+        Write-Host "  ERROR: A rebase is already in progress in this repository!" -ForegroundColor Red
         Write-Host "  Resolve it before syncing:" -ForegroundColor Yellow
         Write-Host "    git rebase --continue  (after resolving conflicts)" -ForegroundColor Yellow
         Write-Host "    git rebase --abort     (to cancel it)" -ForegroundColor Yellow
@@ -119,7 +119,7 @@ try {
     # Check for uncommitted changes
     $status = git status --porcelain 2>$null
     if ($status) {
-        Write-Host "  WARNING: You have uncommitted changes!" -ForegroundColor Red
+        Write-Host "  ERROR: You have uncommitted changes!" -ForegroundColor Red
         Write-Host "  Please commit or stash them before syncing." -ForegroundColor Yellow
         Write-Host "`n  Uncommitted files:" -ForegroundColor Gray
         $status | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }

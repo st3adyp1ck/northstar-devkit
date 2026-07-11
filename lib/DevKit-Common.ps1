@@ -16,6 +16,115 @@
 if ($global:DevKitCommonLoaded) { return }
 $global:DevKitCommonLoaded = $true
 
+# ==================== SETTINGS ====================
+
+function Get-DevKitSettingsFile {
+    $dir = Join-Path $env:LOCALAPPDATA "NorthstarDevKit"
+    if (-not (Test-Path $dir)) {
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    }
+    return Join-Path $dir "settings.json"
+}
+
+function Get-DevKitSettings {
+    <#
+    .SYNOPSIS
+        Loads DevKit's settings, creating the file with defaults on first
+        use. A corrupt/hand-edited file is quarantined and reset rather than
+        crashing - the same pattern already used for the project registry.
+    .OUTPUTS
+        PSCustomObject with .schemaVersion and .preferences.
+    #>
+    $defaults = [PSCustomObject]@{
+        schemaVersion = 1
+        preferences   = [PSCustomObject]@{
+            confirmDestructive = $true
+            updateCheckEnabled = $true
+            lastUpdateCheckUtc = $null
+        }
+    }
+
+    $path = Get-DevKitSettingsFile
+    if (-not (Test-Path $path)) { return $defaults }
+
+    try {
+        $raw = Get-Content -Path $path -Raw -ErrorAction Stop
+        if ([string]::IsNullOrWhiteSpace($raw)) { return $defaults }
+        $data = $raw | ConvertFrom-Json -ErrorAction Stop
+        if (-not $data.preferences) { return $defaults }
+        # Fill in any preference missing from an older/partial file rather
+        # than failing outright, so adding a new setting later never breaks
+        # an existing settings.json.
+        foreach ($prop in $defaults.preferences.PSObject.Properties.Name) {
+            if (-not $data.preferences.PSObject.Properties.Name.Contains($prop)) {
+                $data.preferences | Add-Member -MemberType NoteProperty -Name $prop -Value $defaults.preferences.$prop
+            }
+        }
+        return $data
+    } catch {
+        $backupPath = "$path.corrupt-$([DateTime]::UtcNow.ToString('yyyyMMddHHmmss'))"
+        try { Move-Item -Path $path -Destination $backupPath -Force -ErrorAction SilentlyContinue } catch {}
+        Write-DevKitError "Settings file was corrupted and has been reset. Backup: $backupPath"
+        return $defaults
+    }
+}
+
+function Set-DevKitSettings {
+    param([Parameter(Mandatory = $true)]$Settings)
+    $path = Get-DevKitSettingsFile
+    $tempPath = "$path.tmp.$PID"
+    try {
+        $Settings | ConvertTo-Json -Depth 6 | Set-Content -Path $tempPath -Encoding UTF8
+        Move-Item -Path $tempPath -Destination $path -Force
+    } catch {
+        if (Test-Path $tempPath) { Remove-Item $tempPath -Force -ErrorAction SilentlyContinue }
+        throw "Failed to save settings: $_"
+    }
+}
+
+function Confirm-DevKitDestructiveAction {
+    <#
+    .SYNOPSIS
+        One reusable confirmation gate for destructive operations, so new
+        (and eventually migrated) destructive scripts share a single,
+        correctly-implemented prompt instead of each hand-rolling its own.
+    .PARAMETER Action
+        One-line description of what will happen, e.g. "delete all Docker
+        containers, images, and volumes".
+    .PARAMETER AffectedPaths
+        Optional list of specific paths/items to display, so the user sees
+        exactly what's affected rather than a vague summary.
+    .PARAMETER TypedPhrase
+        If set, the user must type this exact phrase (case-sensitive) to
+        confirm, e.g. 'NUKE'. If omitted, a simple y/N prompt is used.
+    .PARAMETER Force
+        Bypass the prompt entirely (the caller's own -Force switch).
+    .OUTPUTS
+        [bool] $true if the action should proceed.
+    #>
+    param(
+        [Parameter(Mandatory = $true)][string]$Action,
+        [string[]]$AffectedPaths = @(),
+        [string]$TypedPhrase,
+        [switch]$Force
+    )
+
+    if ($Force) { return $true }
+
+    $settings = Get-DevKitSettings
+    if (-not $settings.preferences.confirmDestructive) { return $true }
+
+    Write-Host "  This will: $Action" -ForegroundColor Yellow
+    foreach ($p in $AffectedPaths) { Write-Host "    - $p" -ForegroundColor Gray }
+
+    if ($TypedPhrase) {
+        $typed = Read-Host "  Type '$TypedPhrase' to confirm"
+        return ($typed -ceq $TypedPhrase)
+    }
+    $answer = Read-Host "  Continue? (y/N)"
+    return ($answer -eq 'y')
+}
+
 # ==================== MODULE MENU DISPATCHER ====================
 #
 # DevKit.ps1's ten tool-category submenus (Port/Node/Next.js/Vite/Git/
@@ -234,7 +343,10 @@ function Write-DevKitHeader {
 
 function Write-DevKitStep {
     param([string]$Message)
-    Write-Host "  $Message..." -ForegroundColor Yellow -NoNewline
+    # Cyan, not Yellow: Yellow is reserved for real warnings (per AGENTS.md's
+    # documented color convention). Routine in-progress chrome using the same
+    # color as an actual warning diluted its meaning across the codebase.
+    Write-Host "  $Message..." -ForegroundColor Cyan -NoNewline
 }
 
 function Write-DevKitDone {

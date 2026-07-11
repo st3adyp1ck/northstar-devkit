@@ -39,7 +39,7 @@ foreach ($port in $CommonPorts) {
     if ($procInfo) {
         $foundProcesses += $procInfo
 
-        Write-Host "  WARNING: Port $port" -ForegroundColor Red -NoNewline
+        Write-Host "  WARNING: Port $port" -ForegroundColor Yellow -NoNewline
         Write-Host " -> PID: $($procInfo.PID)" -ForegroundColor Yellow -NoNewline
         Write-Host " ($($procInfo.Name))" -ForegroundColor Gray
     }

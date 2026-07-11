@@ -8,7 +8,7 @@
 - **Website:** https://www.northstarcoding.com
 - **License:** MIT
 - **Language:** English (all comments and documentation)
-- **Version:** 2.1.0
+- **Version:** 3.0.0
 
 ## Technology Stack
 
@@ -22,29 +22,39 @@
 ```
 DevKit/
 ├── DevKit.bat              # Main launcher (batch wrapper)
-├── DevKit.ps1              # Main interactive menu (PowerShell)
+├── DevKit.ps1              # Main interactive menu - Main Menu + Projects menu are
+│                           # hand-written; the ten tool-category submenus below are
+│                           # generic, driven by each folder's _module.psd1
 ├── Setup-Path.bat          # Adds DevKit to PATH for global access
+├── VERSION                 # Single source of truth for the version number
+├── CHANGELOG.md            # Release history
+├── RELEASING.md            # Maintainer release checklist
 ├── README.md               # User documentation
 ├── LICENSE                 # MIT License
 ├── AGENTS.md               # This file
 ├── .gitignore              # Git ignore rules
 │
 ├── lib/                    # Shared PowerShell helpers
-│   └── DevKit-Common.ps1   # Common functions used by scripts
+│   └── DevKit-Common.ps1   # Common functions: path/package-manager helpers, the
+│                           # project-linking picker, the manifest menu dispatcher,
+│                           # settings, and the shared confirmation gate
 │
-├── ports/                  # Port management tools
+├── tests/
+│   └── Unit/               # Pester tests for pure-logic parsers/converters
+│
+├── ports/                  # Port management tools (+ _module.psd1)
 │   ├── Scan-Ports.ps1      # Scan common dev ports (3000, 5173, etc.)
 │   ├── Scan-Ports.bat      # Batch wrapper
 │   ├── Kill-Port.ps1       # Kill process by port or PID
 │   └── Kill-AllNode.ps1    # Kill all Node.js processes
 │
-├── node/                   # Node.js utilities
+├── node/                   # Node.js utilities (+ _module.psd1)
 │   ├── Clear-NpmCache.ps1  # Clear NPM cache
 │   ├── Remove-NodeModules.ps1  # Delete node_modules
 │   ├── Nuke-And-Reinstall.ps1  # Full reset + reinstall
 │   └── Nuke-And-Reinstall.bat  # Batch wrapper
 │
-├── nextjs/                 # Next.js specific tools
+├── nextjs/                 # Next.js specific tools (+ _module.psd1)
 │   ├── Clear-NextCache.ps1     # Clear .next build cache
 │   ├── Clear-TurboCache.ps1    # Clear Turbopack cache
 │   ├── Next-DevFresh.ps1       # Clear cache + start dev server
@@ -52,13 +62,13 @@ DevKit/
 │   ├── Next-FullClean.ps1      # Full clean + reinstall
 │   └── Next-FullClean.bat      # Batch wrapper
 │
-├── vite/                   # Vite tools
+├── vite/                   # Vite tools (+ _module.psd1)
 │   ├── Vite-DevFresh.ps1       # Fresh dev server start
 │   ├── Vite-DevFresh.bat
 │   ├── Vite-PreviewBuild.ps1   # Build and preview
 │   └── Vite-PreviewBuild.bat
 │
-├── git/                    # Git tools
+├── git/                    # Git tools (+ _module.psd1)
 │   ├── Git-Cleanup.ps1         # Prune branches, gc, cleanup
 │   ├── Git-Cleanup.bat
 │   ├── Git-StatusAll.ps1       # Status across multiple repos
@@ -66,7 +76,7 @@ DevKit/
 │   ├── Git-SyncFork.ps1        # Sync fork with upstream
 │   └── Git-SyncFork.bat
 │
-├── docker/                 # Docker tools
+├── docker/                 # Docker tools (+ _module.psd1)
 │   ├── Docker-Nuke.ps1         # Remove all Docker resources
 │   ├── Docker-Nuke.bat
 │   ├── Docker-Cleanup.ps1      # Selective cleanup
@@ -74,7 +84,7 @@ DevKit/
 │   ├── Docker-QuickLogs.ps1    # Multi-container log tailing
 │   └── Docker-QuickLogs.bat
 │
-├── system/                 # System environment tools
+├── system/                 # System environment tools (+ _module.psd1)
 │   ├── Edit-Path.ps1           # PATH variable editor
 │   ├── Edit-Path.bat
 │   ├── Env-Backup.ps1          # Backup env variables
@@ -82,7 +92,7 @@ DevKit/
 │   ├── Shell-Reload.ps1        # Reload shell environment
 │   └── *.bat
 │
-├── workflow/               # Developer workflow tools
+├── workflow/               # Developer workflow tools (+ _module.psd1)
 │   ├── Code-Here.ps1           # Open VS Code/Cursor
 │   ├── Code-Here.bat
 │   ├── Open-Repo.ps1           # Open repo in browser
@@ -90,13 +100,13 @@ DevKit/
 │   ├── Copy-EnvTemplate.ps1    # Copy .env template
 │   └── Copy-EnvTemplate.bat
 │
-├── diagnostics/            # Health check tools
+├── diagnostics/            # Health check tools (+ _module.psd1)
 │   ├── DevKit-Doctor.ps1       # Environment health check
 │   ├── DevKit-Doctor.bat
 │   ├── System-DevInfo.ps1      # System info summary
 │   └── System-DevInfo.bat
 │
-└── wifi/                   # WiFi optimization tools
+└── wifi/                   # WiFi optimization tools (+ _module.psd1)
     ├── WiFi-Optimize.ps1   # Full optimization (DNS, TCP/IP, speed test)
     ├── WiFi-Optimize.bat   # Batch wrapper
     ├── WiFi-FastMode.ps1   # Quick optimization (no speed test)
@@ -104,6 +114,9 @@ DevKit/
     ├── WiFi-Scan.ps1       # Network scanner with signal analysis
     └── WiFi-Scan.bat       # Batch wrapper
 ```
+
+Linked projects (`projects.json`) and settings (`settings.json`) live outside
+the repo at `%LOCALAPPDATA%\NorthstarDevKit\`, not in any of the folders above.
 
 ## Code Style Guidelines
 
@@ -152,10 +165,17 @@ Use consistent color coding for output:
 Write-Host "Success message" -ForegroundColor Green
 Write-Host "Warning message" -ForegroundColor Yellow
 Write-Host "Error message" -ForegroundColor Red
-Write-Host "Info message" -ForegroundColor Cyan
+Write-Host "Info message / routine progress" -ForegroundColor Cyan
 Write-Host "Secondary info" -ForegroundColor Gray
 Write-Host "Highlight" -ForegroundColor Magenta
 ```
+
+**Yellow is reserved for real warnings** - a message the user should pay
+attention to before an action proceeds, not routine step/progress chrome
+(use Cyan for that, matching `Write-DevKitStep`) and not a condition that
+actually halts the script (use Red + "ERROR:", even if it reads like a
+warning in plain English - e.g. "a rebase is already in progress" is an
+error because the script exits, not a warning the user can proceed past).
 
 ### Error Handling
 
@@ -274,41 +294,75 @@ Launches the main interactive menu for navigation via keyboard input.
 - Batch wrappers use `-NoProfile -ExecutionPolicy Bypass` for fast, predictable launches
 - All scripts use `ErrorAction SilentlyContinue` where appropriate to prevent unnecessary failures
 - Force flags (`-Force`) are available to skip confirmation prompts for automation
-- Docker Nuke requires explicit confirmation (type 'NUKE') to prevent accidents
+- Docker Nuke requires explicit, case-sensitive confirmation (type `NUKE`) to prevent accidents - implemented via the shared `Confirm-DevKitDestructiveAction` helper in `lib/DevKit-Common.ps1`, which any new destructive script should call rather than hand-rolling its own y/n or typed-phrase prompt
+- `%LOCALAPPDATA%\NorthstarDevKit\settings.json`'s `preferences.confirmDestructive` (default `true`) gates that shared helper globally; it does not currently gate any script's own bespoke confirmation logic that predates the helper
 
 ## Testing
 
-This project does not have automated tests. Testing is done manually:
+`tests/Unit` (Pester 5, wired into CI) covers pure-logic parsers and
+converters where this project has actually had real bugs: package-manager
+detection (`Get-DevKitPackageManager`), PATH de-duplication, the `.env`
+template parser, the git-remote-to-browsable-URL converter, and the WiFi
+scan parser. Run locally with:
+
+```powershell
+Invoke-Pester -Path tests/Unit
+```
+
+Everything else - anything that shells out to git/docker/npm, mutates
+PATH/env vars/DNS, or kills processes - is **not** covered by automated
+tests by design (a hosted CI runner shouldn't have its real PATH mutated
+or its containers destroyed), and is verified manually:
 
 1. Run scripts in a PowerShell window to observe output
-2. Verify colored output displays correctly
+2. Verify colored output displays correctly (see the color convention above)
 3. Test both success and error paths
 4. Confirm batch wrappers launch PowerShell correctly
-5. Test DryRun modes where available (Docker, Git cleanup)
+5. Test DryRun/-WhatIf modes where available (Docker, Git cleanup)
 6. Verify error handling with invalid inputs
+7. When changing `DevKit.ps1` or `lib/DevKit-Common.ps1`'s menu dispatcher,
+   do a scripted pass through the interactive menu (pipe a sequence of
+   menu choices to `pwsh -File DevKit.ps1`) to confirm every category still
+   renders and dispatches correctly - this is how the 3.0 rewrite verified
+   menu parity across all ten tool categories.
 
 ## Adding New Tools
 
-When adding a new tool to DevKit:
+Since 3.0, adding a tool to an **existing** category (`ports/`, `node/`,
+`nextjs/`, `vite/`, `git/`, `docker/`, `system/`, `workflow/`,
+`diagnostics/`, `wifi/`) is a manifest edit, not a `DevKit.ps1` edit:
 
 1. Create the PowerShell script in the appropriate subdirectory
 2. Dot-source `lib/DevKit-Common.ps1` for shared helpers (admin checks, path validation, safe deletion, etc.)
 3. Include proper comment-based help (SYNOPSIS, DESCRIPTION, PARAMETERS, EXAMPLES)
 4. Add a batch wrapper for double-click execution
-5. Update `DevKit.ps1` main menu if the tool should be accessible from the interactive menu
+5. Add an entry to that category's `_module.psd1` (see any existing one,
+   e.g. `ports/_module.psd1`, for the schema - `Key`/`Label`/`Script`,
+   plus `RequiresProject`, `RequiresFile`, `Prompts`, or `StaticArgs` as
+   needed). **Do not edit `DevKit.ps1`** for this - the generic dispatcher
+   in `lib/DevKit-Common.ps1` (`Start-DevKitModuleTools`) picks up the new
+   manifest entry automatically.
 6. Update `README.md` with documentation
 7. Update `AGENTS.md` with module details
 8. Follow existing naming conventions and output styling
-9. Test the tool thoroughly
+9. Test the tool thoroughly, including via the interactive menu (confirm
+   the new manifest entry parses and dispatches correctly)
 
 ## Common Development Tasks
 
 ### Adding a new module category
 1. Create a new subdirectory (e.g., `docker/`, `git/`)
 2. Add PowerShell scripts and batch wrappers
-3. Add menu function to `DevKit.ps1`
-4. Update `Show-MainMenu` to include new option
-5. Update documentation files
+3. Add a `_module.psd1` manifest listing the category's menu items (copy
+   the shape of an existing one, e.g. `node/_module.psd1`)
+4. Add exactly two lines to `DevKit.ps1`: a line in `Show-MainMenu`'s
+   `Write-Host` list for the new `[N]` option, and a
+   `'N' { Start-DevKitModuleTools -FolderPath (Join-Path $ScriptDir "yourfolder") }`
+   case in the entry-point switch at the bottom of the file. That's the
+   entire integration - no new menu function needed.
+5. Add the new category to `Get-DevKitSearchableCategories` in `DevKit.ps1`
+   (a `Folder`/`MainMenuKey` pair) so `/` search picks it up too
+6. Update documentation files
 
 ### Modifying existing tools
 - Keep backward compatibility with existing parameters
@@ -324,4 +378,5 @@ When adding a new tool to DevKit:
 - Batch wrappers use `%~dp0` to locate `.ps1` files without changing the caller's working directory
 - No package management (no package.json, requirements.txt, etc.) - this is a standalone toolkit
 - Scripts use consistent header format with Northstar branding
-- Version 2.1 unifies the toolkit under a shared helper module (`lib/DevKit-Common.ps1`), adds package-manager auto-detection, completes batch-wrapper coverage, and fixes PowerShell 7 / path-validation / process-killing bugs
+- Version 2.1 unified the toolkit under a shared helper module (`lib/DevKit-Common.ps1`), added package-manager auto-detection, completed batch-wrapper coverage, and fixed PowerShell 7 / path-validation / process-killing bugs
+- Version 3.0 (see `CHANGELOG.md` for full detail) added browsable project linking (`Select-DevKitProject`, the linked-projects registry, `[10] Projects` menu), rewrote all ten tool-category submenus as a manifest-driven dispatcher (`_module.psd1` + `Start-DevKitModuleTools`) instead of ten hand-written function pairs, added `/` search-and-jump, added a Pester test suite, and fixed roughly 150 confirmed bugs from a full-repo review - including one (`system/Env-Restore.ps1`) that had been completely broken (could not run at all) since before 3.0 existed

@@ -181,7 +181,7 @@ Write-Host "  Started: $(Get-Date -Format 'HH:mm:ss')" -ForegroundColor DarkGray
 Write-Host ""
 
 # Warning and confirmation
-Write-Host "  WARNING: This will:" -ForegroundColor Red
+Write-Host "  WARNING: This will:" -ForegroundColor Yellow
 Write-Host "    - Reset your network stack (Winsock/TCP/IP)" -ForegroundColor Yellow
 Write-Host "    - Temporarily disconnect your internet" -ForegroundColor Yellow
 Write-Host "    - Require a system restart to fully complete" -ForegroundColor Yellow

@@ -11,5 +11,10 @@
             Label  = 'System Dev Info'
             Script = 'System-DevInfo.ps1'
         }
+        @{
+            Key    = '3'
+            Label  = 'Check for Updates'
+            Script = 'Test-DevKitUpdate.ps1'
+        }
     )
 }

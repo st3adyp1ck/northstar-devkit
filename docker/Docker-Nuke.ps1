@@ -36,7 +36,7 @@ if (Test-Path $CommonModule) { . $CommonModule }
 
 
 Write-Host "`nNorthstar DevKit - DOCKER NUKE`n" -ForegroundColor Cyan
-Write-Host "  WARNING: This will remove ALL Docker resources!" -ForegroundColor Red
+Write-Host "  WARNING: This will remove ALL Docker resources!" -ForegroundColor Yellow
 Write-Host ""
 
 # Check if Docker is available
@@ -111,14 +111,12 @@ if ($DryRun) {
     exit 0
 }
 
-# Confirm
-if (-not $Force) {
-    Write-Host "  Type 'NUKE' to confirm destruction of all Docker resources:" -ForegroundColor Red -NoNewline
-    $confirm = Read-Host
-    if ($confirm -cne 'NUKE') {
-        Write-Host "`n  Cancelled. Wise choice!`n" -ForegroundColor Gray
-        exit 0
-    }
+# Confirm - uses the shared gate (lib/DevKit-Common.ps1) so the typed-phrase
+# comparison is guaranteed case-sensitive and this respects the user's
+# confirmDestructive setting consistently with every other destructive tool.
+if (-not (Confirm-DevKitDestructiveAction -Action "destroy ALL Docker containers, images, volumes, and networks" -TypedPhrase 'NUKE' -Force:$Force)) {
+    Write-Host "`n  Cancelled. Wise choice!`n" -ForegroundColor Gray
+    exit 0
 }
 
 # Execute the nuke

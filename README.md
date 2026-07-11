@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="https://img.shields.io/badge/Northstar-DevKit-2.1.0-blue?style=for-the-badge&logo=powershell&logoColor=white" alt="Northstar DevKit">
+<img src="https://img.shields.io/badge/Northstar-DevKit-3.0.0-blue?style=for-the-badge&logo=powershell&logoColor=white" alt="Northstar DevKit">
 
 <h3>A powerful, dependency-free Windows toolkit for modern web developers</h3>
 
@@ -66,7 +66,16 @@ DevKit.bat
 :: 3. Pick a tool from the menu and go!
 ```
 
-The interactive menu will guide you through every tool. For project-specific actions (Git, Next.js, Vite, etc.), DevKit automatically prompts you for the target directory — so you can run it from anywhere.
+The interactive menu will guide you through every tool. For project-specific actions (Git, Next.js, Vite, etc.), DevKit prompts you with a picker: pick a previously-linked project, browse for a folder, use the current directory, or type a path — no more retyping the same path for every action. Whatever you pick becomes your **Active Project** for the rest of the session. See [New in 3.0](#-new-in-30) below.
+
+---
+
+## 🎉 New in 3.0
+
+- **Browsable project linking.** Link a project once (by browsing to it, or just using your current directory) and every tool reuses it silently for the rest of the session — no more retyping the same path over and over. Append `p` to any menu number (e.g. `4p`) to use a different project for a single run without disturbing your active one. Manage linked projects from the new `[10] Projects` menu.
+- **Search** (`/` from the Main Menu) — jump straight to any tool by keyword instead of drilling through submenus.
+- **~150 confirmed bugs fixed**, including a couple of genuinely serious ones: `Env-Restore.ps1` couldn't run at all, `WiFi-Scan.ps1` had never successfully parsed a network, and a Docker Nuke confirmation that accepted lowercase `nuke`. Full details in [CHANGELOG.md](CHANGELOG.md).
+- **Manifest-driven menus** under the hood — every tool category is now a small `_module.psd1` data file instead of hand-written dispatch code, so adding a new tool no longer means editing `DevKit.ps1`.
 
 ---
 
@@ -82,9 +91,9 @@ The interactive menu will guide you through every tool. For project-specific act
 |---|---|---|---|
 | Cleanup, status all repos, sync forks | Nuke containers & images, tail logs | Edit PATH, backup/restore env | Open IDE/repo, copy `.env` templates |
 
-| 🔍 **Diagnostics** | 📡 **WiFi** |
-|---|---|
-| Health check & system info | Optimize DNS, scan networks, speed test |
+| 🔍 **Diagnostics** | 📡 **WiFi** | 📁 **Projects** |
+|---|---|---|
+| Health check & system info | Optimize DNS, scan networks, speed test | Link, switch, and manage project directories |
 
 </div>
 
@@ -97,10 +106,11 @@ Launch `DevKit.bat` and navigate with your keyboard:
 
 ```
 =============================================
-        Northstar DevKit v2.1.0
-    Developer Toolkit by Northstar.com
+       Northstar DevKit v3.0.0
+    Developer Toolkit by northstarcoding.com
 =============================================
-  Current: Main Menu
+  Menu: Main Menu
+  Active Project: acme-storefront  (C:\dev\acme-storefront)
 
   Development Tools:
     [1] Port Tools     - Scan and Kill
@@ -117,10 +127,12 @@ Launch `DevKit.bat` and navigate with your keyboard:
     [8] Workflow       - IDE & Utils
     [9] Diagnostics    - Health Check
 
-  Network:
-    [10] WiFi Tools    - Optimize and Scan
+  Projects & Network:
+    [10] Projects      - Link, Switch, Manage
+    [11] WiFi Tools    - Optimize and Scan
 
     [0] Exit
+    [/] Search tools
 ```
 
 ### Run Individual Scripts
@@ -230,6 +242,8 @@ You can also run any tool directly from PowerShell or Command Prompt:
 | Check all repos | `git\Git-StatusAll.bat` |
 | Slow cafe WiFi | `wifi\WiFi-Optimize.bat` |
 | Environment health check | `diagnostics\DevKit-Doctor.bat` |
+| Retyping the same project path every time | `DevKit.bat` → any tool → link it once, it's remembered |
+| Can't remember which menu a tool is in | `DevKit.bat` → `/` → type a keyword |
 
 ---
 
@@ -238,25 +252,34 @@ You can also run any tool directly from PowerShell or Command Prompt:
 ```
 DevKit/
 ├── DevKit.bat              # Main launcher
-├── DevKit.ps1              # Interactive menu
+├── DevKit.ps1              # Interactive menu (manifest-driven dispatcher)
 ├── Setup-Path.bat          # Add to PATH utility
+├── VERSION                 # Single source of truth for the version number
+├── CHANGELOG.md            # Release history
+├── RELEASING.md            # Maintainer release checklist
 ├── README.md               # This file
 ├── CONTRIBUTING.md         # Contribution guidelines
 ├── CODE_OF_CONDUCT.md      # Community standards
 ├── LICENSE                 # MIT License
 │
-├── lib/                    # Shared PowerShell helpers
-├── ports/                  # Port management
-├── node/                   # Node.js utilities
-├── nextjs/                 # Next.js tools
-├── vite/                   # Vite tools
-├── git/                    # Git tools
-├── docker/                 # Docker tools
-├── system/                 # System environment
-├── workflow/               # Developer workflow
-├── diagnostics/            # Health checks
-└── wifi/                   # WiFi optimization
+├── lib/                    # Shared PowerShell helpers (project picker, menu
+│                           # dispatcher, settings, confirmation gate, etc.)
+├── ports/                  # Port management       (+ _module.psd1 menu manifest)
+├── node/                   # Node.js utilities      (+ _module.psd1)
+├── nextjs/                 # Next.js tools          (+ _module.psd1)
+├── vite/                   # Vite tools             (+ _module.psd1)
+├── git/                    # Git tools              (+ _module.psd1)
+├── docker/                 # Docker tools           (+ _module.psd1)
+├── system/                 # System environment     (+ _module.psd1)
+├── workflow/                # Developer workflow     (+ _module.psd1)
+├── diagnostics/            # Health checks           (+ _module.psd1)
+├── wifi/                   # WiFi optimization       (+ _module.psd1)
+└── tests/Unit/             # Pester tests (run via `Invoke-Pester -Path tests/Unit`)
 ```
+
+Linked projects and settings are stored outside the repo, at
+`%LOCALAPPDATA%\NorthstarDevKit\` (`projects.json`, `settings.json`) —
+nothing project-specific is written into the DevKit install folder.
 
 ---
 

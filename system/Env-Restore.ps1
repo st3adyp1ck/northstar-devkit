@@ -29,10 +29,18 @@ param(
     [switch]$Force
 )
 
-$CommonModule = Join-Path (Join-Path (Split-Path -Parent $PSScriptRoot) "lib") "DevKit-Common.ps1"
-if (Test-Path $CommonModule) { . $CommonModule }
-
 begin {
+    # This dot-source must live inside begin{} rather than as loose top-level
+    # code between param() and begin{}: PowerShell only recognizes bare
+    # begin/process/end as pipeline blocks when they are the ENTIRE script
+    # body immediately following param()/dynamicparam(). Any other top-level
+    # statement in between (as this used to be) makes the parser treat the
+    # literal token "begin" as a command name instead - which throws "The
+    # term 'begin' is not recognized ..." on every single invocation. This
+    # was a real, pre-existing bug: the script could not run at all.
+    $CommonModule = Join-Path (Join-Path (Split-Path -Parent $PSScriptRoot) "lib") "DevKit-Common.ps1"
+    if (Test-Path $CommonModule) { . $CommonModule }
+
     Write-DevKitHeader "Environment Restore"
 
     function Resolve-DevKitPathRestoreValue {
@@ -164,7 +172,7 @@ process {
     
     # Confirm
     if (-not $Force) {
-        Write-Host "`n  WARNING: This will overwrite current environment variables!" -ForegroundColor Red
+        Write-Host "`n  WARNING: This will overwrite current environment variables!" -ForegroundColor Yellow
         $confirm = Read-Host "  Continue with restore? (y/n)"
         if ($confirm -ne 'y') {
             Write-Host "  Cancelled.`n" -ForegroundColor Gray
