@@ -2,6 +2,9 @@
 *.ps1.log
 *.ps1.xml
 
+# Pester test-run output
+testResults.xml
+
 # Windows
 Thumbs.db
 desktop.ini

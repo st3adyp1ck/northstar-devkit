@@ -1,7 +1,7 @@
 #!/usr/bin/env pwsh
 <#
 .SYNOPSIS
-    Remove "Open Northstar DevKit Here" from the folder right-click menu.
+    Remove "Open Northstar DevKit Here" from the folder right-click menu - Northstar DevKit
 .DESCRIPTION
     Removes the registry key added by Install-ShellIntegration.ps1.
     HKCU only - no administrator privileges required.

@@ -1,7 +1,7 @@
 #!/usr/bin/env pwsh
 <#
 .SYNOPSIS
-    Add "Open Northstar DevKit Here" to the folder right-click menu.
+    Add "Open Northstar DevKit Here" to the folder right-click menu - Northstar DevKit
 .DESCRIPTION
     Adds a single registry key under HKCU:\Software\Classes\Directory\Background\shell,
     so right-clicking empty space inside any folder in Explorer offers

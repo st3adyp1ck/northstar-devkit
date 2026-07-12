@@ -61,7 +61,7 @@ try {
 }
 
 # Find Git repositories
-Write-Host "  Scanning for repositories..." -ForegroundColor Yellow
+Write-Host "  Scanning for repositories..." -ForegroundColor Cyan
 
 $excludedDirNames = @('node_modules', 'dist', '.next', '.turbo', 'bin', 'obj')
 
@@ -99,7 +99,6 @@ $summary = @{
 
 # Process each repo
 foreach ($repo in $gitRepos) {
-    $repoName = $repo.Name
     $repoPath = $repo.FullName
     $relPath = $repoPath.Substring($targetPath.Length).TrimStart('\', '/')
 

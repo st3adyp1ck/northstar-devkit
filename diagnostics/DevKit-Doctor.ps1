@@ -98,7 +98,7 @@ function Get-DevKitToolVersion {
 }
 
 Write-Host "`nNorthstar DevKit - Doctor`n" -ForegroundColor Cyan
-Write-Host "  Checking development environment health..." -ForegroundColor Yellow
+Write-Host "  Checking development environment health..." -ForegroundColor Cyan
 Write-Host ""
 
 $issuesFound = 0
@@ -259,7 +259,7 @@ if ($dockerCmd) {
     # Check docker compose
     $composeCmd = Get-Command docker-compose -ErrorAction SilentlyContinue
     if (-not $composeCmd) {
-        $composePlugin = & docker compose version 2>$null
+        $null = & docker compose version 2>$null
         if ($LASTEXITCODE -eq 0) { $composeCmd = $true }
     }
     if ($composeCmd) {

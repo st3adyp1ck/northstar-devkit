@@ -5,7 +5,8 @@
 .DESCRIPTION
     Detects which AI coding-agent CLIs are installed on this machine
     (Claude Code, GitHub Copilot CLI via the gh extension, Codex, Gemini,
-    Cursor, Aider) and reports each one's version. Read-only - makes no
+    Cursor, Aider, Supabase CLI, Vercel CLI, Railway CLI, Kimi Code CLI, and
+    Augment Code CLI) and reports each one's version. Read-only - makes no
     changes to the system.
 
     Created by Northstar Software Development
@@ -64,6 +65,13 @@ function Test-AiCliVersion {
     return $result
 }
 
+# Each entry's Note (if set) is always printed as an extra indented line once
+# the tool is found - used for a channel/update caveat worth surfacing even
+# when the tool itself is working fine (e.g. Supabase's npm caveat).
+# NotInstalledMessage (if set) replaces the generic "not installed" line with
+# tool-specific context for why it isn't found (e.g. Augment's WSL-only
+# support on Windows), per the same idea Kill-Port-style tools use elsewhere
+# in this repo for "don't just say no, say why".
 $tools = @(
     @{ Label = 'claude (Claude Code)'; Command = 'claude'; Fallback = $null; VersionArg = '--version' },
     @{ Label = 'gh (GitHub CLI)'; Command = 'gh'; Fallback = $null; VersionArg = '--version' },
@@ -72,7 +80,30 @@ $tools = @(
     # cursor-agent has shipped under two different binary names across
     # releases - fall back to "cursor" before reporting it as not installed.
     @{ Label = 'cursor-agent'; Command = 'cursor-agent'; Fallback = 'cursor'; VersionArg = '--version' },
-    @{ Label = 'aider'; Command = 'aider'; Fallback = $null; VersionArg = '--version' }
+    @{ Label = 'aider'; Command = 'aider'; Fallback = $null; VersionArg = '--version' },
+    @{
+        Label      = 'supabase (Supabase CLI)'
+        Command    = 'supabase'
+        Fallback   = $null
+        VersionArg = '--version'
+        Note       = "update channel: Scoop, not npm -- 'npm install -g supabase' is unsupported upstream (supabase/cli #4496); see supabase.com/docs"
+    },
+    @{ Label = 'vercel (Vercel CLI)'; Command = 'vercel'; Fallback = $null; VersionArg = '--version' },
+    @{ Label = 'railway (Railway CLI)'; Command = 'railway'; Fallback = $null; VersionArg = '--version' },
+    @{
+        Label      = 'kimi (Kimi Code CLI)'
+        Command    = 'kimi'
+        Fallback   = $null
+        VersionArg = '--version'
+        Note       = "two unrelated CLIs share the 'kimi' command name (Moonshot AI's npm-based Kimi Code CLI and an older Python-based kimi-cli) -- DevKit can't reliably tell which one this is, so Update AI CLIs treats it as manual-update-only"
+    },
+    @{
+        Label               = 'auggie (Augment Code CLI)'
+        Command             = 'auggie'
+        Fallback            = $null
+        VersionArg          = '--version'
+        NotInstalledMessage = "not found on native Windows PATH -- Augment Code CLI officially supports Windows only via WSL, see docs.augmentcode.com"
+    }
 )
 
 foreach ($tool in $tools) {
@@ -86,8 +117,13 @@ foreach ($tool in $tools) {
             ($tool.Fallback -and (Get-Command $tool.Fallback -ErrorAction SilentlyContinue))
         if ($presentButUnsafe) {
             Write-Host "  $($tool.Label): found, but not a directly runnable Windows executable (version check skipped)" -ForegroundColor Yellow
+        } elseif ($tool.NotInstalledMessage) {
+            Write-Host "  $($tool.Label): $($tool.NotInstalledMessage)" -ForegroundColor Gray
         } else {
             Write-Host "  $($tool.Label): not installed" -ForegroundColor Gray
+        }
+        if ($tool.Note) {
+            Write-Host "    $($tool.Note)" -ForegroundColor Gray
         }
         continue
     }
@@ -101,6 +137,10 @@ foreach ($tool in $tools) {
     } else {
         Write-Host "  $($tool.Label): " -NoNewline
         Write-Host "found but not responding" -ForegroundColor Yellow
+    }
+
+    if ($tool.Note) {
+        Write-Host "    $($tool.Note)" -ForegroundColor Gray
     }
 
     if ($tool.Command -eq 'gh') {

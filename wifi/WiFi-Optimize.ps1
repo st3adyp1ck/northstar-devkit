@@ -309,7 +309,10 @@ if (-not $KeepDNS) {
             $dnsBackup | ConvertTo-Json | Set-Content -Path $DnsBackupPath -Encoding UTF8 -ErrorAction Stop
             Write-DevKitInfo "Previous DNS backed up to: $DnsBackupPath"
         } catch {
-            Write-DevKitInfo "WARNING: could not back up existing DNS settings ($($_.Exception.Message))"
+            # Yellow, not Write-DevKitInfo's Gray: this is a real warning (per
+            # AGENTS.md's color convention) -- if the backup failed, -RestoreDns
+            # won't have anything to restore from.
+            Write-Host "  WARNING: could not back up existing DNS settings ($($_.Exception.Message))" -ForegroundColor Yellow
         }
 
         Write-DevKitStep "Setting IPv4 DNS on $($adapter.Name)"
@@ -465,7 +468,7 @@ Write-Host ""
 Write-Host "  DNS: $(if($KeepDNS){'Unchanged'}elseif($dns1){"$dns1, $dns2"}else{'Unchanged (no WiFi adapter found)'})" -ForegroundColor Gray
 Write-Host "  Network stack: Reset" -ForegroundColor Gray
 Write-Host ""
-Write-Host "  IMPORTANT: A system restart is recommended" -ForegroundColor Red
+Write-Host "  IMPORTANT: A system restart is recommended" -ForegroundColor Yellow
 Write-Host "  to fully complete the TCP/IP reset.`n" -ForegroundColor Yellow
 
 Write-Host "  Tips for better speeds:" -ForegroundColor Cyan

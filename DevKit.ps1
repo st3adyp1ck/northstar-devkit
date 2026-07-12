@@ -32,6 +32,23 @@
 $ScriptDir = $PSScriptRoot
 . (Join-Path $ScriptDir "lib\DevKit-Common.ps1")
 
+# Read the version once at startup so the header banner never drifts out of
+# sync with the VERSION file (previously hardcoded as a literal string).
+$DevKitVersion = '3.1.0'
+try {
+    $versionFile = Join-Path $ScriptDir "VERSION"
+    if (Test-Path $versionFile) {
+        $rawVersion = (Get-Content -Path $versionFile -Raw -ErrorAction Stop).Trim()
+        if (-not [string]::IsNullOrWhiteSpace($rawVersion)) { $DevKitVersion = $rawVersion }
+    }
+} catch {
+    # Keep the hardcoded fallback version above.
+}
+
+# Print the startup banner exactly once per session - never call this from
+# Show-Header/Show-MainMenu, which redraw on every menu.
+Show-DevKitStartupBanner
+
 # Cache of the active project for this session, so Show-Header doesn't hit
 # disk on every menu redraw. Invalidated by Set-/Clear-DevKitActiveProject.
 $global:DevKitActiveProjectCache = $null
@@ -40,7 +57,7 @@ function Show-Header {
     param([string]$Title)
     Clear-Host
     Write-Host "=============================================" -ForegroundColor Cyan
-    Write-Host "       Northstar DevKit v3.1.0             " -ForegroundColor Cyan
+    Write-Host "       Northstar DevKit v$DevKitVersion             " -ForegroundColor Cyan
     Write-Host "    Developer Toolkit by northstarcoding.com" -ForegroundColor Cyan
     Write-Host "=============================================" -ForegroundColor Cyan
     Write-Host "  Menu: $Title" -ForegroundColor Cyan
@@ -61,6 +78,9 @@ function Show-Header {
 
 function Show-MainMenu {
     Show-Header "Main Menu"
+    Write-Host "  DevKit bundles your everyday Node/Next.js/Vite/Git/Docker tools into" -ForegroundColor Gray
+    Write-Host "  one menu. New here? Pick [?] Getting Started below." -ForegroundColor Gray
+    Write-Host ""
 }
 
 # Drives both the arrow-navigable Main Menu render and Get-DevKitSearchableCategories'
@@ -91,6 +111,7 @@ function Get-DevKitMainMenuEntries {
         @{ Key = '11'; Label = 'WiFi Tools     - Optimize and Scan' }
         @{ IsHeader = $true; Label = '' }
         @{ Key = '/'; Label = 'Search tools' }
+        @{ Key = '?'; Label = 'Getting Started - how Active Project, search, and help work' }
         @{ Key = '0'; Label = 'Exit' }
     )
 }
@@ -178,6 +199,38 @@ function Search-DevKitTools {
     }
 }
 
+function Show-DevKitGettingStarted {
+    <#
+    .SYNOPSIS
+        First-time-user help screen explaining Active Project linking, the
+        'p' suffix convention, the '/' search convention, and each
+        submenu's '[?]' help entry. Reachable via '?' on the Main Menu.
+    #>
+    Clear-Host
+    Write-Host "=============================================" -ForegroundColor Cyan
+    Write-Host "  Getting Started" -ForegroundColor Cyan
+    Write-Host "=============================================" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  Active Project" -ForegroundColor White
+    Write-Host "    Pick, browse, or link a project once via option [10] Projects," -ForegroundColor Gray
+    Write-Host "    or from any tool that needs one. DevKit remembers it as your" -ForegroundColor Gray
+    Write-Host "    Active Project for the rest of this session." -ForegroundColor Gray
+    Write-Host ""
+    Write-Host "  The 'p' suffix" -ForegroundColor White
+    Write-Host "    Typing e.g. '4p' at any submenu re-prompts for a project just for" -ForegroundColor Gray
+    Write-Host "    that one run, without changing your Active Project." -ForegroundColor Gray
+    Write-Host ""
+    Write-Host "  The '/' search" -ForegroundColor White
+    Write-Host "    From the Main Menu, type '/' and a keyword (e.g. 'port', 'cache')" -ForegroundColor Gray
+    Write-Host "    to jump straight to a matching tool in any category." -ForegroundColor Gray
+    Write-Host ""
+    Write-Host "  Per-category help" -ForegroundColor White
+    Write-Host "    Inside every submenu, type '?' to see what each numbered option" -ForegroundColor Gray
+    Write-Host "    in that category actually does." -ForegroundColor Gray
+    Write-Host ""
+    Read-Host "Press Enter to return to the menu"
+}
+
 # ==================== PROJECTS ====================
 # Hand-written rather than manifest-driven: this menu manages the picker
 # system itself (Select-DevKitProject / the linked-projects registry), it
@@ -243,6 +296,7 @@ while ($true) {
         '12' { Start-DevKitModuleTools -FolderPath (Join-Path $ScriptDir "maintenance") }
         '13' { Start-DevKitModuleTools -FolderPath (Join-Path $ScriptDir "agents") }
         '/' { Search-DevKitTools }
+        '?' { Show-DevKitGettingStarted }
         '0' { exit }
         default { Write-Host "  Invalid option. Press Enter to continue." -ForegroundColor Red; Read-Host }
     }

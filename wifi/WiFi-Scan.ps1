@@ -76,7 +76,16 @@ function ConvertFrom-DevKitWlanScan {
         $results += $currentNet
     }
 
-    return $results
+    # The unary comma is required: PowerShell flattens a 0- or 1-element array
+    # to $null / a bare scalar as it crosses the function-return boundary. With
+    # exactly one network found, "return $results" handed the caller a bare
+    # Hashtable instead of a 1-element array -- $sorted.Count then silently
+    # returned that hashtable's *key* count (4: SSID/BSSIDs/Auth/CurrentBSSID)
+    # instead of the real network count, so the scanner printed "Found 4
+    # network(s)" while only ever listing the one real network. ",$results"
+    # forces the output stream to carry exactly one object (the array itself),
+    # so the caller gets back a true array at every count, including 0 and 1.
+    return ,$results
 }
 
 # Skip the interactive scan when this script is dot-sourced (e.g. by
@@ -117,8 +126,13 @@ if ($results.Count -eq 0) {
     exit 0
 }
 
-# Sort by best signal
-$sorted = $results | Sort-Object { ($_.BSSIDs | Measure-Object -Property Signal -Maximum).Maximum } -Descending
+# Sort by best signal. Wrapped in @(...): same single-element flattening
+# hazard as ConvertFrom-DevKitWlanScan's return (see comment there) applies
+# here too -- with exactly one network, "$results | Sort-Object ..." streams
+# a single object through the pipeline, so a bare assignment would again
+# collapse $sorted to a scalar Hashtable instead of a 1-element array, and
+# $sorted.Count below would silently report that hashtable's key count.
+$sorted = @($results | Sort-Object { ($_.BSSIDs | Measure-Object -Property Signal -Maximum).Maximum } -Descending)
 
 # Display results
 Write-Host "  Found $($sorted.Count) network(s):" -ForegroundColor Green

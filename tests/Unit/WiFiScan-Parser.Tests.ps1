@@ -126,4 +126,34 @@ Describe "ConvertFrom-DevKitWlanScan" {
         $results = ConvertFrom-DevKitWlanScan -RawOutput "There is no wireless interface on the system.`r`n"
         $results.Count | Should -Be 0
     }
+
+    It "returns a true 1-element array (not a bare Hashtable) when exactly one network is found" {
+        # Regression test: PowerShell flattens a 1-element array to a bare
+        # scalar across a function-return boundary unless the function forces
+        # array output (e.g. "return ,$results"). Without that, $results.Count
+        # here silently reported the single network's *key* count (4) instead
+        # of the real network count (1) -- confirmed live against a real
+        # single-network `netsh wlan show networks` scan.
+        $singleNetworkOutput = @"
+Interface name : Wi-Fi
+There are 1 networks currently visible.
+
+SSID 1 : Mr.Robot
+    Network type            : Infrastructure
+    Authentication          : WPA2-Personal
+    Encryption              : CCMP
+    BSSID 1                 : cc:2d:21:b1:66:8d
+         Signal             : 82%
+         Radio type         : 802.11ac
+         Channel             : 149
+         Basic rates (Mbps) : 6 12 24
+         Other rates (Mbps) : 9 18 36 48 54
+
+"@ -replace "`r?`n", "`r`n"
+
+        $results = ConvertFrom-DevKitWlanScan -RawOutput $singleNetworkOutput
+        $results.GetType().IsArray | Should -Be $true
+        $results.Count | Should -Be 1
+        $results[0].SSID | Should -Be "Mr.Robot"
+    }
 }

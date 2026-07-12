@@ -84,7 +84,7 @@ Write-Host "    Networks:   $networkCount (custom only)" -ForegroundColor $(if($
 Write-Host ""
 
 # Nothing to do
-if ($containerCount -eq 0 -and $imageCount -eq 0 -and ($KeepVolumes -or $volumeCount -eq 0) -and $networkCount -eq 0) {
+if ($containerCount -eq 0 -and ($KeepImages -or $imageCount -eq 0) -and ($KeepVolumes -or $volumeCount -eq 0) -and $networkCount -eq 0) {
     Write-Host "  OK: No Docker resources found. Nothing to nuke!`n" -ForegroundColor Green
     exit 0
 }
@@ -133,7 +133,7 @@ $totalSteps = $containerSteps + $imageSteps + $volumeSteps + $networkSteps
 
 # Step 1: Stop all containers
 if ($containerCount -gt 0) {
-    Write-Host "`n  [$step/$totalSteps] Stopping all containers..." -ForegroundColor Yellow
+    Write-Host "`n  [$step/$totalSteps] Stopping all containers..." -ForegroundColor Cyan
     $stopHadErrors = $false
     $stopOutput = @(docker stop $(docker ps -aq) 2>&1)
     foreach ($line in $stopOutput) {
@@ -150,7 +150,7 @@ if ($containerCount -gt 0) {
     $step++
 
     # Step 2: Remove all containers
-    Write-Host "`n  [$step/$totalSteps] Removing all containers..." -ForegroundColor Yellow
+    Write-Host "`n  [$step/$totalSteps] Removing all containers..." -ForegroundColor Cyan
     $removeHadErrors = $false
     $removeOutput = @(docker rm -f $(docker ps -aq) 2>&1)
     foreach ($line in $removeOutput) {
@@ -174,7 +174,7 @@ if ($containerCount -gt 0) {
 
 # Step 3: Remove images (unless KeepImages)
 if (-not $KeepImages -and $imageCount -gt 0) {
-    Write-Host "`n  [$step/$totalSteps] Removing all images..." -ForegroundColor Yellow
+    Write-Host "`n  [$step/$totalSteps] Removing all images..." -ForegroundColor Cyan
     $imagesHadErrors = $false
     $imagesOutput = @(docker rmi -f $(docker images -q) 2>&1)
     foreach ($line in $imagesOutput) {
@@ -201,7 +201,7 @@ if (-not $KeepImages -and $imageCount -gt 0) {
 
 # Step 4: Remove volumes (unless KeepVolumes)
 if (-not $KeepVolumes -and $volumeCount -gt 0) {
-    Write-Host "`n  [$step/$totalSteps] Removing all volumes..." -ForegroundColor Yellow
+    Write-Host "`n  [$step/$totalSteps] Removing all volumes..." -ForegroundColor Cyan
     $volumesHadErrors = $false
     $volumesOutput = @(docker volume rm $(docker volume ls -q) 2>&1)
     foreach ($line in $volumesOutput) {
@@ -227,7 +227,7 @@ if (-not $KeepVolumes -and $volumeCount -gt 0) {
 }
 
 # Step 5: Prune networks and build cache
-Write-Host "`n  [$step/$totalSteps] Pruning networks and build cache..." -ForegroundColor Yellow
+Write-Host "`n  [$step/$totalSteps] Pruning networks and build cache..." -ForegroundColor Cyan
 docker network prune -f 2>&1 | Out-Null
 docker builder prune -f 2>&1 | Out-Null
 Write-Host "  DONE: Networks and build cache pruned." -ForegroundColor Green
@@ -239,11 +239,11 @@ Write-Host "  DONE: Networks and build cache pruned." -ForegroundColor Green
 if ($KeepImages) {
     Write-Host "`n  Skipping final system prune (KeepImages specified - system prune still removes dangling images)." -ForegroundColor Green
     if (-not $KeepVolumes) {
-        Write-Host "  Pruning remaining anonymous volumes..." -ForegroundColor Yellow
+        Write-Host "  Pruning remaining anonymous volumes..." -ForegroundColor Cyan
         docker volume prune -f 2>&1 | Out-Null
     }
 } else {
-    Write-Host "`n  Final cleanup with system prune..." -ForegroundColor Yellow
+    Write-Host "`n  Final cleanup with system prune..." -ForegroundColor Cyan
     $pruneArgs = @("system", "prune", "-f")
     if (-not $KeepVolumes) { $pruneArgs += "--volumes" }
     docker @pruneArgs 2>&1 | Out-Null

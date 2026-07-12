@@ -83,7 +83,7 @@ foreach ($proc in $nodeProcesses) {
         Stop-Process -Id $proc.Id -Force
         $killed++
     } catch {
-        Write-Host "  WARNING: Failed to kill PID $($proc.Id): $_" -ForegroundColor Yellow
+        Write-Host "  ERROR: Failed to kill PID $($proc.Id): $_" -ForegroundColor Red
         $failed++
     }
 }

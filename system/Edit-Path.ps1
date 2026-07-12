@@ -126,7 +126,7 @@ $pathEntries = $currentPath -split ';' | Where-Object { $_ -ne '' }
 
 # Show mode
 if ($Show) {
-    Write-Host "  Current $target PATH entries:" -ForegroundColor Yellow
+    Write-Host "  Current $target PATH entries:" -ForegroundColor Cyan
     Write-Host "  Total entries: $($pathEntries.Count)" -ForegroundColor Gray
     Write-Host ""
     

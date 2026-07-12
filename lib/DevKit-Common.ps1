@@ -16,6 +16,12 @@
 if ($global:DevKitCommonLoaded) { return }
 $global:DevKitCommonLoaded = $true
 
+# Animation/color engine (gradient text, startup banner, spinner) - split
+# out of this file so the terminal-capability probing and ANSI rendering
+# live in one place. Dot-sourced here so every function below (and every
+# script that dot-sources DevKit-Common.ps1) can call it directly.
+. (Join-Path $PSScriptRoot "DevKit-UI.ps1")
+
 # ==================== SETTINGS ====================
 
 function Get-DevKitSettingsFile {
@@ -41,6 +47,7 @@ function Get-DevKitSettings {
             confirmDestructive = $true
             updateCheckEnabled = $true
             lastUpdateCheckUtc = $null
+            enableAnimations   = $true
         }
     }
 
@@ -439,6 +446,10 @@ function Show-DevKitInteractiveMenu {
 function Show-DevKitModuleMenu {
     param([Parameter(Mandatory = $true)]$Module)
     Show-Header $Module.Name
+    if (-not [string]::IsNullOrWhiteSpace([string]$Module.Description)) {
+        Write-Host "  $($Module.Description)" -ForegroundColor Gray
+        Write-Host ""
+    }
 }
 
 function Start-DevKitModuleTools {
@@ -456,11 +467,27 @@ function Start-DevKitModuleTools {
         Show-DevKitModuleMenu -Module $module
         $entries = @()
         foreach ($item in $module.Items) { $entries += @{ Key = $item.Key; Label = $item.Label } }
+        $entries += @{ Key = '?'; Label = 'Help - what does each option do?' }
         $entries += @{ Key = '0'; Label = 'Back' }
         $choice = Show-DevKitInteractiveMenu -Entries $entries -PromptLabel 'Select option'
         $trimmed = $choice.Trim()
 
         if ($trimmed -eq '0') { return }
+
+        if ($trimmed -eq '?') {
+            Show-DevKitModuleMenu -Module $module
+            foreach ($item in $module.Items) {
+                Write-Host ("  [{0}] {1}" -f $item.Key, $item.Label) -ForegroundColor Cyan
+                if (-not [string]::IsNullOrWhiteSpace([string]$item.Help)) {
+                    Write-Host "      $($item.Help)" -ForegroundColor Gray
+                } else {
+                    Write-Host "      (no additional help for this item)" -ForegroundColor Gray
+                }
+            }
+            Write-Host ""
+            Read-Host "Press Enter to return to the menu"
+            continue
+        }
 
         $forceReprompt = $false
         $keyToMatch = $trimmed

@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="https://img.shields.io/badge/Northstar-DevKit-3.1.0-blue?style=for-the-badge&logo=powershell&logoColor=white" alt="Northstar DevKit">
+<img src="https://img.shields.io/badge/Northstar-DevKit-3.5.0-blue?style=for-the-badge&logo=powershell&logoColor=white" alt="Northstar DevKit">
 
 <h3>A powerful, dependency-free Windows toolkit for modern web developers</h3>
 
@@ -70,6 +70,13 @@ The interactive menu will guide you through every tool. For project-specific act
 
 ---
 
+## 🎉 New in 3.5
+
+- **Animated terminal experience.** A gradient startup banner and an animated spinner for longer-running steps, built on the existing brand blue — gracefully degrades to today's plain look on a console (or a `NO_COLOR`/redirected-output setup) that doesn't support it, and can be turned off entirely via the new `enableAnimations` setting.
+- **In-menu help, everywhere.** Every tool category now has a `[?]` entry that lists what each numbered option does and when to use it, and the Main Menu has a new `[?] Getting Started` screen that walks first-time users through Active Project linking, the `p` suffix, and `/` search.
+- **CLI tracking expanded from 6 to 11 tools.** Supabase CLI, Vercel CLI, Railway CLI, Kimi Code CLI, and Augment Code CLI (`auggie`) join claude/gh/codex/gemini/cursor-agent/aider — each is now updated through whichever channel actually fits it (npm, the tool's own built-in upgrade command, or Scoop) instead of assuming everything is npm.
+- **MCP server catalog + scan.** A curated catalog of well-known MCP servers (Supabase, GitHub, Notion, Linear, Stripe, and more) turns adding one into a guided picker instead of hand-typing a `claude mcp add` command, and the new "Scan MCP Setup" option in the Agents & MCP menu checks your active project (and this machine) against the catalog and offers to add anything missing.
+
 ## 🎉 New in 3.1
 
 - **Arrow-key navigation.** Every menu now supports Up/Down + Enter to move and select, Escape to go back — typing a number still works exactly as before, and it falls back automatically on a console that can't do raw key reads.
@@ -103,7 +110,7 @@ The interactive menu will guide you through every tool. For project-specific act
 
 | 🧰 **Maintenance** | 🤖 **Agents & MCP** |
 |---|---|
-| Disk cleanup, startup/services tuning, SFC/DISM repair, Windows Update reset, scheduled tasks & event logs, power/performance tuning, hardware health | Detect/update AI CLIs, manage Claude Code MCP servers globally or per project |
+| Disk cleanup, startup/services tuning, SFC/DISM repair, Windows Update reset, scheduled tasks & event logs, power/performance tuning, hardware health | Detect/update 11 AI CLIs, add MCP servers from a curated catalog or by hand, and scan for missing ones, globally or per project |
 
 </div>
 
@@ -116,11 +123,14 @@ Launch `DevKit.bat` and navigate with your keyboard:
 
 ```
 =============================================
-       Northstar DevKit v3.1.0
+       Northstar DevKit v3.5.0
     Developer Toolkit by northstarcoding.com
 =============================================
   Menu: Main Menu
   Active Project: acme-storefront  (C:\dev\acme-storefront)
+
+  DevKit bundles your everyday Node/Next.js/Vite/Git/Docker tools into
+  one menu. New here? Pick [?] Getting Started below.
 
   Development Tools:
     [1] Port Tools     - Scan and Kill
@@ -146,6 +156,7 @@ Launch `DevKit.bat` and navigate with your keyboard:
     [11] WiFi Tools    - Optimize and Scan
 
     [/] Search tools
+    [?] Getting Started
     [0] Exit
 ```
 
@@ -261,6 +272,8 @@ You can also run any tool directly from PowerShell or Command Prompt:
 .\agents\Update-AiClis.ps1 -DryRun
 .\agents\Get-McpServers.ps1
 .\agents\Add-McpServer.ps1 -Name myserver -Command npx -CommandArgs '-y','my-mcp-server' -Scope user
+.\agents\Add-McpServerFromCatalog.ps1                    # pick a well-known server (Supabase, GitHub, Notion...) from a built-in catalog
+.\agents\Scan-McpServers.ps1                              # check configured servers against the catalog and offer to add what's missing
 ```
 
 ---
@@ -288,6 +301,8 @@ You can also run any tool directly from PowerShell or Command Prompt:
 | Check drive/battery health | `maintenance\Get-DiskHealthReport.bat` / `Get-BatteryReport.bat` |
 | Which AI CLIs do I have installed | `agents\Get-InstalledAiClis.bat` |
 | Add/remove a Claude Code MCP server | `agents\Add-McpServer.bat` / `Remove-McpServer.bat` |
+| Don't know the exact command for a well-known MCP server | `agents\Add-McpServerFromCatalog.bat` → pick it from the catalog |
+| Not sure which MCP servers a project (or this machine) is missing | `agents\Scan-McpServers.bat` |
 
 ---
 

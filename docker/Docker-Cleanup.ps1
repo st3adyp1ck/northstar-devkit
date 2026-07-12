@@ -48,6 +48,7 @@ try {
     Write-Host "  ERROR: Docker not found in PATH.`n" -ForegroundColor Red
     exit 1
 }
+Write-Host "  Docker: $dockerVersion" -ForegroundColor Gray
 
 try {
     $null = docker info 2>$null
@@ -173,7 +174,7 @@ $hadErrors = $false
 
 # Step 1: Remove stopped containers
 if ($containerCount -gt 0) {
-    Write-Host "  [$step] Removing stopped containers..." -ForegroundColor Yellow
+    Write-Host "  [$step] Removing stopped containers..." -ForegroundColor Cyan
     $containersOutput = @(docker container prune -f 2>&1)
     foreach ($line in $containersOutput) {
         if ($line -match 'Deleted Containers') {
@@ -191,7 +192,7 @@ if ($containerCount -gt 0) {
 # gated on the real $unusedImageCount computed above rather than the mere
 # non-emptiness of `docker system df` text output.
 if ($unusedImageCount -gt 0) {
-    Write-Host "  [$step] Removing unused images..." -ForegroundColor Yellow
+    Write-Host "  [$step] Removing unused images..." -ForegroundColor Cyan
     if ($AllUnused) {
         $imagesOutput = @(docker image prune -a -f 2>&1)
     } else {
@@ -211,7 +212,7 @@ if ($unusedImageCount -gt 0) {
 
 # Step 3: Remove volumes if requested
 if ($Volumes -and $volumeCount -gt 0) {
-    Write-Host "  [$step] Removing unused volumes..." -ForegroundColor Yellow
+    Write-Host "  [$step] Removing unused volumes..." -ForegroundColor Cyan
     $volumesOutput = @(docker volume prune -f 2>&1)
     foreach ($line in $volumesOutput) {
         if ($line -match 'Deleted Volumes|Total reclaimed') {
@@ -229,7 +230,7 @@ if ($Volumes -and $volumeCount -gt 0) {
 # summary already claimed -AllUnused cleans up networks, but no step ever
 # actually called `docker network prune` - this closes that gap.
 if ($AllUnused -and $networkCount -gt 0) {
-    Write-Host "  [$step] Removing unused networks..." -ForegroundColor Yellow
+    Write-Host "  [$step] Removing unused networks..." -ForegroundColor Cyan
     $networksOutput = @(docker network prune -f 2>&1)
     foreach ($line in $networksOutput) {
         if ($line -match 'Deleted Networks|Total reclaimed') {
@@ -244,7 +245,7 @@ if ($AllUnused -and $networkCount -gt 0) {
 }
 
 # Step 5: Build cache
-Write-Host "  [$step] Cleaning build cache..." -ForegroundColor Yellow
+Write-Host "  [$step] Cleaning build cache..." -ForegroundColor Cyan
 $builderOutput = @(docker builder prune -f 2>&1)
 foreach ($line in $builderOutput) {
     if ($line -match 'Total reclaimed') {

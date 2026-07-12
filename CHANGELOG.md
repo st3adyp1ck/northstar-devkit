@@ -2,6 +2,180 @@
 
 All notable changes to Northstar DevKit are documented here.
 
+## [3.5.0] - 2026-07-12
+
+A gradient startup banner and spinner engine, in-menu help across every
+tool category, a much wider (and more honest) AI-CLI tracking list, a
+curated MCP server catalog with a scan-and-fill-gaps flow, and a batch of
+real bugs found and fixed during the audit that produced all of the above.
+
+### Added
+
+- **Animation & color engine** (new `lib\DevKit-UI.ps1`):
+  `Test-DevKitAnimationSupport` is a capability probe that fails closed to
+  today's plain output on any doubt - it checks `NO_COLOR` is unset,
+  `settings.json`'s new `preferences.enableAnimations` is true, console
+  output isn't redirected, and a real Windows Console API probe
+  (`GetStdHandle`/`GetConsoleMode`/`SetConsoleMode`) confirms virtual
+  terminal processing can actually be enabled on the stdout handle.
+  `Write-DevKitGradientText` renders 24-bit ANSI gradient text anchored on
+  the existing brand blue `#00B4D8`. `Show-DevKitStartupBanner` prints a
+  gradient banner exactly once per session - `DevKit.ps1` calls it once at
+  startup, never on every menu redraw. `Invoke-DevKitWithSpinner` runs a
+  scriptblock behind an animated braille spinner on a dedicated Runspace
+  via `BeginInvoke`, for callers whose child output is already fully
+  captured/buffered; it falls back to today's plain
+  `Write-DevKitStep`/`-Done`/`-Error` sequence whenever animation isn't
+  supported or spinner setup fails, invoking the scriptblock exactly once
+  either way. `DevKit.ps1` also no longer hardcodes `v3.1.0` in its header
+  banner - it now reads the repo-root `VERSION` file dynamically, closing
+  a real pre-existing gap where every past version bump required
+  remembering to hand-edit that literal string (nobody had, for 3.1.0).
+- **In-menu help.** The `_module.psd1` manifest schema gained two optional
+  keys: a top-level `Description` (one or two sentences about the whole
+  category) and a per-item `Help` (what it does, when to use it, and any
+  safety notes). `Show-DevKitModuleMenu` now prints a category's
+  `Description` under its header, and `Start-DevKitModuleTools` gained a
+  `?` entry that lists every item's Label and Help text. All twelve
+  tool-category manifests - Agents & MCP, Ports, Node, Next.js, Vite, Git,
+  Docker, System, Workflow, Diagnostics, WiFi, and Maintenance (14 items,
+  the largest category) - now have this filled in for every item. The
+  Main Menu also gained its own `?` "Getting Started" entry
+  (`Show-DevKitGettingStarted`) explaining Active Project linking, the `p`
+  suffix convention, `/` search, and the new per-category help.
+- **CLI tracking expanded from 6 to 11 tools.** `Get-InstalledAiClis.ps1`
+  and `Update-AiClis.ps1` now also detect Supabase CLI, Vercel CLI,
+  Railway CLI, Kimi Code CLI, and Augment Code CLI (`auggie`), alongside
+  the existing claude/gh/codex/gemini/cursor-agent/aider. Update now
+  branches per tool on a real "channel" (`npm` / `npm+builtin` / `scoop` /
+  `manual`) instead of assuming everything is an npm package - Supabase's
+  CLI cannot be installed globally via npm at all (confirmed against a
+  real upstream issue), so it's tracked via Scoop; Vercel and Railway
+  prefer their own builtin `upgrade` subcommand before falling back to
+  npm; Kimi is deliberately manual-only because the `kimi` command name is
+  shared by two unrelated real-world tools (Moonshot AI's npm-based Kimi
+  Code CLI and an older Python-based `kimi-cli`) - a live, confirmed
+  ambiguity, not a theoretical one - so auto-updating it risked corrupting
+  an unrelated tool; Augment Code CLI now shows an explicit
+  "Windows support is WSL-only" note instead of a bare "not installed"
+  when it's missing from native PATH.
+- **MCP server catalog and scan** (new `lib\DevKit-McpCatalog.ps1`,
+  `lib\DevKit-McpList.ps1`, `lib\DevKit-McpAddFlow.ps1`; new
+  `agents\Add-McpServerFromCatalog.ps1`, `agents\Scan-McpServers.ps1`): a
+  10-entry curated catalog of well-known MCP servers (Supabase, Sequential
+  Thinking, Context7, GitHub, Filesystem, Notion, Jira/Atlassian, Linear,
+  Stripe, Plaid), most offering one or more registration variants - many
+  now default to a remote/OAuth-hosted HTTP server rather than a local
+  npx package (Supabase, GitHub, Notion, Jira/Atlassian, Linear, and
+  Stripe all default to remote; Sequential Thinking and Filesystem are
+  local-only; Context7 defaults local with a remote alternate); Plaid is
+  marked experimental with no automatable variant at all, since its MCP
+  server needs a short-lived OAuth token refresh that a one-time
+  registration can't sustain, so picking it just shows a docs pointer.
+  `agents\Add-McpServer.ps1` gained a second parameter set
+  (`-Transport http -Url -Headers`) - previously it could only register
+  local stdio commands, so it structurally could not register 6 of the 10
+  catalog entries. `agents\Get-McpServers.ps1`'s `-Scope` parameter is now
+  real (it used to be purely informational, since `claude mcp list` has no
+  scope flag) - it diffs a listing run from a neutral directory against
+  one run from the active project directory to split user/global scope
+  from project/local scope. `agents\Scan-McpServers.ps1` cross-references
+  configured servers against the catalog per scope and interactively
+  offers to add anything missing. `agents\_module.psd1` grew from 5 items
+  to 7.
+
+### Fixed
+
+- **`wifi\WiFi-Scan.ps1`**: a PowerShell array-flattening bug made a
+  single-network scan report the wrong count ("Found 4 network(s)" when
+  only 1 was found), because a returned 1-element array flattened to a
+  bare Hashtable whose `.Count` read as its key count instead. Fixed at
+  both the function-return and pipeline-assignment sites; a new Pester
+  regression test (`tests\Unit\WiFiScan-Parser.Tests.ps1`) was added using
+  real captured single-network `netsh` output, since the pre-existing
+  fixture only ever exercised 3-network input.
+- **`lib\DevKit-McpList.ps1`**'s server-name parser was silently dropping
+  server names containing spaces (e.g. a real connector named
+  `claude.ai Notion`) due to an over-restrictive character-class regex;
+  fixed to split on the first `': '` instead. Caught via a live run
+  against this machine's actual configured MCP servers.
+- **`docker\Docker-Nuke.ps1`**'s "nothing to nuke" early-exit check
+  special-cased `-KeepVolumes` but not `-KeepImages`, so running
+  `-KeepImages` on a machine with only images (no containers/volumes/
+  networks) skipped straight to a live confirmation prompt for an
+  operation that would end up deleting nothing. Fixed to mirror the
+  existing `-KeepVolumes` pattern.
+- **`diagnostics\System-DevInfo.ps1`**: (a) the disk-usage loop divided by
+  zero on an empty/unmounted local-disk-type volume (`Size` 0 or null),
+  which threw and silently dropped every disk enumerated after it from the
+  report behind a misleading "Could not query WMI/CIM" message - it now
+  skips just that one disk with a clear "unavailable" line and continues;
+  (b) network-adapter selection picked whichever "Up" adapter enumerated
+  first with no preference for one with a real default gateway, so a
+  machine with a Hyper-V/WSL/VPN virtual adapter could report that
+  adapter's NAT-only IP instead of the machine's real network identity -
+  it now prefers an adapter with a non-null default gateway before falling
+  back.
+- **`node\Nuke-And-Reinstall.ps1`**: the pre-confirmation warning shown
+  right before the typed-`nuke` safety gate didn't match what the script
+  actually deletes (it claimed `dist` and `.vite` caches, which are never
+  touched by default, and omitted `.turbo`, which always is). Fixed the
+  displayed text only - no change to actual deletion behavior.
+- **Repo-wide color-convention cleanup**: `AGENTS.md` documents Yellow as
+  reserved for real warnings, not routine progress chrome. Roughly 25+
+  stray Yellow progress-chrome lines were corrected to Cyan/Gray as
+  appropriate across `ports/`, `node/`, `vite/`, `git/`, `docker/`,
+  `system/`, `workflow/`, and `diagnostics/`.
+- Small doc/comment accuracy fixes: missing `.PARAMETER` entries added
+  (`system\Env-Backup.ps1`'s `-Force`, `wifi\WiFi-FastMode.ps1`'s
+  `-KeepDNS`/`-Force`), a stale/missing script-header footer added
+  (`node\Clear-NpmCache.ps1`), `.SYNOPSIS` lines brought in line with the
+  repo-wide template (`system\Install-/Uninstall-ShellIntegration.ps1`),
+  dead/unused variables removed (`git\Git-StatusAll.ps1`,
+  `diagnostics\DevKit-Doctor.ps1`), and a missing version-display line
+  added to `docker\Docker-Cleanup.ps1` to match its sibling
+  `Docker-Nuke.ps1`.
+
+### Known Issues
+
+Real gaps found during this sprint's audit and deliberately left
+unchanged, since fixing them would alter user-facing mutating behavior
+rather than just correct wrong information:
+
+- Many mutating scripts across `ports/`, `node/`, `nextjs/`, `vite/`,
+  `git/`, `docker/`, `system/`, and `workflow/` predate the shared
+  `Confirm-DevKitDestructiveAction` helper and hand-roll their own y/n
+  prompts, so they don't honor `settings.json`'s global
+  `confirmDestructive` toggle the way newer destructive scripts do
+  (already documented in `AGENTS.md`).
+- `maintenance\Repair-SystemFiles.ps1` and
+  `maintenance\Reset-WindowsUpdate.ps1` both default to attempting the
+  real mutating action behind just a confirmation prompt (`-DryRun` is
+  opt-out, not opt-in) - the inverse of the safe-by-default pattern the
+  rest of `maintenance/` follows, and structurally the same shape as the
+  2026-07-11 incident `AGENTS.md` already documents for
+  `Reset-WindowsUpdate.ps1` specifically.
+- `git\Git-SyncFork.ps1` has no `-DryRun`/preview mode at all, unlike its
+  sibling `Git-Cleanup.ps1`.
+- `system\Uninstall-ShellIntegration.ps1` and
+  `system\Unregister-DevKitTerminalProfile.ps1` delete real registry/file
+  state with no confirmation prompt of any kind.
+- `docker\Docker-Cleanup.ps1`'s displayed "Custom networks" count can
+  overstate what `-AllUnused` actually prunes - Docker has no built-in
+  "dangling" filter for networks, so the count includes in-use ones.
+- A handful of judgment-call color/severity inconsistencies (e.g.
+  `ports\Kill-AllNode.ps1`'s failure severity vs. its siblings,
+  `maintenance\Manage-Services.ps1`'s disclaimer color) and duplicated
+  logic (`system\Edit-Path.ps1`/`Shell-Reload.ps1` share a copy-pasted
+  helper function; `diagnostics\DevKit-Doctor.ps1`/`System-DevInfo.ps1`
+  each separately implement tool-version detection) were flagged but not
+  changed.
+- `AGENTS.md`'s Project Structure tree was missing a few files that exist
+  on disk and now have in-menu help text (`node\Check-NpmCacheSize.ps1`,
+  `nextjs`'s `Clear-NextCache.bat`/`Clear-TurboCache.bat`, and `system`'s
+  four opt-in setup scripts) - fixed as part of this release's
+  documentation pass.
+
 ## [3.1.0] - 2026-07-11
 
 Arrow-key navigation across every menu, and two new tool categories: real

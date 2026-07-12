@@ -66,14 +66,14 @@ try {
 }
 
 # Get initial size
-Write-Host "`n  Analyzing repository..." -ForegroundColor Yellow
+Write-Host "`n  Analyzing repository..." -ForegroundColor Cyan
 $sizeBefore = (git count-objects -vH 2>$null | Select-String "size-pack" | ForEach-Object { $_.Line.Split(":")[1].Trim() })
 if (-not $sizeBefore) { $sizeBefore = "Unknown" }
 Write-Host "  Current pack size: $sizeBefore" -ForegroundColor Gray
 
 # Fetch latest from remote (dry-run safe)
 if (-not $DryRun) {
-    Write-Host "`n  Fetching from remote..." -ForegroundColor Yellow
+    Write-Host "`n  Fetching from remote..." -ForegroundColor Cyan
     git fetch --all --prune 2>&1 | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
     if ($LASTEXITCODE -ne 0) {
         Write-Host "  ERROR: git fetch --all --prune failed (exit code $LASTEXITCODE)." -ForegroundColor Red
@@ -159,7 +159,7 @@ if ($mergedBranches) {
 if ($DryRun) {
     Write-Host "`n  [DRY RUN] Would prune remote-tracking branches" -ForegroundColor Magenta
 } else {
-    Write-Host "`n  Pruning remote-tracking branches..." -ForegroundColor Yellow
+    Write-Host "`n  Pruning remote-tracking branches..." -ForegroundColor Cyan
     git remote prune origin 2>&1 | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
     if ($LASTEXITCODE -ne 0) {
         Write-Host "  ERROR: git remote prune origin failed (exit code $LASTEXITCODE)." -ForegroundColor Red
@@ -170,7 +170,7 @@ if ($DryRun) {
 # exit-code handling isn't duplicated between the standalone pass below and
 # the post-reflog-clear pass.
 function Invoke-DevKitGitGc {
-    Write-Host "  Running garbage collection..." -ForegroundColor Yellow
+    Write-Host "  Running garbage collection..." -ForegroundColor Cyan
     git gc --aggressive --prune=now 2>&1 | ForEach-Object {
         if ($_ -match '^(Counting|Compressing|Writing|Total)') {
             Write-Host "    $_" -ForegroundColor DarkGray
@@ -204,7 +204,7 @@ if ($ClearReflog) {
         Write-Host "  [DRY RUN] Would clear reflog" -ForegroundColor Magenta
     } else {
         if ($Force -or (Read-Host "`n  Clear reflog? This is irreversible! (y/n)") -eq 'y') {
-            Write-Host "  Clearing reflog..." -ForegroundColor Yellow
+            Write-Host "  Clearing reflog..." -ForegroundColor Cyan
             git reflog expire --expire=now --all 2>&1 | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
             if ($LASTEXITCODE -ne 0) {
                 Write-Host "  ERROR: git reflog expire failed (exit code $LASTEXITCODE)." -ForegroundColor Red
@@ -229,7 +229,7 @@ if ($ClearReflog) {
 
 # Get final size
 if (-not $DryRun) {
-    Write-Host "`n  Analyzing results..." -ForegroundColor Yellow
+    Write-Host "`n  Analyzing results..." -ForegroundColor Cyan
     $sizeAfter = (git count-objects -vH 2>$null | Select-String "size-pack" | ForEach-Object { $_.Line.Split(":")[1].Trim() })
     if (-not $sizeAfter) { $sizeAfter = "Unknown" }
     

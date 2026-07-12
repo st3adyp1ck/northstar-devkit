@@ -23,6 +23,9 @@
 .PARAMETER IncludeSecrets
     Store raw, unredacted values even for secret-like variable names.
     Equivalent to -Redact:$false.
+.PARAMETER Force
+    Skip the confirmation prompt that warns backup files may contain
+    secrets or tokens.
 .EXAMPLE
     .\Env-Backup.ps1
     .\Env-Backup.ps1 -OutputPath "C:\Backups"

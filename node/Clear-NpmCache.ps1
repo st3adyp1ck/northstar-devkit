@@ -7,6 +7,9 @@
     Auto-detects npm/yarn/pnpm/bun from lock files (same detection used
     across the rest of DevKit) and dispatches to the matching cache-clean
     command, so this works on non-npm projects too.
+
+    Created by Northstar Software Development
+    Website: https://www.northstarcoding.com
 .PARAMETER Path
     The project directory whose package manager cache to clean.
     Defaults to current directory.

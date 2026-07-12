@@ -8,7 +8,7 @@
 - **Website:** https://www.northstarcoding.com
 - **License:** MIT
 - **Language:** English (all comments and documentation)
-- **Version:** 3.1.0
+- **Version:** 3.5.0
 
 ## Technology Stack
 
@@ -35,9 +35,14 @@ DevKit/
 ├── .gitignore              # Git ignore rules
 │
 ├── lib/                    # Shared PowerShell helpers
-│   └── DevKit-Common.ps1   # Common functions: path/package-manager helpers, the
-│                           # project-linking picker, the manifest menu dispatcher,
-│                           # settings, and the shared confirmation gate
+│   ├── DevKit-Common.ps1   # Common functions: path/package-manager helpers, the
+│   │                       # project-linking picker, the manifest menu dispatcher,
+│   │                       # settings, and the shared confirmation gate
+│   ├── DevKit-UI.ps1       # Animation/color engine: capability probe, gradient
+│   │                       # text, startup banner, spinner-wrapped scriptblocks
+│   ├── DevKit-McpCatalog.ps1  # Curated MCP server catalog + 'claude mcp add' builder
+│   ├── DevKit-McpList.ps1     # Parses 'claude mcp list' output, incl. user/project scope split
+│   └── DevKit-McpAddFlow.ps1  # Shared interactive add-from-catalog prompt flow
 │
 ├── tests/
 │   └── Unit/               # Pester tests for pure-logic parsers/converters
@@ -52,11 +57,15 @@ DevKit/
 │   ├── Clear-NpmCache.ps1  # Clear NPM cache
 │   ├── Remove-NodeModules.ps1  # Delete node_modules
 │   ├── Nuke-And-Reinstall.ps1  # Full reset + reinstall
-│   └── Nuke-And-Reinstall.bat  # Batch wrapper
+│   ├── Nuke-And-Reinstall.bat  # Batch wrapper
+│   ├── Check-NpmCacheSize.ps1  # Read-only cache-size report per package manager
+│   └── *.bat                   # Batch wrapper per script
 │
 ├── nextjs/                 # Next.js specific tools (+ _module.psd1)
 │   ├── Clear-NextCache.ps1     # Clear .next build cache
+│   ├── Clear-NextCache.bat     # Batch wrapper
 │   ├── Clear-TurboCache.ps1    # Clear Turbopack cache
+│   ├── Clear-TurboCache.bat    # Batch wrapper
 │   ├── Next-DevFresh.ps1       # Clear cache + start dev server
 │   ├── Next-DevFresh.bat       # Batch wrapper
 │   ├── Next-FullClean.ps1      # Full clean + reinstall
@@ -90,6 +99,10 @@ DevKit/
 │   ├── Env-Backup.ps1          # Backup env variables
 │   ├── Env-Restore.ps1         # Restore env variables
 │   ├── Shell-Reload.ps1        # Reload shell environment
+│   ├── Install-ShellIntegration.ps1    # Opt-in: add "Open Northstar DevKit Here" to Explorer's right-click menu
+│   ├── Uninstall-ShellIntegration.ps1  # Opt-in: remove that right-click entry
+│   ├── Register-DevKitTerminalProfile.ps1   # Opt-in: register a Windows Terminal profile
+│   ├── Unregister-DevKitTerminalProfile.ps1 # Opt-in: remove that Windows Terminal profile
 │   └── *.bat
 │
 ├── workflow/               # Developer workflow tools (+ _module.psd1)
@@ -131,13 +144,16 @@ DevKit/
 │   ├── Invoke-MemoryDiagnostic.ps1 # Launches mdsched.exe (schedules a restart)
 │   └── *.bat                       # Batch wrapper per script
 │
-└── agents/                 # AI CLI & MCP management (+ _module.psd1)
-    ├── Get-InstalledAiClis.ps1  # Detect claude/gh/codex/gemini/cursor-agent/aider
-    ├── Update-AiClis.ps1        # Best-effort npm-based CLI updates
-    ├── Get-McpServers.ps1       # claude mcp list, optionally scoped to the active project
-    ├── Add-McpServer.ps1        # claude mcp add wrapper (local/project/user scope)
-    ├── Remove-McpServer.ps1     # claude mcp remove wrapper
-    └── *.bat                    # Batch wrapper per script
+└── agents/                 # AI CLI & MCP management (+ _module.psd1, 7 items)
+    ├── Get-InstalledAiClis.ps1     # Detect 11 tracked CLIs: claude/gh/codex/gemini/
+    │                               # cursor-agent/aider/supabase/vercel/railway/kimi/auggie
+    ├── Update-AiClis.ps1           # Per-tool channel update (npm/npm+builtin/scoop/manual)
+    ├── Get-McpServers.ps1          # claude mcp list, with a real user/global vs project/local -Scope split
+    ├── Add-McpServer.ps1           # claude mcp add wrapper (local stdio, or -Transport http remote)
+    ├── Remove-McpServer.ps1        # claude mcp remove wrapper
+    ├── Add-McpServerFromCatalog.ps1 # Browsable picker over lib/DevKit-McpCatalog.ps1's 10 curated servers
+    ├── Scan-McpServers.ps1         # Cross-references configured servers against the catalog, offers to fill gaps
+    └── *.bat                       # Batch wrapper per script
 ```
 
 Linked projects (`projects.json`) and settings (`settings.json`) live outside
@@ -291,11 +307,25 @@ try {
   moved to a sibling folder), not a best-effort delete
 
 ### Agents & MCP (`agents/`)
-- Detects AI coding-agent CLIs (claude, gh, codex, gemini, cursor-agent, aider) via
-  `Get-DevKitWindowsExecutable` (see below) rather than a bare `Get-Command`/`&` invocation
-- Wraps `claude mcp list/add/remove`; project-scoped operations resolve the active project
-  via `Get-DevKitActiveProject` (read-only) and `Push-Location`/`Pop-Location` around the
-  `claude` call, never via `Select-DevKitProject` (which can prompt/mutate the active project)
+- Tracks 11 AI/dev CLIs (claude, gh, codex, gemini, cursor-agent, aider, supabase, vercel,
+  railway, kimi, auggie) via `Get-DevKitWindowsExecutable` (see below) rather than a bare
+  `Get-Command`/`&` invocation; each tool carries its own update "channel" (npm / npm+builtin
+  / scoop / manual) instead of assuming everything is an npm package - e.g. Supabase updates
+  via Scoop (its CLI can't be installed globally via npm at all), Vercel/Railway prefer their
+  own builtin `upgrade` subcommand, and Kimi is manual-only because the `kimi` command name is
+  shared by two unrelated real-world tools
+- Wraps `claude mcp list/add/remove`; `Add-McpServer.ps1` supports both local stdio commands
+  and remote HTTP servers (`-Transport http -Url -Headers`); project-scoped operations resolve
+  the active project via `Get-DevKitActiveProject` (read-only) and `Push-Location`/
+  `Pop-Location` around the `claude` call, never via `Select-DevKitProject` (which can
+  prompt/mutate the active project); `Get-McpServers.ps1 -Scope` diffs a listing run from a
+  neutral directory against one run from the project directory to give a real user/global vs.
+  project/local split
+- `lib\DevKit-McpCatalog.ps1` ships a 10-entry curated catalog of well-known MCP servers
+  (Supabase, Sequential Thinking, Context7, GitHub, Filesystem, Notion, Jira/Atlassian, Linear,
+  Stripe, Plaid); `Add-McpServerFromCatalog.ps1` is a browsable picker over it and
+  `Scan-McpServers.ps1` cross-references what's already configured (per scope) against the
+  catalog and offers to add anything missing
 
 ## Usage Patterns
 
@@ -424,3 +454,4 @@ Since 3.0, adding a tool to an **existing** category (`ports/`, `node/`,
 - Version 2.1 unified the toolkit under a shared helper module (`lib/DevKit-Common.ps1`), added package-manager auto-detection, completed batch-wrapper coverage, and fixed PowerShell 7 / path-validation / process-killing bugs
 - Version 3.0 (see `CHANGELOG.md` for full detail) added browsable project linking (`Select-DevKitProject`, the linked-projects registry, `[10] Projects` menu), rewrote all ten tool-category submenus as a manifest-driven dispatcher (`_module.psd1` + `Start-DevKitModuleTools`) instead of ten hand-written function pairs, added `/` search-and-jump, added a Pester test suite, and fixed roughly 150 confirmed bugs from a full-repo review - including one (`system/Env-Restore.ps1`) that had been completely broken (could not run at all) since before 3.0 existed
 - Version 3.1 (see `CHANGELOG.md`) added arrow-key navigation (`Show-DevKitInteractiveMenu`) with automatic fallback to the classic typed-number flow, two new manifest-driven categories (`[12] Maintenance`, `[13] Agents & MCP`), and `Get-DevKitWindowsExecutable` - a defensive CLI-resolution helper added after a real bug where an ambiguously-resolved `gh` on PATH triggered a Windows ShellExecute "Select an app to open" dialog instead of failing cleanly
+- Version 3.5 (see `CHANGELOG.md`) added a gradient animation/color engine (`lib\DevKit-UI.ps1`: a fail-closed capability probe, a startup banner shown once per session, and a Runspace-backed spinner for long-running scriptblocks) plus in-menu help (`Description`/`Help` keys in every `_module.psd1`, a `?` entry per category, and a Main Menu "Getting Started" entry); expanded AI-CLI tracking from 6 to 11 tools with a real per-tool update channel (npm/npm+builtin/scoop/manual) instead of assuming npm everywhere; and added a 10-entry curated MCP server catalog (`lib\DevKit-McpCatalog.ps1`) with a browsable add-from-catalog flow and a scan-and-fill-gaps tool, alongside real HTTP/remote MCP server support and a genuinely-scoped `Get-McpServers.ps1 -Scope`

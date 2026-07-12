@@ -91,7 +91,7 @@ if (-not (Test-Path $nmPath)) {
 }
 
 if ($Reinstall) {
-    Write-Host "`n  Reinstalling dependencies..." -ForegroundColor Yellow
+    Write-Host "`n  Reinstalling dependencies..." -ForegroundColor Cyan
     try {
         Invoke-DevKitInDirectory -Path $targetPath -ScriptBlock {
             Invoke-DevKitPackageInstall -Path .

@@ -132,7 +132,7 @@ try {
             }
         }
 
-        Write-Host "`n  Building for production..." -ForegroundColor Yellow
+        Write-Host "`n  Building for production..." -ForegroundColor Cyan
         Write-Host "  This may take a moment...`n" -ForegroundColor Gray
 
         switch ($manager.Command) {
@@ -200,7 +200,7 @@ try {
             }
         }
     } else {
-        Write-Host "  Skipping build (using existing $OutDir)" -ForegroundColor Yellow
+        Write-Host "  Skipping build (using existing $OutDir)" -ForegroundColor Gray
         if (-not (Test-Path $outDirFull)) {
             Write-Host "`n  ERROR: No existing build found at $OutDir`n" -ForegroundColor Red
             exit 1
@@ -209,7 +209,7 @@ try {
 
     # Bundle analysis
     if ($Analyze) {
-        Write-Host "`n  Analyzing bundle..." -ForegroundColor Yellow
+        Write-Host "`n  Analyzing bundle..." -ForegroundColor Cyan
 
         $statsFile = Join-Path $outDirFull "stats.html"
         if (-not (Test-Path $statsFile)) {

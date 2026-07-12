@@ -8,6 +8,10 @@
     
     Created by Northstar Software Development
     Website: https://www.northstarcoding.com
+.PARAMETER KeepDNS
+    Don't change DNS settings. Passed through to WiFi-Optimize.ps1.
+.PARAMETER Force
+    Skip confirmation prompts. Passed through to WiFi-Optimize.ps1.
 .EXAMPLE
     .\WiFi-FastMode.ps1
     .\WiFi-FastMode.ps1 -KeepDNS

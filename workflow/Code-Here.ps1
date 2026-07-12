@@ -21,7 +21,8 @@
     .\Code-Here.ps1 -Recent
     .\Code-Here.ps1 -Path "C:\MyProject"
     .\Code-Here.ps1 -Cursor
-#>[CmdletBinding()]
+#>
+[CmdletBinding()]
 param(
     [string]$Path = ".",
     [switch]$Recent,
@@ -84,7 +85,7 @@ function Find-DevKitCursorCommand {
     return $null
 }
 
-Write-Host "`nNorthstar DevKit - Code Here`n" -ForegroundColor Cyan
+Write-DevKitHeader "Code Here"
 
 # Detect available editors
 $vsCodePath = Get-Command code -ErrorAction SilentlyContinue
@@ -114,7 +115,7 @@ Write-Host "  Editor: $editorName" -ForegroundColor Gray
 
 # Recent projects mode
 if ($Recent) {
-    Write-Host "  Loading recent projects..." -ForegroundColor Yellow
+    Write-Host "  Loading recent projects..." -ForegroundColor Cyan
     
     # Get recent folders from VS Code/Cursor storage
     $recentPaths = @()

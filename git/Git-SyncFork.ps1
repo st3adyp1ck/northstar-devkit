@@ -159,7 +159,7 @@ try {
     }
 
     # Step 1: Fetch from upstream
-    Write-Host "`n  [1/4] Fetching from $UpstreamRemote..." -ForegroundColor Yellow
+    Write-Host "`n  [1/4] Fetching from $UpstreamRemote..." -ForegroundColor Cyan
     $fetchOutput = git fetch $UpstreamRemote 2>&1
     $fetchExit = $LASTEXITCODE
     $fetchOutput | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
@@ -170,7 +170,7 @@ try {
     Write-Host "  DONE: Fetched from upstream." -ForegroundColor Green
 
     # Step 2: Checkout target branch
-    Write-Host "`n  [2/4] Checking out $Branch..." -ForegroundColor Yellow
+    Write-Host "`n  [2/4] Checking out $Branch..." -ForegroundColor Cyan
     $checkoutOutput = git checkout "$Branch" 2>&1
     $checkoutExit = $LASTEXITCODE
     $checkoutOutput | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
@@ -181,7 +181,7 @@ try {
     Write-Host "  DONE: On branch $Branch." -ForegroundColor Green
 
     # Step 3: Merge or Rebase
-    Write-Host "`n  [3/4] Syncing with $UpstreamRemote/$Branch..." -ForegroundColor Yellow
+    Write-Host "`n  [3/4] Syncing with $UpstreamRemote/$Branch..." -ForegroundColor Cyan
     if ($Rebase) {
         $syncOutput = git rebase "$UpstreamRemote/$Branch" 2>&1
     } else {
@@ -206,12 +206,12 @@ try {
     }
 
     # Step 4: Push to origin
-    Write-Host "`n  [4/4] Pushing to $OriginRemote..." -ForegroundColor Yellow
+    Write-Host "`n  [4/4] Pushing to $OriginRemote..." -ForegroundColor Cyan
     if ($Rebase) {
         # We never fetched $OriginRemote before this point (only $UpstreamRemote),
         # so refresh our view of it now - --force-with-lease needs a fresh
         # remote-tracking ref to compare against before it will allow the push.
-        Write-Host "  Fetching latest $OriginRemote/$Branch before force-pushing..." -ForegroundColor Yellow
+        Write-Host "  Fetching latest $OriginRemote/$Branch before force-pushing..." -ForegroundColor Cyan
         $originFetchOutput = git fetch $OriginRemote $Branch 2>&1
         $originFetchExit = $LASTEXITCODE
         $originFetchOutput | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }

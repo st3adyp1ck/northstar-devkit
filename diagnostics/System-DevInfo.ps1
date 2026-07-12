@@ -65,7 +65,7 @@ $info = @{
 }
 
 # System Info
-Write-Host "  System Information:" -ForegroundColor Yellow
+Write-Host "  System Information:" -ForegroundColor Cyan
 try {
     $os = Get-CimInstance Win32_OperatingSystem -ErrorAction Stop
     $computerSystem = Get-CimInstance Win32_ComputerSystem -ErrorAction Stop
@@ -96,7 +96,7 @@ try {
 }
 
 # Tools Info
-Write-Host "`n  Development Tools:" -ForegroundColor Yellow
+Write-Host "`n  Development Tools:" -ForegroundColor Cyan
 
 $tools = @(
     @{ Name = "PowerShell"; Cmd = "pwsh"; Args = @("--version"); Pattern = '(\d+\.\d+\.\d+)' }
@@ -143,10 +143,16 @@ foreach ($tool in $tools) {
 }
 
 # Network Info
-Write-Host "`n  Network:" -ForegroundColor Yellow
+Write-Host "`n  Network:" -ForegroundColor Cyan
 
 try {
-    $ipConfig = Get-NetIPConfiguration | Where-Object { $_.NetAdapter.Status -eq 'Up' } | Select-Object -First 1
+    # Prefer an "Up" adapter that actually has a default gateway - a
+    # virtual Hyper-V/WSL/VPN adapter can otherwise sort first and report
+    # a NAT-only IP with no real gateway instead of the machine's actual
+    # network identity.
+    $ipConfig = Get-NetIPConfiguration | Where-Object { $_.NetAdapter.Status -eq 'Up' } |
+        Sort-Object -Property @{Expression = { if ($_.IPv4DefaultGateway) { 0 } else { 1 } } } |
+        Select-Object -First 1
     if ($ipConfig) {
         $ip = $ipConfig.IPv4Address.IPAddress
         $gateway = $ipConfig.IPv4DefaultGateway.NextHop
@@ -181,11 +187,21 @@ if ($usedPorts.Count -gt 0) {
 $info.Network.UsedPorts = $usedPorts
 
 # Resources
-Write-Host "`n  Resources:" -ForegroundColor Yellow
+Write-Host "`n  Resources:" -ForegroundColor Cyan
 
 try {
     $disks = Get-CimInstance Win32_LogicalDisk -ErrorAction Stop | Where-Object { $_.DriveType -eq 3 }
     foreach ($disk in $disks) {
+        if (-not $disk.Size -or $disk.Size -le 0) {
+            # An unmounted/empty local-disk-type volume (Size 0 or $null) -
+            # skip it rather than divide by zero below, which would trip
+            # the catch below and silently drop every disk enumerated
+            # after it from the report.
+            Write-Host "    Disk $($disk.DeviceID) " -NoNewline -ForegroundColor Gray
+            Write-Host "unavailable (no size reported)" -ForegroundColor Gray
+            continue
+        }
+
         $freeGB = [math]::Round($disk.FreeSpace / 1GB, 1)
         $totalGB = [math]::Round($disk.Size / 1GB, 1)
         $usedPercent = [math]::Round((($disk.Size - $disk.FreeSpace) / $disk.Size) * 100, 0)
@@ -215,7 +231,7 @@ if ($computerSystem) {
 }
 
 # Environment
-Write-Host "`n  Environment:" -ForegroundColor Yellow
+Write-Host "`n  Environment:" -ForegroundColor Cyan
 
 $pathCount = ($env:PATH -split ';' | Where-Object { $_ }).Count
 Write-Host "    PATH entries: $pathCount" -ForegroundColor Gray
