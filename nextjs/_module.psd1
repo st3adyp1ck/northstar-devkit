@@ -21,7 +21,7 @@
             Label           = 'Full Clean (.next + node_modules + reinstall)'
             Script          = 'Next-FullClean.ps1'
             RequiresProject = $true
-            Help            = "The most destructive option in this category: stops locally running node/bun processes for the project, clears all Next.js/Turbopack caches and build output (.next, .turbo, node_modules/.cache, node_modules/.vite, dist, .vite), deletes node_modules and all lock files (package-lock.json, yarn.lock, pnpm-lock.yaml, bun.lockb), clears the package manager's own cache, and reinstalls. Use this when a project is genuinely broken and a narrower cache clear hasn't fixed it. Safety note: mutates the project directory extensively - shows a summary of what will be deleted and requires y/n confirmation unless -Force is passed; pass -StartDev to also launch the dev server once cleaning finishes."
+            Help            = "The most destructive option in this category: stops locally running node/bun processes for the project, clears all Next.js/Turbopack caches and build output (.next, .turbo, node_modules/.cache, node_modules/.vite, dist, .vite), deletes node_modules and all lock files (package-lock.json, yarn.lock, pnpm-lock.yaml, bun.lock/bun.lockb), clears the package manager's own cache, and reinstalls. Use this when a project is genuinely broken and a narrower cache clear hasn't fixed it. Safety note: mutates the project directory extensively - shows a summary of what will be deleted and requires y/n confirmation unless -Force is passed; pass -StartDev to also launch the dev server once cleaning finishes."
         }
         @{
             Key             = '4'

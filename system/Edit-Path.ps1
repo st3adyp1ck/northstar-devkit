@@ -167,7 +167,9 @@ if ($Add) {
         exit 0
     }
     
-    $newPathString = $currentPath + ";" + $fullPath
+    # Append with ';' only when there is an existing value - a leading empty
+    # segment (";C:\...") is treated by Windows as "current directory".
+    $newPathString = if ([string]::IsNullOrEmpty($currentPath)) { $fullPath } else { $currentPath + ";" + $fullPath }
     [Environment]::SetEnvironmentVariable("PATH", $newPathString, $target)
     
     Write-Host "  DONE: Added to $target PATH" -ForegroundColor Green
@@ -299,7 +301,7 @@ while ($true) {
             } elseif ($pathEntries -contains $resolved.Path) {
                 Write-Host "  WARNING: Path already exists.`n" -ForegroundColor Yellow
             } else {
-                $newPathString = $currentPath + ";" + $resolved.Path
+                $newPathString = if ([string]::IsNullOrEmpty($currentPath)) { $resolved.Path } else { $currentPath + ";" + $resolved.Path }
                 [Environment]::SetEnvironmentVariable("PATH", $newPathString, $target)
                 Write-Host "  DONE: Path added.`n" -ForegroundColor Green
             }

@@ -343,9 +343,11 @@ try {
     $warningsFound++
 }
 
-# Admin check
+# Admin check (counted as a warning, not a free pass - the summary line
+# should reflect that some features need elevation)
 $isAdmin = Test-DevKitAdmin
 Write-Check "Administrator Rights" $isAdmin "" "Some features require admin - Run as Administrator if needed"
+if (-not $isAdmin) { $warningsFound++ }
 
 # Execution policy
 try {
@@ -364,10 +366,10 @@ try {
     $freeSpaceGB = [math]::Round($systemDrive.FreeSpace / 1GB, 1)
     $totalSpaceGB = [math]::Round($systemDrive.Size / 1GB, 1)
     $diskOk = $freeSpaceGB -gt 10
-    Write-Check "Disk Space (C:)" $diskOk "$freeSpaceGB GB free / $totalSpaceGB GB total" "Free up disk space"
+    Write-Check "Disk Space ($($env:SystemDrive))" $diskOk "$freeSpaceGB GB free / $totalSpaceGB GB total" "Free up disk space"
     if (-not $diskOk) { $warningsFound++ }
 } catch {
-    Write-Check "Disk Space (C:)" $false "Could not query WMI/CIM" "Check that the WMI/Winmgmt service is running"
+    Write-Check "Disk Space ($($env:SystemDrive))" $false "Could not query WMI/CIM" "Check that the WMI/Winmgmt service is running"
     $warningsFound++
 }
 

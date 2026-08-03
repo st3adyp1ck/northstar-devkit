@@ -9,12 +9,31 @@
     Created by Northstar Software Development
     Website: https://www.northstarcoding.com
 .VERSION
-    3.1.0
+    3.8.0
 #>
 
-# Prevent double-loading
-if ($global:DevKitCommonLoaded) { return }
+# Prevent double-loading. Scope-aware on purpose: a $global: bool would
+# incorrectly skip loading for a sibling script invoked via `&` in the same
+# process (a distinct child scope that never inherits functions defined by
+# another sibling's dot-source), leaving it with the flag set but none of
+# the functions actually defined. Checking for the function itself detects
+# "already loaded in a scope this one can see" instead.
+if (Get-Command Write-DevKitHeader -ErrorAction SilentlyContinue) { return }
 $global:DevKitCommonLoaded = $true
+
+# A process relaunched via Start-Process (e.g. the GUI's MTA->STA and
+# packaged-shell hops in gui/DevKit-GUI.ps1) can have module auto-load
+# resolve Microsoft.PowerShell.Utility to a same-named module from a
+# DIFFERENT PowerShell install earlier on PSModulePath - observed on real
+# hardware: a Store-packaged pwsh 7 build's copy (no
+# Import-PowerShellDataFile) winning over this host's own copy. $PSHOME
+# always points at the CURRENT host's own install regardless of how it was
+# launched, so pin its own Utility module now, once, before anything below
+# calls Import-PowerShellDataFile.
+$devKitUtilityManifestPath = Join-Path $PSHOME "Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1"
+if (Test-Path $devKitUtilityManifestPath) {
+    Import-Module $devKitUtilityManifestPath -Force -ErrorAction SilentlyContinue
+}
 
 # Animation/color engine (gradient text, startup banner, spinner) - split
 # out of this file so the terminal-capability probing and ANSI rendering
@@ -48,6 +67,10 @@ function Get-DevKitSettings {
             updateCheckEnabled = $true
             lastUpdateCheckUtc = $null
             enableAnimations   = $true
+            widgetDockMode     = 'Right'
+            widgetWidth        = 380
+            gitFlyoutWidth     = 300
+            envDriftSilencedProjects = @()
         }
     }
 
@@ -62,8 +85,12 @@ function Get-DevKitSettings {
         # Fill in any preference missing from an older/partial file rather
         # than failing outright, so adding a new setting later never breaks
         # an existing settings.json.
+        # Caveat: shallow name-level backfill only - any key present in the user file replaces the default wholesale (nested object values are never deep-merged).
         foreach ($prop in $defaults.preferences.PSObject.Properties.Name) {
-            if (-not $data.preferences.PSObject.Properties.Name.Contains($prop)) {
+            # @() + -contains, never .Name.Contains(): with exactly one
+            # property on file the member-enumerated .Name is a bare string,
+            # and String.Contains would do a substring match.
+            if (-not (@($data.preferences.PSObject.Properties.Name) -contains $prop)) {
                 $data.preferences | Add-Member -MemberType NoteProperty -Name $prop -Value $defaults.preferences.$prop
             }
         }
@@ -81,7 +108,30 @@ function Set-DevKitSettings {
     $path = Get-DevKitSettingsFile
     $tempPath = "$path.tmp.$PID"
     try {
-        $Settings | ConvertTo-Json -Depth 6 | Set-Content -Path $tempPath -Encoding UTF8
+        # Merge over whatever is on disk right now instead of blindly
+        # overwriting: another DevKit process (e.g. the long-lived widget) may
+        # have written its own preference change since this caller loaded its
+        # copy, and last-writer-wins would silently drop it. The caller's
+        # preference keys win; on-disk keys the caller doesn't carry (e.g.
+        # written by a newer build) are preserved. Best-effort: any
+        # read/parse failure falls back to the caller's copy as-is.
+        $toSave = $Settings
+        try {
+            if (Test-Path $path) {
+                $raw = Get-Content -Path $path -Raw -ErrorAction Stop
+                if (-not [string]::IsNullOrWhiteSpace($raw)) {
+                    $onDisk = $raw | ConvertFrom-Json -ErrorAction Stop
+                    if ($onDisk.preferences -and $Settings.preferences) {
+                        foreach ($prop in @($Settings.preferences.PSObject.Properties.Name)) {
+                            $onDisk.preferences | Add-Member -MemberType NoteProperty -Name $prop -Value $Settings.preferences.$prop -Force
+                        }
+                        $onDisk | Add-Member -MemberType NoteProperty -Name schemaVersion -Value $Settings.schemaVersion -Force
+                        $toSave = $onDisk
+                    }
+                }
+            }
+        } catch { $toSave = $Settings }
+        $toSave | ConvertTo-Json -Depth 6 | Set-Content -Path $tempPath -Encoding UTF8
         Move-Item -Path $tempPath -Destination $path -Force
     } catch {
         if (Test-Path $tempPath) { Remove-Item $tempPath -Force -ErrorAction SilentlyContinue }
@@ -195,8 +245,13 @@ function Read-DevKitTypedValue {
             if ([string]::IsNullOrWhiteSpace($raw)) { return $null }
             if ($raw -notmatch '^\d+$') { return $null }
             $val = [int64]$raw
-            if ($Spec.Min -and $val -lt [int64]$Spec.Min) { return $null }
-            if ($Spec.Max -and $val -gt [int64]$Spec.Max) { return $null }
+            # $null checks, not truthiness: a Min/Max of 0 is a real bound.
+            if ($null -ne $Spec.Min -and $val -lt [int64]$Spec.Min) { return $null }
+            if ($null -ne $Spec.Max -and $val -gt [int64]$Spec.Max) { return $null }
+            # Reject like any other invalid input instead of overflowing:
+            # casting a value past Int32.MaxValue to [int] throws an uncaught
+            # OverflowException that kills the whole menu loop.
+            if ($val -gt [int]::MaxValue) { return $null }
             return [int]$val
         }
         'YesNo' {
@@ -349,7 +404,7 @@ function Show-DevKitInteractiveMenu {
 
     foreach ($e in $Entries) {
         if ($e.IsHeader) {
-            Write-Host "  $($e.Label)" -ForegroundColor Magenta
+            Write-Host "  $($e.Label)" -ForegroundColor White
         } else {
             Write-Host ("  [{0}] {1}" -f $e.Key, $e.Label)
         }
@@ -357,13 +412,19 @@ function Show-DevKitInteractiveMenu {
     Write-Host ""
 
     if (-not $canNavigate) {
-        return (Read-Host $PromptLabel).Trim()
+        $raw = Read-Host $PromptLabel
+        # stdin EOF (redirected input exhausted) must not throw on .Trim() or
+        # spin a re-prompt loop forever - treat it as Back, same as Escape.
+        if ($null -eq $raw) { return '0' }
+        return $raw.Trim()
     }
 
     $promptTop = $null
     try { $promptTop = [Console]::CursorTop } catch { $canNavigate = $false }
     if (-not $canNavigate) {
-        return (Read-Host $PromptLabel).Trim()
+        $raw = Read-Host $PromptLabel
+        if ($null -eq $raw) { return '0' }
+        return $raw.Trim()
     }
 
     try {
@@ -439,7 +500,9 @@ function Show-DevKitInteractiveMenu {
     } catch {
         Write-Host ""
         Write-Host "  (Arrow-key navigation unavailable in this console -- switched to typed input.)" -ForegroundColor DarkGray
-        return (Read-Host $PromptLabel).Trim()
+        $raw = Read-Host $PromptLabel
+        if ($null -eq $raw) { return '0' }   # stdin EOF: treat as Back, same as Escape
+        return $raw.Trim()
     }
 }
 
@@ -744,12 +807,14 @@ function Get-DevKitPackageManager {
     .SYNOPSIS
         Detects which package manager a project uses.
     .DESCRIPTION
-        Checks lock files first (bun.lockb, pnpm-lock.yaml, yarn.lock,
-        package-lock.json, in that priority order). If none are found, falls
-        back to package.json's corepack "packageManager" field (e.g.
-        "pnpm@8.15.0") so freshly-scaffolded projects that don't yet have a
-        lock file are still detected correctly. Defaults to npm if nothing
-        matches.
+        Checks lock files first (bun.lock / bun.lockb, pnpm-lock.yaml,
+        yarn.lock, package-lock.json, in that priority order). If none are
+        found, falls back to package.json's corepack "packageManager" field
+        (e.g. "pnpm@8.15.0") so freshly-scaffolded projects that don't yet
+        have a lock file are still detected correctly. Defaults to npm if
+        nothing matches. bun.lock (the text lockfile bun writes since 1.2)
+        is probed before bun.lockb (the legacy binary one); they share one
+        priority slot, so either one wins over every other manager's file.
     .PARAMETER Path
         The project directory to inspect.
     #>
@@ -761,6 +826,7 @@ function Get-DevKitPackageManager {
     $resolved = Resolve-DevKitDirectory -Path $Path
 
     $managers = @(
+        @{ Lock = "bun.lock"; Command = "bun"; Install = @("install") },
         @{ Lock = "bun.lockb"; Command = "bun"; Install = @("install") },
         @{ Lock = "pnpm-lock.yaml"; Command = "pnpm"; Install = @("install") },
         @{ Lock = "yarn.lock"; Command = "yarn"; Install = @("install") },
@@ -888,7 +954,12 @@ function Get-DevKitProcessByPort {
         [int]$Port
     )
 
-    $connection = Get-NetTCPConnection -LocalPort $Port -ErrorAction SilentlyContinue | Select-Object -First 1
+    # Prefer the real listener: a stale non-Listen row (e.g. TIME_WAIT with
+    # OwningProcess 0) can sort ahead of it in the raw Get-NetTCPConnection
+    # output and would otherwise win the -First 1 pick, reporting PID 0.
+    $connections = @(Get-NetTCPConnection -LocalPort $Port -ErrorAction SilentlyContinue)
+    $connection = $connections | Where-Object { $_.State -eq 'Listen' -and $_.OwningProcess -ne 0 } | Select-Object -First 1
+    if (-not $connection) { $connection = $connections | Select-Object -First 1 }
     if (-not $connection) {
         return $null
     }
@@ -902,14 +973,61 @@ function Get-DevKitProcessByPort {
     }
 }
 
+function ConvertFrom-DevKitExcludedPortRanges {
+    <#
+    .SYNOPSIS
+        Parses `netsh interface ipv4 show excludedportrange protocol=tcp`
+        output into a list of port-range records.
+    .DESCRIPTION
+        The netsh table is localized (its header text varies by Windows
+        display language), so parsing never matches literal header words:
+        a line is a data row when its first two whitespace-separated tokens
+        both parse as integers (the table's Start Port / End Port columns).
+        That single rule skips the title, blank lines, the header row, the
+        dashed separator row, and the trailing "* - Administered port
+        exclusions." footnote in every locale. A row whose two columns are
+        equal (e.g. "5357  5357") is a real single-port exclusion and is
+        returned as a range with Start -eq End; any third column netsh may
+        print (the "*" marker) is ignored.
+    .PARAMETER Output
+        The full captured text of the netsh command (may be empty).
+    .OUTPUTS
+        An array (possibly empty) of hashtables @{ Start = [int]; End = [int] },
+        in the order the rows appeared. Always a real array - the "return ,$"
+        pattern keeps a single result from unrolling to a bare hashtable.
+    .EXAMPLE
+        $ranges = ConvertFrom-DevKitExcludedPortRanges -Output (netsh interface ipv4 show excludedportrange protocol=tcp | Out-String)
+    #>
+    [CmdletBinding()]
+    param([AllowEmptyString()][string]$Output)
+
+    $results = @()
+    if (-not [string]::IsNullOrWhiteSpace($Output)) {
+        foreach ($line in ($Output -split "\r?\n")) {
+            $tokens = @($line.Trim() -split '\s+')
+            if ($tokens.Count -lt 2) { continue }
+            $start = 0
+            $end = 0
+            if ([int]::TryParse($tokens[0], [ref]$start) -and [int]::TryParse($tokens[1], [ref]$end)) {
+                $results += @{ Start = $start; End = $end }
+            }
+        }
+    }
+    return ,$results
+}
+
 # ==================== FOLDER / FILE BROWSER ====================
 
-# One-time native interop for a real console-window owner (so a dialog
-# z-orders correctly above the console instead of floating globally topmost).
-# Guarded by -as [type] (Add-Type -TypeDefinition throws "type already
-# exists" on a second compile in the same process) combined with the file's
-# own $global:DevKitCommonLoaded guard above.
-if (-not ('DevKit.NativeMethods' -as [type])) {
+function Initialize-DevKitFormsInterop {
+    <#
+    .SYNOPSIS
+        One-time native interop compile for a real console-window owner (so a
+        dialog z-orders correctly above the console instead of floating
+        globally topmost). Idempotent and cheap after first use - done lazily
+        here rather than at dot-source time, because most tool runs never
+        show a dialog and shouldn't pay the WinForms/C# compile cost.
+    #>
+    if ('DevKit.NativeMethods' -as [type]) { return }
     Add-Type -AssemblyName System.Windows.Forms -ErrorAction SilentlyContinue
     Add-Type -ReferencedAssemblies 'System.Windows.Forms' -TypeDefinition @'
 using System;
@@ -954,6 +1072,8 @@ function Show-DevKitFolderBrowser {
         [string]$Description = "Select a project folder",
         [string]$InitialDirectory
     )
+
+    Initialize-DevKitFormsInterop   # process-wide types used inside the STA runspace below
 
     try {
         $iss = [System.Management.Automation.Runspaces.InitialSessionState]::CreateDefault()
@@ -1036,6 +1156,8 @@ function Show-DevKitFileBrowser {
         [string]$Filter = "All files (*.*)|*.*"
     )
 
+    Initialize-DevKitFormsInterop   # process-wide types used inside the STA runspace below
+
     try {
         $iss = [System.Management.Automation.Runspaces.InitialSessionState]::CreateDefault()
         $rs = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspace($iss)
@@ -1115,6 +1237,38 @@ function Save-DevKitProjectRegistry {
     $path = Get-DevKitProjectsFile
     $tempPath = "$path.tmp.$PID"
     try {
+        # Merge over whatever is on disk right now instead of blindly
+        # overwriting: another DevKit process (e.g. the long-lived widget) may
+        # have added or updated a project since this caller loaded its copy,
+        # and last-writer-wins would silently drop that. The caller's version
+        # wins per project id, and its activeProjectId wins outright. An
+        # on-disk project this process never read (absent from the
+        # Get-DevKitProjectRegistry baseline, i.e. a concurrent add) is kept;
+        # one the caller read and deliberately dropped (e.g.
+        # Remove-DevKitLinkedProject) stays dropped. Best-effort: any
+        # read/parse failure falls back to the caller's copy as-is.
+        try {
+            if (Test-Path $path) {
+                $raw = Get-Content -Path $path -Raw -ErrorAction Stop
+                if (-not [string]::IsNullOrWhiteSpace($raw)) {
+                    $onDisk = $raw | ConvertFrom-Json -ErrorAction Stop
+                    if ($null -ne $onDisk.projects) {
+                        $callerIds = @($Registry.projects | ForEach-Object { $_.id })
+                        $kept = @()
+                        foreach ($diskProject in @($onDisk.projects)) {
+                            if ($callerIds -contains $diskProject.id) { continue }
+                            if ($null -eq $script:DevKitProjectRegistryReadIds -or
+                                -not ($script:DevKitProjectRegistryReadIds -contains $diskProject.id)) {
+                                $kept += $diskProject
+                            }
+                        }
+                        if ($kept.Count -gt 0) {
+                            $Registry.projects = @(@($Registry.projects) + $kept)
+                        }
+                    }
+                }
+            }
+        } catch { }
         $Registry | ConvertTo-Json -Depth 6 | Set-Content -Path $tempPath -Encoding UTF8
         Move-Item -Path $tempPath -Destination $path -Force
     } catch {
@@ -1128,6 +1282,12 @@ function Get-DevKitProjectRegistry {
     $path = Get-DevKitProjectsFile
     $empty = [PSCustomObject]@{ schemaVersion = 1; activeProjectId = $null; projects = @() }
 
+    # Baseline of project ids this process last read, for
+    # Save-DevKitProjectRegistry's merge: it distinguishes "on disk but the
+    # caller never saw it" (a concurrent add - keep) from "the caller saw it
+    # and deliberately dropped it" (a Remove - keep the deletion).
+    $script:DevKitProjectRegistryReadIds = @()
+
     if (-not (Test-Path $path)) { return $empty }
 
     try {
@@ -1137,6 +1297,7 @@ function Get-DevKitProjectRegistry {
         # ConvertFrom-Json returns a bare PSCustomObject (not a 1-item array)
         # when "projects" has exactly one element - always wrap with @().
         $projects = @($data.projects)
+        $script:DevKitProjectRegistryReadIds = @($projects | ForEach-Object { $_.id })
         return [PSCustomObject]@{
             schemaVersion   = $data.schemaVersion
             activeProjectId = $data.activeProjectId
@@ -1242,6 +1403,9 @@ function Remove-DevKitLinkedProject {
     $registry.projects = @($registry.projects | Where-Object { $_.id -ne $Id })
     if ($registry.activeProjectId -eq $Id) { $registry.activeProjectId = $null }
     Save-DevKitProjectRegistry -Registry $registry
+    # Invalidate DevKit.ps1's Show-Header cache: the removed project may have
+    # been the active one (same contract as Set/Clear-DevKitActiveProject).
+    $global:DevKitActiveProjectCache = $null
 }
 
 function Rename-DevKitLinkedProject {
@@ -1249,6 +1413,8 @@ function Rename-DevKitLinkedProject {
     $registry = Get-DevKitProjectRegistry
     foreach ($p in $registry.projects) { if ($p.id -eq $Id) { $p.name = $NewName } }
     Save-DevKitProjectRegistry -Registry $registry
+    # Invalidate DevKit.ps1's Show-Header cache: it may be displaying the old name.
+    $global:DevKitActiveProjectCache = $null
 }
 
 function Set-DevKitProjectPinned {
@@ -1271,6 +1437,8 @@ function Repair-DevKitLinkedProject {
         }
     }
     Save-DevKitProjectRegistry -Registry $registry
+    # Invalidate DevKit.ps1's Show-Header cache: it may be displaying the old path.
+    $global:DevKitActiveProjectCache = $null
 }
 
 function Get-DevKitActiveProject {
@@ -1469,7 +1637,7 @@ function Select-DevKitProject {
         $linked = @(Get-DevKitLinkedProjects | Sort-Object -Property @{Expression = 'pinned'; Descending = $true }, @{Expression = 'lastUsedUtc'; Descending = $true })
 
         if ($linked.Count -gt 0) {
-            Write-Host "  Linked Projects (most recently used first):" -ForegroundColor Magenta
+            Write-Host "  Linked Projects (most recently used first):" -ForegroundColor White
             for ($i = 0; $i -lt $linked.Count; $i++) {
                 $p = $linked[$i]
                 $pin = if ($p.pinned) { "*" } else { " " }

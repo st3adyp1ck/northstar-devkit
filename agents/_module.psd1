@@ -15,10 +15,11 @@
             Help   = "Updates installed AI/dev CLIs (of the 11 tracked - claude, gh, codex, gemini, cursor-agent, aider, supabase, vercel, railway, kimi, auggie) that are on an automatable update channel: npm ('npm install -g PACKAGE@latest'), npm+builtin (tries the tool's own upgrade subcommand first, e.g. 'vercel upgrade', falling back to npm), or scoop ('scoop update NAME', only when installed via Scoop). Tools on a manual channel (gh, cursor-agent, aider, and kimi -- two unrelated CLIs share the 'kimi' command name, so it's report-only until there's a safe way to tell them apart) are reported only, never touched. Supports -Only <name(s)> to restrict which tools are considered, -DryRun to show current/latest versions and what would update with no changes made, and -Force to skip the confirmation prompt. Safety note: without -DryRun, confirming runs real update commands (npm install/scoop update/builtin upgrade) against globally installed packages - review the detected list before confirming."
         }
         @{
-            Key    = '3'
-            Label  = 'List MCP Servers'
-            Script = 'Get-McpServers.ps1'
-            Help   = "Lists Claude Code's configured MCP servers via 'claude mcp list'. Read-only. With an active project set, splits the list into user/global scope versus project/local scope by diffing the list run from a neutral directory against the list run from the project. Use this to see what's currently configured before adding or removing anything."
+            Key        = '3'
+            Label      = 'List MCP Servers'
+            Script     = 'Get-McpServers.ps1'
+            StaticArgs = @{ UseActiveProject = $true }
+            Help       = "Lists Claude Code's configured MCP servers via 'claude mcp list'. Read-only. With an active project set, splits the list into user/global scope versus project/local scope by diffing the list run from a neutral directory against the list run from the project. Use this to see what's currently configured before adding or removing anything."
         }
         @{
             Key    = '4'

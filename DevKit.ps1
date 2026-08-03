@@ -11,7 +11,7 @@
     Website: https://www.northstarcoding.com
 
 .VERSION
-    3.1.0
+    3.8.0
 .NOTES
     Requires PowerShell 5.1 or PowerShell 7+
     Run as Administrator for full network optimization features
@@ -34,7 +34,7 @@ $ScriptDir = $PSScriptRoot
 
 # Read the version once at startup so the header banner never drifts out of
 # sync with the VERSION file (previously hardcoded as a literal string).
-$DevKitVersion = '3.1.0'
+$DevKitVersion = '3.8.0'
 try {
     $versionFile = Join-Path $ScriptDir "VERSION"
     if (Test-Path $versionFile) {
@@ -56,11 +56,17 @@ $global:DevKitActiveProjectCache = $null
 function Show-Header {
     param([string]$Title)
     Clear-Host
-    Write-Host "=============================================" -ForegroundColor Cyan
-    Write-Host "       Northstar DevKit v$DevKitVersion             " -ForegroundColor Cyan
+    # Center the version banner on the 45-char rule: the padding is computed
+    # from the actual string lengths, so the line stays centered no matter
+    # how the version string's length changes (a hardcoded pad broke that).
+    $rule = "============================================="
+    $banner = "Northstar DevKit v$DevKitVersion"
+    $bannerPadLeft = [Math]::Max([int][Math]::Floor(($rule.Length - $banner.Length) / 2), 0)
+    Write-Host $rule -ForegroundColor Cyan
+    Write-Host ((' ' * $bannerPadLeft) + $banner) -ForegroundColor Cyan
     Write-Host "    Developer Toolkit by northstarcoding.com" -ForegroundColor Cyan
-    Write-Host "=============================================" -ForegroundColor Cyan
-    Write-Host "  Menu: $Title" -ForegroundColor Cyan
+    Write-Host $rule -ForegroundColor Cyan
+    Write-Host "  Menu: $Title" -ForegroundColor White
 
     if ($null -eq $global:DevKitActiveProjectCache) {
         $global:DevKitActiveProjectCache = Get-DevKitActiveProject
@@ -184,7 +190,7 @@ function Search-DevKitTools {
     }
 
     Write-Host ""
-    Write-Host "  Results for '$keyword':" -ForegroundColor Magenta
+    Write-Host "  Results for '$keyword':" -ForegroundColor White
     $entries = @()
     for ($i = 0; $i -lt $found.Count; $i++) {
         $entries += @{ Key = "$($i + 1)"; Label = ("[{0}] {1} -> {2}" -f $found[$i].MainMenuKey, $found[$i].ModuleName, $found[$i].Label) }

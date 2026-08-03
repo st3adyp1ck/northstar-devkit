@@ -25,8 +25,13 @@
     Website: https://www.northstarcoding.com
 #>
 
-# Prevent double-loading
-if ($global:DevKitMcpListLoaded) { return }
+# Prevent double-loading. Scope-aware on purpose: a $global: bool would
+# incorrectly skip loading for a sibling script invoked via `&` in the same
+# process (a distinct child scope that never inherits functions defined by
+# another sibling's dot-source), leaving it with the flag set but none of
+# the functions actually defined. Checking for the function itself detects
+# "already loaded in a scope this one can see" instead.
+if (Get-Command Invoke-DevKitMcpList -ErrorAction SilentlyContinue) { return }
 $global:DevKitMcpListLoaded = $true
 
 function Invoke-DevKitMcpList {

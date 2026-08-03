@@ -138,6 +138,12 @@ process {
         return
     }
 
+    # Secret-like values Env-Backup redacted to this literal marker were never
+    # stored in the backup at all - restoring them would overwrite live
+    # secrets with the marker text. Skip them everywhere below and report once.
+    $redactedMarker = '***REDACTED***'
+    $redactedSkipped = 0
+
     # Show backup info
     Write-Host "`n  Backup Information:" -ForegroundColor Yellow
     Write-Host "    Created:  $($backup.Timestamp)" -ForegroundColor Gray
@@ -157,14 +163,19 @@ process {
         
         Write-Host "`n  User Variables:" -ForegroundColor Cyan
         $backup.Variables.User.PSObject.Properties | ForEach-Object {
+            if ($_.Value -eq $redactedMarker) { $redactedSkipped++; return }
             $value = if ($_.Value.Length -gt 50) { $_.Value.Substring(0, 50) + "..." } else { $_.Value }
             Write-Host "    $($_.Name) = $value" -ForegroundColor Gray
         }
         
         Write-Host "`n  Machine Variables:" -ForegroundColor Cyan
         $backup.Variables.Machine.PSObject.Properties | ForEach-Object {
+            if ($_.Value -eq $redactedMarker) { $redactedSkipped++; return }
             $value = if ($_.Value.Length -gt 50) { $_.Value.Substring(0, 50) + "..." } else { $_.Value }
             Write-Host "    $($_.Name) = $value" -ForegroundColor Gray
+        }
+        if ($redactedSkipped -gt 0) {
+            Write-Host "`n  Skipped $redactedSkipped redacted secret value(s) - re-enter them manually (they were never stored in this backup)." -ForegroundColor Yellow
         }
         Write-Host ""
         return
@@ -187,6 +198,7 @@ process {
     Write-Host "`n  Restoring User environment variables..." -ForegroundColor Yellow
     $userRestored = 0
     $backup.Variables.User.PSObject.Properties | ForEach-Object {
+        if ($_.Value -eq $redactedMarker) { $redactedSkipped++; return }
         try {
             if ($_.Name -eq "PATH") {
                 if ($Force) {
@@ -217,6 +229,7 @@ process {
             Write-Host "`n  Restoring Machine environment variables..." -ForegroundColor Yellow
             $machineRestored = 0
             $backup.Variables.Machine.PSObject.Properties | ForEach-Object {
+                if ($_.Value -eq $redactedMarker) { $redactedSkipped++; return }
                 try {
                     if ($_.Name -eq "PATH") {
                         if ($Force) {
@@ -241,6 +254,10 @@ process {
         }
     }
     
+    if ($redactedSkipped -gt 0) {
+        Write-Host "  Skipped $redactedSkipped redacted secret value(s) - re-enter them manually (they were never stored in this backup)." -ForegroundColor Yellow
+    }
+
     Write-Host "`n  ===================================" -ForegroundColor Cyan
     Write-Host "  Restore complete!" -ForegroundColor Green
     Write-Host "  Restart your terminal to see all changes." -ForegroundColor Yellow

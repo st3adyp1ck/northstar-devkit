@@ -105,10 +105,18 @@ if ($AllUnused) {
 # Calculate reclaimable space
 $df = docker system df 2>$null
 $reclaimable = "Unknown"
+$builderReclaimable = "Unknown"
 if ($df) {
     $imagesLine = $df | Select-String "Images"
-    if ($imagesLine -match '(\d+\.?\d*\s*(B|KB|MB|GB))\s+\((\d+)%\s+reclaimable\)') {
+    # 'docker system df' prints the RECLAIMABLE column as "800MB (66%)" - the
+    # word "reclaimable" only appears in the header row, never in the value.
+    # Units come from go-units: kB/MB/GB/TB, case-insensitive.
+    if ($imagesLine -match '(\d+\.?\d*\s*(?i:B|KB|MB|GB|TB))\s+\((\d+)%\)') {
         $reclaimable = $matches[1]
+    }
+    $builderLine = $df | Select-String "Build Cache"
+    if ($builderLine -match '(\d+\.?\d*\s*(?i:B|KB|MB|GB|TB))\s+\((\d+)%\)') {
+        $builderReclaimable = $matches[1]
     }
 }
 
@@ -125,11 +133,18 @@ if ($Volumes -or $AllUnused) {
 if ($AllUnused) {
     Write-Host "    Custom networks:    $networkCount" -ForegroundColor $(if($networkCount -gt 0){'Yellow'}else{'Green'})
 }
+# -DanglingOnly narrows cleanup to just untagged images - build cache is not
+# touched in that mode, so only show/count it when it will actually run.
+if (-not $DanglingOnly) {
+    Write-Host "    Build cache:        $builderReclaimable" -ForegroundColor Cyan
+}
 Write-Host "    Estimated reclaimable: $reclaimable" -ForegroundColor Cyan
 Write-Host ""
 
-# Check if there's anything to clean
-if ($containerCount -eq 0 -and $unusedImageCount -eq 0 -and
+# Check if there's anything to clean. Stopped containers are excluded from
+# this check when -DanglingOnly is set, since that mode skips container
+# removal entirely (see Step 1 below).
+if (($DanglingOnly -or $containerCount -eq 0) -and $unusedImageCount -eq 0 -and
     (-not $Volumes -or $volumeCount -eq 0) -and
     (-not $AllUnused -or $networkCount -eq 0)) {
     Write-Host "  OK: Nothing to clean up!`n" -ForegroundColor Green
@@ -160,7 +175,13 @@ if ($DryRun) {
 
 # Confirm
 if (-not $Force) {
-    $confirm = Read-Host "  Proceed with cleanup? (y/n)"
+    $confirmPrompt = "  Proceed with cleanup? (y/n)"
+    if (-not $DanglingOnly) {
+        # Step 5 always prunes the build cache when -DanglingOnly is not set -
+        # disclose that here so users aren't surprised by it after confirming.
+        $confirmPrompt = "  Proceed with cleanup (includes build cache prune)? (y/n)"
+    }
+    $confirm = Read-Host $confirmPrompt
     if ($confirm -ne 'y') {
         Write-Host "`n  Cancelled.`n" -ForegroundColor Gray
         exit 0
@@ -172,8 +193,9 @@ Write-Host ""
 $step = 1
 $hadErrors = $false
 
-# Step 1: Remove stopped containers
-if ($containerCount -gt 0) {
+# Step 1: Remove stopped containers - skipped when -DanglingOnly narrows
+# cleanup to just untagged images.
+if ($containerCount -gt 0 -and -not $DanglingOnly) {
     Write-Host "  [$step] Removing stopped containers..." -ForegroundColor Cyan
     $containersOutput = @(docker container prune -f 2>&1)
     foreach ($line in $containersOutput) {
@@ -244,18 +266,21 @@ if ($AllUnused -and $networkCount -gt 0) {
     $step++
 }
 
-# Step 5: Build cache
-Write-Host "  [$step] Cleaning build cache..." -ForegroundColor Cyan
-$builderOutput = @(docker builder prune -f 2>&1)
-foreach ($line in $builderOutput) {
-    if ($line -match 'Total reclaimed') {
-        Write-Host "    $line" -ForegroundColor Green
-    } elseif ($line -match 'error|Error') {
-        Write-Host "    ERROR: $line" -ForegroundColor Red
-        $hadErrors = $true
+# Step 5: Build cache - skipped when -DanglingOnly narrows cleanup to just
+# untagged images.
+if (-not $DanglingOnly) {
+    Write-Host "  [$step] Cleaning build cache..." -ForegroundColor Cyan
+    $builderOutput = @(docker builder prune -f 2>&1)
+    foreach ($line in $builderOutput) {
+        if ($line -match 'Total reclaimed') {
+            Write-Host "    $line" -ForegroundColor Green
+        } elseif ($line -match 'error|Error') {
+            Write-Host "    ERROR: $line" -ForegroundColor Red
+            $hadErrors = $true
+        }
     }
+    if ($LASTEXITCODE -ne 0) { $hadErrors = $true }
 }
-if ($LASTEXITCODE -ne 0) { $hadErrors = $true }
 
 # Final summary - only claim success if every preceding prune step actually
 # came back clean.

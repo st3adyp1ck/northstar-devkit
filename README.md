@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="https://img.shields.io/badge/Northstar-DevKit-3.5.0-blue?style=for-the-badge&logo=powershell&logoColor=white" alt="Northstar DevKit">
+<img src="https://img.shields.io/badge/Northstar-DevKit-3.8.0-blue?style=for-the-badge&logo=powershell&logoColor=white" alt="Northstar DevKit">
 
 <h3>A powerful, dependency-free Windows toolkit for modern web developers</h3>
 
@@ -37,7 +37,7 @@
 
 1. Click the button above to download the latest version
 2. Extract the ZIP to a folder (e.g., `C:\Tools\DevKit`)
-3. Double-click `DevKit.bat` to launch
+3. Double-click `DevKit-GUI.bat` for the desktop app (or `DevKit.bat` for the classic terminal menu)
 
 ### Option 2: Clone with Git
 ```bash
@@ -62,13 +62,34 @@ DevKit.bat
 
 ```batch
 :: 1. Download & extract
-:: 2. Double-click DevKit.bat
-:: 3. Pick a tool from the menu and go!
+:: 2. Double-click DevKit-GUI.bat  (desktop app)
+::    ...or DevKit.bat             (classic terminal menu)
+:: 3. Pick a tool and go!
 ```
 
-The interactive menu will guide you through every tool. For project-specific actions (Git, Next.js, Vite, etc.), DevKit prompts you with a picker: pick a previously-linked project, browse for a folder, use the current directory, or type a path — no more retyping the same path for every action. Whatever you pick becomes your **Active Project** for the rest of the session. See [New in 3.0](#-new-in-30) below.
+The desktop app shows every tool as a card in one branded window — pick a category on the left (or search), press **Run**, and the tool opens in a terminal window with its full interactive UI. For project-specific actions (Git, Next.js, Vite, etc.), DevKit prompts you with a picker: pick a previously-linked project, browse for a folder, use the current directory, or type a path — no more retyping the same path for every action. Whatever you pick becomes your **Active Project** and is shared between the app and the terminal UI. See [New in 3.0](#-new-in-30) below.
 
 ---
+
+## 🎉 New in 3.8
+
+- **A git graph worth looking at.** The widget's Git flyout now draws your project's history like a modern Git GUI: bright colored lanes, smooth gradient curves that flow from each branch into its parent, branch/tag pills, and a ring around HEAD — with ahead/behind counts in the header and fetch/pull/push underneath. No more ASCII art.
+- **The widget became the mission control.** A Disk Free dial (disk-full breaks builds), process ages and a per-server kill button in the node table (plus ports you can click to open in the browser), a git badge under the project picker (branch, uncommitted, ahead/behind, stashes), an `.env` drift warning when your project is missing template keys, a "reboot pending" hint, and one-click Editor / Explorer / Terminal / Run Script launchers for the active project.
+- **Both desktop apps got a fit-and-finish pass.** Themed thin scrollbars everywhere, destructive tools show an ember Run button, dialogs submit with Enter and close with Escape or an [x], search behaves the way you expect, cards react to hover, and the terminal UI's gradient now uses the real logo colors.
+- **Eight new tools.** Reserved-port-range finder (why a "free" port won't bind), an HTTP health check for dev endpoints, `git standup` across your repos, a package.json script picker, stale `node_modules` reclaimer, a hosts-file editor, an `.env` drift checker, and a dev-text converter box (Base64/URL/timestamps/GUID/SHA-256/JWT).
+- **A deep bug sweep.** Two notable fixes: the Agents "Manage..." dialog opened an invisible frozen window, and every MCP menu tool crashed on its second use in a session. Plus `Env-Restore` can no longer overwrite your real secrets with redacted placeholders. Full details in [CHANGELOG.md](CHANGELOG.md).
+
+## 🎉 New in 3.7
+
+- **A companion widget for your desktop.** Click the gauge icon in the DevKit title bar and a small always-on-top window keeps watching your system after DevKit closes: CPU, memory, and GPU load with temperatures (honest "n/a" when a sensor doesn't exist on your machine), the Node processes you're running with their ports, and quick-action buttons (Clear NPM Cache, Kill All Node, Kill Port, Doctor) that fire up the real tools.
+- **Your AI tooling's wiring, at a glance.** Two expandable boxes show Claude Code and Kimi Code: CLI version plus every MCP server for you and for the selected project, with Connected / Disconnected / Requires Auth badges (Claude is health-checked live in the background; Kimi is read from its documented `mcp.json` files, since it has no headless status command).
+- **It lives in the system tray.** Balloon hints, a dark branded right-click menu (Show/Hide, Open DevKit, Start with Windows, Exit), Explorer-restart resilience, and single-instance behavior — clicking the gauge again just brings the running widget back up. The project selector on top is the same Active Project shared with the GUI and terminal UI.
+
+## 🎉 New in 3.6
+
+- **A branded desktop app.** `DevKit-GUI.bat` opens a native dark UI themed on the Northstar compass-rose logo — custom window chrome, brushed-metal title, sapphire/ember accents — rendering all twelve tool categories as navigable cards with live search, chips showing what each tool needs (`PROJECT`/`FILE`/`INPUT`) and a `CAUTION` flag for state-changing tools, plus full linked-project management and a Getting Started page.
+- **Zero changes to the tools themselves.** Pressing Run opens the tool in a real terminal window (Windows Terminal when installed) with the same menus, colors, spinners, and confirmations it always had — the GUI never re-implements or dumbs down a script. The classic terminal UI (`DevKit.bat`) is untouched and fully supported.
+- **Still dependency-free.** The app is WPF hosted by PowerShell itself — no runtime to install, no build step, still a portable folder.
 
 ## 🎉 New in 3.5
 
@@ -80,7 +101,7 @@ The interactive menu will guide you through every tool. For project-specific act
 ## 🎉 New in 3.1
 
 - **Arrow-key navigation.** Every menu now supports Up/Down + Enter to move and select, Escape to go back — typing a number still works exactly as before, and it falls back automatically on a console that can't do raw key reads.
-- **`[12] Maintenance`** — 14 real Windows maintenance/tuning tools: disk & storage cleanup, startup & services tuning, SFC/DISM repair + Windows Update reset, scheduled tasks & event log triage, power/performance tuning, and hardware health. Every mutating tool defaults to a safe report and requires an explicit flag + confirmation to change anything.
+- **`[12] Maintenance`** — 14 real Windows maintenance/tuning tools: disk & storage cleanup, startup & services tuning, SFC/DISM repair + Windows Update reset, scheduled tasks & event log triage, power/performance tuning, and hardware health. Every mutating tool defaults to a safe report and, when run interactively, offers to apply its changes right after the report — flags + confirmation remain for automation.
 - **`[13] Agents & MCP`** — detect and update installed AI CLIs (claude, gh, codex, gemini, cursor-agent, aider) and manage Claude Code's MCP servers globally or per linked project.
 
 ## 🎉 New in 3.0
@@ -118,12 +139,32 @@ The interactive menu will guide you through every tool. For project-specific act
 
 ## 🖥️ Usage
 
+### Desktop App (GUI)
+Launch `DevKit-GUI.bat`:
+
+- **Navigate** by category (left rail) or **search** (top of the rail, `Ctrl+F`) — every tool appears as a card with a one-line summary and the full details on hover.
+- **Run** opens the tool in its own terminal window (Windows Terminal when available, classic console otherwise) with its complete interactive UI — long-running tools like dev servers simply live in that window until you close it.
+- Cards marked **PROJECT** run against your **Active Project** automatically; manage linked projects from the **Projects** page in the rail. Cards marked **CAUTION** change system state — their terminal window always asks for confirmation first.
+- Tools that need input (a port number, a file, a yes/no) ask with a small validated dialog before launching.
+- "Restart as Administrator" (Getting Started page) relaunches the app elevated for the maintenance tools that need it.
+
+### Companion Widget
+Click the gauge icon in the title bar (or "Launch companion widget" on the Getting Started page):
+
+- **Metrics**: CPU / memory / GPU dials with temperatures where the machine exposes them (unavailable sensors show "n/a"), a **System Junk** dial with a safe one-click clean, and a **Disk Free** dial — plus a reboot-pending / long-uptime hint when Windows needs a restart.
+- **Node watch**: every running `node` process with its memory, age, and listening ports — click a port to open it in your browser, or kill just that one process (after a confirm). Warns you when a dev port is stuck inside a Windows-reserved range (Hyper-V/winnat).
+- **Git panel** (title-bar `GIT` button): a drawn commit graph with colored lanes and merge curves, branch with ahead/behind, fetch/pull/push, and quick links to GitHub/Actions — for the project selected below.
+- **Project selector**: the same Active Project as the GUI and terminal UI, with an ambient badge showing its branch + uncommitted/ahead/behind/stash counts, and a warning when its `.env` drifts from the template ("Fix..." copies the template in a terminal).
+- **Quick actions**: Clear NPM Cache, Kill All Node, Kill Port..., Doctor, plus Editor / Explorer / Terminal / Run Script... launchers for the active project — each launches the real DevKit tool in a terminal window — and **Open DevKit** to come back here.
+- **Agents**: the expandable **Claude Code** / **Kimi Code** boxes show that project's MCP servers alongside your user-scope ones, with Connected / Disconnected / Requires Auth badges and working **Manage...** dialogs (re-check, sign in, add/remove servers).
+- **Tray**: the widget keeps running in the system tray when you close DevKit (or hide the window). Left-click the icon to show/hide, right-click for the menu (Show, Open DevKit, Start with Windows, Exit). On Windows 11 look in the ^ overflow near the clock; clicking the gauge in DevKit always brings the widget back up.
+
 ### Interactive Menu
 Launch `DevKit.bat` and navigate with your keyboard:
 
 ```
 =============================================
-       Northstar DevKit v3.5.0
+       Northstar DevKit v3.8.0
     Developer Toolkit by northstarcoding.com
 =============================================
   Menu: Main Menu
@@ -188,6 +229,8 @@ You can also run any tool directly from PowerShell or Command Prompt:
 .\ports\Scan-Ports.ps1
 .\ports\Kill-Port.ps1 -Port 3000
 .\ports\Kill-AllNode.ps1
+.\ports\Show-ExcludedPortRanges.ps1          # why a "free" port refuses to bind (Hyper-V/winnat)
+.\ports\Test-DevEndpoint.ps1 -Url "https://localhost:7181"   # HTTP status, latency, cert expiry
 ```
 
 ### Node.js Tools
@@ -195,6 +238,8 @@ You can also run any tool directly from PowerShell or Command Prompt:
 .\node\Clear-NpmCache.ps1
 .\node\Remove-NodeModules.ps1 -Path "C:\my-project"
 .\node\Nuke-And-Reinstall.ps1 -Path "C:\my-project"
+.\node\Start-PackageScript.ps1 -Path "C:\my-project"        # arrow-key picker for package.json scripts
+.\node\Find-StaleNodeModules.ps1 -Path "C:\Projects"        # report sizes/ages, offer gated cleanup
 ```
 
 ### Next.js Tools
@@ -215,6 +260,7 @@ You can also run any tool directly from PowerShell or Command Prompt:
 .\git\Git-Cleanup.ps1 -Path "C:\my-project"
 .\git\Git-StatusAll.ps1 -Path "C:\Projects"
 .\git\Git-SyncFork.ps1 -Path "C:\my-project"
+.\git\Get-GitStandup.ps1 -Hours 48           # your recent commits across repos (standup notes)
 ```
 
 ### Docker Tools
@@ -231,6 +277,7 @@ You can also run any tool directly from PowerShell or Command Prompt:
 .\system\Env-Backup.ps1 -OutputPath "C:\Backups"
 .\system\Env-Restore.ps1 -BackupFile "backup.json"
 .\system\Shell-Reload.ps1
+.\system\Edit-HostsFile.ps1 -Show            # view hosts entries; interactive add/remove/toggle
 ```
 
 ### Workflow Tools
@@ -238,12 +285,15 @@ You can also run any tool directly from PowerShell or Command Prompt:
 .\workflow\Code-Here.ps1 -Path "C:\my-project"
 .\workflow\Open-Repo.ps1 -Path "C:\my-project"
 .\workflow\Copy-EnvTemplate.ps1 -Path "C:\my-project" -Interactive
+.\workflow\Compare-EnvFiles.ps1 -Path "C:\my-project"      # .env vs template drift (keys only)
+.\workflow\Convert-DevText.ps1                             # Base64/URL/timestamps/GUID/SHA-256/JWT
 ```
 
 ### Diagnostics
 ```powershell
 .\diagnostics\DevKit-Doctor.ps1
 .\diagnostics\System-DevInfo.ps1 -Export
+.\diagnostics\Test-DevKitUpdate.ps1 [-Force]
 ```
 
 ### WiFi Tools
@@ -255,7 +305,7 @@ You can also run any tool directly from PowerShell or Command Prompt:
 
 ### Maintenance
 ```powershell
-.\maintenance\Clear-DiskJunk.ps1                  # report only; add -Apply to actually clean
+.\maintenance\Clear-DiskJunk.ps1                  # report, then offers to clean right away (or -Apply up front)
 .\maintenance\Manage-StartupPrograms.ps1          # list startup entries
 .\maintenance\Repair-SystemFiles.ps1 -DryRun      # preview the SFC/DISM plan
 .\maintenance\Reset-WindowsUpdate.ps1 -DryRun     # preview the WU reset plan
@@ -303,6 +353,14 @@ You can also run any tool directly from PowerShell or Command Prompt:
 | Add/remove a Claude Code MCP server | `agents\Add-McpServer.bat` / `Remove-McpServer.bat` |
 | Don't know the exact command for a well-known MCP server | `agents\Add-McpServerFromCatalog.bat` → pick it from the catalog |
 | Not sure which MCP servers a project (or this machine) is missing | `agents\Scan-McpServers.bat` |
+| Port refuses to bind but nothing is listening (EACCES/10013) | `ports\Show-ExcludedPortRanges.bat` |
+| Is my dev server actually responding? | `ports\Test-DevEndpoint.bat` |
+| "What did I do yesterday?" (standup) | `git\Get-GitStandup.bat` |
+| Just want to run a package.json script | `node\Start-PackageScript.bat` |
+| Reclaim gigabytes of old node_modules | `node\Find-StaleNodeModules.bat` |
+| Map `myapp.test` to localhost | `system\Edit-HostsFile.bat` |
+| App broke after a pull (missing .env keys) | `workflow\Compare-EnvFiles.bat` |
+| Decode a JWT / Base64 / timestamp | `workflow\Convert-DevText.bat` |
 
 ---
 
@@ -312,6 +370,7 @@ You can also run any tool directly from PowerShell or Command Prompt:
 DevKit/
 ├── DevKit.bat              # Main launcher
 ├── DevKit.ps1              # Interactive menu (manifest-driven dispatcher)
+├── DevKit-GUI.bat          # Desktop app launcher
 ├── Setup-Path.bat          # Add to PATH utility
 ├── VERSION                 # Single source of truth for the version number
 ├── CHANGELOG.md            # Release history
@@ -323,6 +382,8 @@ DevKit/
 │
 ├── lib/                    # Shared PowerShell helpers (project picker, menu
 │                           # dispatcher, settings, confirmation gate, etc.)
+├── gui/                    # Desktop app + companion widget: WPF windows, brand
+│                           # theme, pure-logic cores, logo assets (Build-Assets.ps1)
 ├── ports/                  # Port management       (+ _module.psd1 menu manifest)
 ├── node/                   # Node.js utilities      (+ _module.psd1)
 ├── nextjs/                 # Next.js tools          (+ _module.psd1)
@@ -348,6 +409,7 @@ nothing project-specific is written into the DevKit install folder.
 
 - **Windows 10/11**
 - **PowerShell 5.1+** or **PowerShell 7+** (PowerShell 7 recommended)
+- Optional: **Windows Terminal** (tools open in it instead of the classic console when installed)
 - **Administrator privileges** recommended for:
   - WiFi optimization
   - Editing system PATH

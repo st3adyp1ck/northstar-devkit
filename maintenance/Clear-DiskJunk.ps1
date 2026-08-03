@@ -5,8 +5,9 @@
 .DESCRIPTION
     Scans common Windows junk locations (user/system temp folders, the
     Windows Update download cache, and the Recycle Bin) and reports how much
-    space each is holding. Nothing is deleted by default - pass -Apply to
-    actually clean, after a typed confirmation.
+    space each is holding. Nothing is deleted by default - after the report
+    you'll be asked whether to clean up right away (or pass -Apply to clean
+    without the report-first prompt, after a typed confirmation).
 
     Created by Northstar Software Development
     Website: https://www.northstarcoding.com
@@ -108,8 +109,16 @@ try {
 
     if (-not $Apply) {
         Write-Host ""
-        Write-DevKitInfo "Report only - nothing was deleted. Re-run with -Apply to clean."
-        exit 0
+        Write-DevKitInfo "Report only - nothing was deleted."
+        if ([Console]::IsInputRedirected) {
+            Write-DevKitInfo "Re-run with -Apply to clean."
+            exit 0
+        }
+        $answer = Read-Host "  Clean up now? (y/N)"
+        if ($answer -ne 'y') {
+            Write-DevKitInfo "No changes made."
+            exit 0
+        }
     }
 
     $proceed = Confirm-DevKitDestructiveAction -Action "delete temp files, the Windows Update cache, and empty the Recycle Bin" `
@@ -121,8 +130,15 @@ try {
     }
 
     Write-Host ""
+    $isAdmin = Test-DevKitAdmin
     foreach ($p in $tempPaths) {
         if (-not (Test-Path -LiteralPath $p)) { continue }
+        # Windows\Temp deletes silently no-op without elevation (every failure
+        # is swallowed by -ErrorAction SilentlyContinue) while printing DONE.
+        if ($p -like "$($env:SystemRoot)*" -and -not $isAdmin) {
+            Write-Host "  SKIP: $p (requires an elevated session)" -ForegroundColor Yellow
+            continue
+        }
         Write-DevKitStep "Cleaning $p"
         try {
             Get-ChildItem -LiteralPath $p -Force -ErrorAction SilentlyContinue | ForEach-Object {
@@ -134,35 +150,42 @@ try {
         }
     }
 
-    Write-DevKitStep "Stopping Windows Update services"
-    try {
-        Stop-Service -Name wuauserv -Force -ErrorAction SilentlyContinue
-        Stop-Service -Name bits -Force -ErrorAction SilentlyContinue
-        Write-DevKitDone
-    } catch {
-        Write-DevKitError "Could not stop Windows Update services: $_"
-    }
-
-    Write-DevKitStep "Clearing Windows Update cache"
-    try {
-        if (Test-Path -LiteralPath $wuCachePath) {
-            Get-ChildItem -LiteralPath $wuCachePath -Force -ErrorAction SilentlyContinue | ForEach-Object {
-                Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
-            }
+    # Stopping WU services and clearing the Windows Update cache require
+    # elevation - without it these steps silently no-op (every failure is
+    # swallowed by -ErrorAction SilentlyContinue) while still printing DONE.
+    if (Test-DevKitAdmin) {
+        Write-DevKitStep "Stopping Windows Update services"
+        try {
+            Stop-Service -Name wuauserv -Force -ErrorAction SilentlyContinue
+            Stop-Service -Name bits -Force -ErrorAction SilentlyContinue
+            Write-DevKitDone
+        } catch {
+            Write-DevKitError "Could not stop Windows Update services: $_"
         }
-        Write-DevKitDone
-    } catch {
-        Write-DevKitError "Could not clear Windows Update cache: $_"
-    }
 
-    Write-DevKitStep "Restarting Windows Update services"
-    try {
-        # bits started before wuauserv: wuauserv can depend on bits being up.
-        Start-Service -Name bits -ErrorAction SilentlyContinue
-        Start-Service -Name wuauserv -ErrorAction SilentlyContinue
-        Write-DevKitDone
-    } catch {
-        Write-DevKitError "Could not restart Windows Update services: $_"
+        Write-DevKitStep "Clearing Windows Update cache"
+        try {
+            if (Test-Path -LiteralPath $wuCachePath) {
+                Get-ChildItem -LiteralPath $wuCachePath -Force -ErrorAction SilentlyContinue | ForEach-Object {
+                    Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
+                }
+            }
+            Write-DevKitDone
+        } catch {
+            Write-DevKitError "Could not clear Windows Update cache: $_"
+        }
+
+        Write-DevKitStep "Restarting Windows Update services"
+        try {
+            # bits started before wuauserv: wuauserv can depend on bits being up.
+            Start-Service -Name bits -ErrorAction SilentlyContinue
+            Start-Service -Name wuauserv -ErrorAction SilentlyContinue
+            Write-DevKitDone
+        } catch {
+            Write-DevKitError "Could not restart Windows Update services: $_"
+        }
+    } else {
+        Write-Host "  SKIP: Clearing the Windows Update cache requires an elevated (Administrator) session. Re-run as Administrator to clean it." -ForegroundColor Yellow
     }
 
     Write-DevKitStep "Emptying Recycle Bin"

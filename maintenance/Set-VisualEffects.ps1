@@ -7,6 +7,8 @@
     visual effects mode (the setting behind Advanced System Settings ->
     Performance). Reading requires no admin rights; it only touches the
     current user's own registry hive (HKCU), so setting it doesn't either.
+    After showing the current mode, an interactive run offers to change it
+    right away; -SetMode does the same non-interactively.
 
     Created by Northstar Software Development
     Website: https://www.northstarcoding.com
@@ -51,6 +53,32 @@ function Get-DevKitVisualEffectsMode {
     return [int]$props.$valueName
 }
 
+if (-not $SetMode) {
+    $currentValue = Get-DevKitVisualEffectsMode
+    if ($null -eq $currentValue) {
+        Write-DevKitInfo "Current visual effects mode: Auto (default) - no explicit setting found"
+    } else {
+        $modeName = if ($modeByValue.ContainsKey($currentValue)) { $modeByValue[$currentValue] } else { "Unknown ($currentValue)" }
+        Write-DevKitInfo "Current visual effects mode: $modeName"
+    }
+
+    if ([Console]::IsInputRedirected) {
+        Write-DevKitInfo "Use -SetMode <Performance|Appearance|Auto|Custom> to change it."
+        exit 0
+    }
+    $mode = Read-Host "  New mode (Performance/Appearance/Auto/Custom, Enter to keep current)"
+    if (-not $mode) {
+        Write-DevKitInfo "No changes made."
+        exit 0
+    }
+    $matchedMode = @($valueByMode.Keys | Where-Object { $_ -ieq $mode })
+    if ($matchedMode.Count -eq 0) {
+        Write-DevKitError "Invalid mode '$mode'. Expected Performance, Appearance, Auto, or Custom."
+        exit 1
+    }
+    $SetMode = $matchedMode[0]
+}
+
 if ($SetMode) {
     if (-not (Confirm-DevKitDestructiveAction -Action "set visual effects to '$SetMode' (may need sign-out to fully apply)" -Force:$Force)) {
         Write-DevKitInfo "Cancelled."
@@ -80,14 +108,6 @@ if ($SetMode) {
     Write-Host ""
     Write-DevKitInfo "A sign-out (or an Explorer restart) may be needed for all effects to visibly update."
     exit 0
-}
-
-$currentValue = Get-DevKitVisualEffectsMode
-if ($null -eq $currentValue) {
-    Write-DevKitInfo "Current visual effects mode: Auto (default) - no explicit setting found"
-} else {
-    $modeName = if ($modeByValue.ContainsKey($currentValue)) { $modeByValue[$currentValue] } else { "Unknown ($currentValue)" }
-    Write-DevKitInfo "Current visual effects mode: $modeName"
 }
 
 exit 0

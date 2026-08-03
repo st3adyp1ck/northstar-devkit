@@ -8,7 +8,7 @@
 - **Website:** https://www.northstarcoding.com
 - **License:** MIT
 - **Language:** English (all comments and documentation)
-- **Version:** 3.5.0
+- **Version:** 3.8.0
 
 ## Technology Stack
 
@@ -26,6 +26,7 @@ DevKit/
 │                           # hand-written; the ten tool-category submenus below are
 │                           # generic, driven by each folder's _module.psd1
 ├── Setup-Path.bat          # Adds DevKit to PATH for global access
+├── DevKit-GUI.bat          # Desktop GUI launcher (batch wrapper for gui/DevKit-GUI.ps1)
 ├── VERSION                 # Single source of truth for the version number
 ├── CHANGELOG.md            # Release history
 ├── RELEASING.md            # Maintainer release checklist
@@ -44,6 +45,27 @@ DevKit/
 │   ├── DevKit-McpList.ps1     # Parses 'claude mcp list' output, incl. user/project scope split
 │   └── DevKit-McpAddFlow.ps1  # Shared interactive add-from-catalog prompt flow
 │
+├── gui/                    # Desktop GUI (WPF front-end - see "Desktop GUI" below)
+│   ├── DevKit-GUI.ps1      # Entry point + code-behind: XAML load, nav/pages,
+│   │                       # dialogs, project registry UI, terminal launcher
+│   ├── DevKit-GUI.xaml     # Main window layout (loose XAML, parsed by XamlReader)
+│   ├── Theme.xaml          # Brand resource dictionary (palette/gradients/styles
+│   │                       # from the compass-rose logo); parsed into
+│   │                       # Application.Resources before any window XAML loads
+│   ├── DevKit-GuiCore.ps1  # Pure logic (Pester-tested): manifest catalog,
+│   │                       # search, argument resolution, terminal command builder
+│   ├── DevKit-Widget.ps1   # Companion widget: persistent metrics/MCP/status
+│   │                       # window + system-tray app (own process, survives
+│   │                       # DevKit closing; single-instance + summon event)
+│   ├── DevKit-Widget.xaml  # Widget window layout (same loose-XAML pattern)
+│   ├── DevKit-WidgetCore.ps1 # Widget pure logic (Pester-tested): system
+│   │                       # metrics sensors, node/port snapshot, Claude +
+│   │                       # Kimi MCP status collectors and parsers, git log
+│   │                       # parsing + graph lane layout, .env drift diff
+│   ├── Build-Assets.ps1    # Regenerates Assets/* from Assets/logo.png (dev-time
+│   │                       # only; outputs are committed)
+│   └── Assets/             # logo.png (master), logo-256.png, logo.ico
+│
 ├── tests/
 │   └── Unit/               # Pester tests for pure-logic parsers/converters
 │
@@ -51,7 +73,10 @@ DevKit/
 │   ├── Scan-Ports.ps1      # Scan common dev ports (3000, 5173, etc.)
 │   ├── Scan-Ports.bat      # Batch wrapper
 │   ├── Kill-Port.ps1       # Kill process by port or PID
-│   └── Kill-AllNode.ps1    # Kill all Node.js processes
+│   ├── Kill-AllNode.ps1    # Kill all Node.js processes
+│   ├── Show-ExcludedPortRanges.ps1  # Hyper-V/winnat reserved ranges (EACCES/10013)
+│   ├── Test-DevEndpoint.ps1  # HTTP health check: status, latency, cert days
+│   └── *.bat               # Batch wrapper per script
 │
 ├── node/                   # Node.js utilities (+ _module.psd1)
 │   ├── Clear-NpmCache.ps1  # Clear NPM cache
@@ -59,6 +84,8 @@ DevKit/
 │   ├── Nuke-And-Reinstall.ps1  # Full reset + reinstall
 │   ├── Nuke-And-Reinstall.bat  # Batch wrapper
 │   ├── Check-NpmCacheSize.ps1  # Read-only cache-size report per package manager
+│   ├── Start-PackageScript.ps1  # Arrow-key picker for package.json scripts
+│   ├── Find-StaleNodeModules.ps1  # Size/age report + gated cleanup across projects
 │   └── *.bat                   # Batch wrapper per script
 │
 ├── nextjs/                 # Next.js specific tools (+ _module.psd1)
@@ -83,7 +110,9 @@ DevKit/
 │   ├── Git-StatusAll.ps1       # Status across multiple repos
 │   ├── Git-StatusAll.bat
 │   ├── Git-SyncFork.ps1        # Sync fork with upstream
-│   └── Git-SyncFork.bat
+│   ├── Git-SyncFork.bat
+│   ├── Get-GitStandup.ps1      # Your recent commits across repos (standup notes)
+│   └── Get-GitStandup.bat
 │
 ├── docker/                 # Docker tools (+ _module.psd1)
 │   ├── Docker-Nuke.ps1         # Remove all Docker resources
@@ -103,6 +132,7 @@ DevKit/
 │   ├── Uninstall-ShellIntegration.ps1  # Opt-in: remove that right-click entry
 │   ├── Register-DevKitTerminalProfile.ps1   # Opt-in: register a Windows Terminal profile
 │   ├── Unregister-DevKitTerminalProfile.ps1 # Opt-in: remove that Windows Terminal profile
+│   ├── Edit-HostsFile.ps1      # View/add/remove/toggle hosts entries (backup + DNS flush)
 │   └── *.bat
 │
 ├── workflow/               # Developer workflow tools (+ _module.psd1)
@@ -111,13 +141,18 @@ DevKit/
 │   ├── Open-Repo.ps1           # Open repo in browser
 │   ├── Open-Repo.bat
 │   ├── Copy-EnvTemplate.ps1    # Copy .env template
-│   └── Copy-EnvTemplate.bat
+│   ├── Copy-EnvTemplate.bat
+│   ├── Compare-EnvFiles.ps1    # .env vs template drift check (keys only, masked)
+│   ├── Convert-DevText.ps1     # Base64/URL/timestamp/GUID/SHA-256/JWT converters
+│   └── *.bat                   # Batch wrapper per script
 │
 ├── diagnostics/            # Health check tools (+ _module.psd1)
 │   ├── DevKit-Doctor.ps1       # Environment health check
 │   ├── DevKit-Doctor.bat
 │   ├── System-DevInfo.ps1      # System info summary
-│   └── System-DevInfo.bat
+│   ├── System-DevInfo.bat
+│   ├── Test-DevKitUpdate.ps1   # Check for DevKit updates (GitHub Releases)
+│   └── Test-DevKitUpdate.bat
 │
 ├── wifi/                   # WiFi optimization tools (+ _module.psd1)
 │   ├── WiFi-Optimize.ps1   # Full optimization (DNS, TCP/IP, speed test)
@@ -240,13 +275,15 @@ try {
 - Uses `Get-Process` and `Stop-Process` for process management
 
 ### Node.js Tools (`node/`)
-- Auto-detects package manager (npm/yarn/pnpm/bun) from lock files
+- Auto-detects package manager (npm/yarn/pnpm/bun) from lock files - both
+  bun's legacy binary `bun.lockb` and the modern (>= 1.2) text `bun.lock`
 - Executes the correct cache clean command for the detected package manager
 - Recursively removes `node_modules` directories using long-path-safe deletion
 - Supports `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, and `bun.lockb` cleanup
 
 ### Next.js Tools (`nextjs/`)
-- Auto-detects package manager (npm/yarn/pnpm/bun) from lock files
+- Auto-detects package manager (npm/yarn/pnpm/bun) from lock files - both
+  bun's legacy binary `bun.lockb` and the modern (>= 1.2) text `bun.lock`
 - Removes `.next/` build cache directory
 - Clears Turbopack cache from `.next/cache`, `node_modules/.cache`, `.turbo`
 - Runs the detected package manager's dev command after cache clearing
@@ -300,7 +337,12 @@ try {
 - Real Windows maintenance/tuning, distinct from `diagnostics/`'s dev-tool health check
 - Every mutating tool (disk cleanup, service/startup changes, SFC/DISM, Windows Update
   reset, power plan, visual effects, memory diagnostic) defaults to a safe report/`-DryRun`
-  and requires an explicit flag plus `Confirm-DevKitDestructiveAction` to change anything
+  and only changes anything behind `Confirm-DevKitDestructiveAction`. Report-mode tools
+  additionally end with an interactive "apply now?" prompt (so batch-file users who can't
+  pass flags can still act) - the prompt only collects input and sets the same variables
+  the flags would have set, then falls into the existing flag code path unchanged. The
+  prompt is guarded by `-not [Console]::IsInputRedirected` so piped/automated runs keep
+  the old report-then-exit behavior; keep that guard on any future tool of this shape
 - Admin-gated actions check `Test-DevKitAdmin` and fail with a clear message rather than a
   stack trace when not elevated
 - Startup-entry disable/enable is reversible by design (registry value rename / shortcut
@@ -326,6 +368,126 @@ try {
   Stripe, Plaid); `Add-McpServerFromCatalog.ps1` is a browsable picker over it and
   `Scan-McpServers.ps1` cross-references what's already configured (per scope) against the
   catalog and offers to add anything missing
+
+### Desktop GUI (`gui/`)
+- WPF front-end (`DevKit-GUI.bat` → `gui/DevKit-GUI.ps1`) themed on the company
+  compass-rose logo (gunmetal/silver UI, sapphire + ember accents), running on
+  both pwsh 7 and Windows PowerShell 5.1 with no external dependencies
+- **Purely additive architecture:** no leaf script, manifest, or the TUI is
+  modified. The GUI reuses `Get-DevKitModule` to load the same twelve
+  `_module.psd1` manifests and re-implements `Invoke-DevKitTool`'s argument
+  resolution with dialogs (`gui/DevKit-GuiCore.ps1`'s
+  `ConvertTo-DevKitToolArguments` mirrors its semantics exactly - project via
+  `ProjectArgName`/`Path`, YesNo-true-only, Optional, StaticArgs last). Adding
+  a tool to a manifest makes it appear in the GUI with zero GUI changes.
+- Tools **run in a real terminal window** (Windows Terminal via `wt.exe` when
+  installed, classic conhost otherwise; pwsh preferred, powershell fallback)
+  launched by `Get-DevKitTerminalCommand` with `-NoExit` so quick tools' output
+  stays readable. This is deliberate: the scripts' interactive features
+  (arrow-key menus via `[Console]::ReadKey`, the runspace spinner, Console API
+  probe) bypass PowerShell's host interface and would degrade under an embedded
+  PSHost. Never "embed a console" into the GUI at the cost of those features.
+- XAML is loose (no x:Class/compiled resources): a `Windows.Application` is
+  created FIRST and `Theme.xaml` is parsed into `Application.Resources`
+  before the window XAML is loaded - NOT string-merged into the window.
+  Application-scope is what lets the keyless styles (ScrollBar, ToolTip,
+  CheckBox) reach template-generated elements (every ScrollViewer's
+  scrollbars, ComboBox popups) and dialog windows; merging into
+  Window.Resources left them in stock light Windows chrome. All dynamic
+  content (nav, cards, dialogs) is built in code against `x:Name` handles +
+  theme style keys. WPF gotchas already handled:
+  STA self-relaunch, `GetNewClosure()` on every event handler that captures
+  locals, AllowsTransparency maximize/work-area fix, logo loaded from absolute
+  URIs. Keep markup compatible with .NET Framework 4.x WPF (PS 5.1) - nothing
+  newer-only.
+- `gui/DevKit-GuiCore.ps1` is UI-free and Pester-covered
+  (`tests/Unit/GuiCore.Tests.ps1`); keep any new pure logic there so it stays
+  testable.
+
+### Companion Widget (`gui/DevKit-Widget.ps1`)
+- Persistent desktop/tray app launched (detached, own process) from the GUI's
+  gauge button or `gui/DevKit-Widget.ps1` directly - it keeps running after
+  DevKit closes. Single-instance via a named mutex; a second launch signals a
+  named event that makes the running instance surface its window, so the
+  gauge button always brings it up even where the shell hides new tray icons.
+- Shows CPU/memory/GPU load with best-effort temperatures (ACPI thermal-zone
+  counter, MSAcpi WMI, driver-bundled nvidia-smi - every sensor degrades to
+  "n/a", never a fake number), a reboot-pending / long-uptime hint line
+  (documented registry sentinels + Win32_OperatingSystem.LastBootUpTime), a
+  System Junk radial dial (reclaimable temp + Windows Update cache + Recycle
+  Bin bytes, 100% arc = 10 GB, re-scanned in the background every 5 minutes)
+  with a safe in-widget clean (temp folder contents + `Clear-RecycleBin` only
+  - no service stop/start, no WU cache, no DISM - behind a styled Yes/No
+  confirm; the full tool opens via "Cleanup Tool..."), a Disk Free dial next
+  to it (`System.IO.DriveInfo` on the system drive; arc = used space, number
+  = free, ember under 10% free), a columnar node-process table (NAME / PID /
+  MEM / AGE / PORTS, aligned via WPF SharedSizeGroups; each port is a
+  click-to-open `http://localhost:<port>` link, each row a confirmed per-pid
+  kill button, plus other processes on the common dev ports and a warning
+  when common dev ports sit inside Hyper-V/winnat-reserved ranges - parsed
+  from `netsh show excludedportrange` via lib's
+  `ConvertFrom-DevKitExcludedPortRanges`, cached 30 minutes), two rows of
+  quick actions that launch real DevKit tools in terminal windows (cache/port/
+  node/doctor + Editor/Explorer/Terminal/Run Script... for the active
+  project), and a project selector bound to the same Active Project the
+  GUI/TUI share (projects.json is watched for external changes) whose
+  permanent last row "+ Add new project..." links a folder via a
+  FolderBrowserDialog. Under the selector an ambient git badge shows the
+  active project's branch + dirty/ahead/behind/stash counts (refreshed every
+  2 minutes via the work runspace), and an ember hint appears when the
+  project's `.env` drifts from its template (key-name diff only - values are
+  secrets; "Fix..." opens the real Copy-EnvTemplate tool).
+- The window is ALWAYS work-area full height, docked or free - the mode only
+  sets horizontal placement (Left/Right/Free, persisted as
+  `preferences.widgetDockMode`). Invisible 6px grips on the content edges
+  drag-resize the width (clamped 340-700, persisted as
+  `preferences.widgetWidth`); a title-bar drag always moves the window, and
+  dropping it within 24 DIPs of a screen edge docks there while dropping a
+  docked widget anywhere else undocks it to Free. The Settings expander sits
+  in its own bottom grid row and expands upward over the content. Position
+  math uses WPF DIP work-area units, never WinForms pixels.
+- A title-bar GIT button opens the GitHub flyout for the active project
+  (greyed out when none is selected): a 300px panel that grows the window
+  INTO the screen (a docked-right window shifts left first, restored on
+  close) showing branch + ahead/behind, a DRAWN commit graph (not text:
+  `Get-DevKitRepoOverview` parses `git log --all --topo-order -n 40` with
+  record/unit separators, `ConvertTo-DevKitGitGraphLayout` assigns lanes -
+  the first-parent trunk stays a straight vertical, side branches bend into
+  it - and `Render-DevKitGitGraph` draws gradient S-curve links, bright lane
+  nodes with a HEAD ring, and branch/tag pills on a Canvas), fetch/pull/push
+  buttons (last output line lands in a status line, ember on failure),
+  open-on-GitHub/Actions (origin URL run through Open-Repo's
+  `ConvertTo-DevKitBrowsableUrl`, never the raw value), and a Git Cleanup
+  tool shortcut. All git and junk work shares a third MTA runspace with a
+  busy flag + 30s timeout; a job declined while busy re-fires on completion
+  (project switches never leave stale graphs), and a result collected for a
+  since-switched project is discarded rather than rendered. The collectors
+  (`Get-DevKitSystemJunk`, `Clear-DevKitSystemJunk`, `Get-DevKitRepoOverview`,
+  `Invoke-DevKitGitAction`) live in `DevKit-WidgetCore.ps1` and degrade to
+  honest notes ("Not a git repository", "git not found"), never fake data.
+- Claude Code MCP status uses the documented `claude mcp list` health output
+  via `lib/DevKit-McpList.ps1` (never Claude's internal JSON); Kimi Code has
+  no headless status command, so its badges come from the documented
+  `~/.kimi-code/mcp.json` / `<project>/.kimi-code/mcp.json` files and say
+  CONFIGURED/DISABLED/REQUIRES AUTH (missing bearer-token env var) rather
+  than claiming live connection state. Both agents nest under one AGENTS
+  expander, and each panel's "Manage..." dialog summarizes the last report
+  and offers Connect / Re-check (the honest "connect": Claude's real
+  `claude mcp list` health check, Kimi's config re-read), Sign In /
+  Authenticate (launches the CLI in a terminal window), Scan & Fix MCP Gaps
+  and Add Server from Catalog (the real agents/ tools), Claude-only
+  Disconnect a Server, and Kimi-only Open Config File. MCP checks run in a
+  background runspace with a 45s timeout so the widget never freezes.
+- Tray: WinForms `NotifyIcon` + dark-rendered context menu (Show/Hide, Open
+  DevKit, reversible "Start with Windows" HKCU Run-key toggle, Exit), balloon
+  hints, and a `TaskbarCreated` broadcast hook that re-registers the icon
+  after an Explorer restart. Closing the widget window only hides it; Exit
+  lives in the tray menu.
+- `gui/DevKit-WidgetCore.ps1` is the UI-free, Pester-covered core
+  (`tests/Unit/WidgetCore.Tests.ps1`) - same separation as the GUI core.
+- WPF/WinForms pitfalls already handled here: STA relaunch, `GetNewClosure()`,
+  WPF DIP units for positioning (NOT WinForms pixel units - breaks on
+  DPI-scaled displays), and off-screen-aware UI behavior.
 
 ## Usage Patterns
 
@@ -375,8 +537,11 @@ Launches the main interactive menu for navigation via keyboard input.
 `tests/Unit` (Pester 5, wired into CI) covers pure-logic parsers and
 converters where this project has actually had real bugs: package-manager
 detection (`Get-DevKitPackageManager`), PATH de-duplication, the `.env`
-template parser, the git-remote-to-browsable-URL converter, and the WiFi
-scan parser. Run locally with:
+template parser, the git-remote-to-browsable-URL converter, the WiFi
+scan parser, the GUI/widget cores (argument rendering, MCP/Kimi parsers,
+nvidia-smi parser, git log parser + graph lane layout, .env key diff),
+the winnat excluded-port-ranges parser, the .env key extractor, and the
+Convert-DevText converters. Run locally with:
 
 ```powershell
 Invoke-Pester -Path tests/Unit
@@ -403,7 +568,7 @@ or its containers destroyed), and is verified manually:
 
 Since 3.0, adding a tool to an **existing** category (`ports/`, `node/`,
 `nextjs/`, `vite/`, `git/`, `docker/`, `system/`, `workflow/`,
-`diagnostics/`, `wifi/`) is a manifest edit, not a `DevKit.ps1` edit:
+`diagnostics/`, `wifi/`, `maintenance/`, `agents/`) is a manifest edit, not a `DevKit.ps1` edit:
 
 1. Create the PowerShell script in the appropriate subdirectory
 2. Dot-source `lib/DevKit-Common.ps1` for shared helpers (admin checks, path validation, safe deletion, etc.)
@@ -455,3 +620,6 @@ Since 3.0, adding a tool to an **existing** category (`ports/`, `node/`,
 - Version 3.0 (see `CHANGELOG.md` for full detail) added browsable project linking (`Select-DevKitProject`, the linked-projects registry, `[10] Projects` menu), rewrote all ten tool-category submenus as a manifest-driven dispatcher (`_module.psd1` + `Start-DevKitModuleTools`) instead of ten hand-written function pairs, added `/` search-and-jump, added a Pester test suite, and fixed roughly 150 confirmed bugs from a full-repo review - including one (`system/Env-Restore.ps1`) that had been completely broken (could not run at all) since before 3.0 existed
 - Version 3.1 (see `CHANGELOG.md`) added arrow-key navigation (`Show-DevKitInteractiveMenu`) with automatic fallback to the classic typed-number flow, two new manifest-driven categories (`[12] Maintenance`, `[13] Agents & MCP`), and `Get-DevKitWindowsExecutable` - a defensive CLI-resolution helper added after a real bug where an ambiguously-resolved `gh` on PATH triggered a Windows ShellExecute "Select an app to open" dialog instead of failing cleanly
 - Version 3.5 (see `CHANGELOG.md`) added a gradient animation/color engine (`lib\DevKit-UI.ps1`: a fail-closed capability probe, a startup banner shown once per session, and a Runspace-backed spinner for long-running scriptblocks) plus in-menu help (`Description`/`Help` keys in every `_module.psd1`, a `?` entry per category, and a Main Menu "Getting Started" entry); expanded AI-CLI tracking from 6 to 11 tools with a real per-tool update channel (npm/npm+builtin/scoop/manual) instead of assuming npm everywhere; and added a 10-entry curated MCP server catalog (`lib\DevKit-McpCatalog.ps1`) with a browsable add-from-catalog flow and a scan-and-fill-gaps tool, alongside real HTTP/remote MCP server support and a genuinely-scoped `Get-McpServers.ps1 -Scope`
+- Version 3.6 (see `CHANGELOG.md`) added the branded desktop GUI (`gui/` + root `DevKit-GUI.bat`): a dependency-free WPF shell themed on the company compass-rose logo that renders the same twelve `_module.psd1` manifests as navigable tool cards with search, linked-project management, and validated input dialogs, and launches tools in a real terminal window (Windows Terminal or conhost) so every script's existing interactivity keeps working byte-for-byte unchanged. Pure logic lives in `gui/DevKit-GuiCore.ps1` with Pester coverage; brand assets are generated from `gui/Assets/logo.png` by `gui/Build-Assets.ps1`.
+- Version 3.7 (see `CHANGELOG.md`) added the companion widget (`gui/DevKit-Widget.ps1`, launched from the GUI's gauge button): a persistent desktop + system-tray app with live CPU/memory/GPU metrics and best-effort temperatures, a node-process/port watch, quick-action buttons that launch real DevKit tools, an Active Project selector, and expandable Claude Code / Kimi Code CLI + MCP status boxes with Connected/Disconnected/Requires Auth badges (Claude via `claude mcp list` health output, Kimi via its documented `mcp.json` files) - single-instance with a summon event, TaskbarCreated re-registration, and a reversible Start-with-Windows toggle.
+- Version 3.8 (see `CHANGELOG.md`) turned the widget into the primary surface: a drawn commit graph (lane layout + gradient S-curves + ref pills) replaced the monospace `git log --graph` text, and the widget gained a Disk Free dial, process ages + per-pid kill + click-to-open ports in the node table, an ambient git badge and .env-drift hint under the project selector, a reboot-pending hint, winnat reserved-port warnings, and four project launchers (Editor/Explorer/Terminal/Run Script...). Both WPF apps moved the theme from a Window.Resources string-merge to Application.Resources created before XAML load (fixes unthemed scrollbars/dialogs). Eight new tools shipped: Show-ExcludedPortRanges + Test-DevEndpoint (ports/), Get-GitStandup (git/), Start-PackageScript + Find-StaleNodeModules (node/), Edit-HostsFile (system/), Compare-EnvFiles + Convert-DevText (workflow/). It also fixed two long-standing HIGH bugs: the Agents "Manage..." dialog never attached its content (invisible modal), and the MCP libs' `$global:` load-guards crashed every second menu use in one session; plus Env-Restore no longer overwrites live secrets with the `***REDACTED***` marker, and bun >= 1.2's `bun.lock` is detected everywhere.

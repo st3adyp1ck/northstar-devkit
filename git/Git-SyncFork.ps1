@@ -61,8 +61,13 @@ try {
     }
 
     # Check git availability
-    $null = git --version 2>$null
-    if ($LASTEXITCODE -ne 0) {
+    try {
+        $null = git --version 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "`n  ERROR: Git not found in PATH.`n" -ForegroundColor Red
+            exit 1
+        }
+    } catch {
         Write-Host "`n  ERROR: Git not found in PATH.`n" -ForegroundColor Red
         exit 1
     }

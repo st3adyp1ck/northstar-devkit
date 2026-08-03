@@ -27,7 +27,7 @@ First off, thanks for taking the time to contribute! 🎉
 - **Style**: Follow the existing script structure in `AGENTS.md`.
 - **Shared helpers**: Dot-source `lib/DevKit-Common.ps1` for common tasks (path validation, safe `node_modules` deletion, package-manager detection, banners, etc.).
 - **No new dependencies**: DevKit is meant to be dependency-free and use built-in Windows tools.
-- **Menu integration**: If you add a new tool, update `DevKit.ps1` and add a `.bat` wrapper.
+- **Menu integration**: Adding a tool to an **existing** category (`ports/`, `node/`, etc.) means adding the script, a `.bat` wrapper, and an entry in that category's `_module.psd1` (see `AGENTS.md`'s "Adding New Tools" for the schema). **Do not edit `DevKit.ps1`** for this - the generic dispatcher (`Start-DevKitModuleTools` in `lib/DevKit-Common.ps1`) picks up the new manifest entry automatically. `DevKit.ps1` only needs a two-line edit when adding a brand-new top-level module category (see `AGENTS.md`'s "Adding a new module category").
 - **Single source of truth**: Avoid duplicating logic between `DevKit.ps1` and standalone scripts. The menu should call the standalone script whenever possible.
 
 ## Code of Conduct

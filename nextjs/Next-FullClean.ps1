@@ -50,7 +50,7 @@ if (-not $Force) {
     Write-Host "    - .next, .turbo, node_modules/.cache, node_modules/.vite" -ForegroundColor Gray
     Write-Host "    - dist, .vite (build output)" -ForegroundColor Gray
     Write-Host "    - node_modules" -ForegroundColor Gray
-    Write-Host "    - package-lock.json, yarn.lock, pnpm-lock.yaml, bun.lockb" -ForegroundColor Gray
+    Write-Host "    - package-lock.json, yarn.lock, pnpm-lock.yaml, bun.lockb, bun.lock" -ForegroundColor Gray
     Write-Host ""
     $confirm = Read-Host "  Continue? (y/n)"
     if ($confirm -ne 'y') {
@@ -98,8 +98,8 @@ Invoke-DevKitInDirectory -Path $targetPath -ScriptBlock {
     $steps += @{
         Name = "Delete lock files"
         Action = {
-            @("package-lock.json", "yarn.lock", "pnpm-lock.yaml", "bun.lockb") | ForEach-Object {
-                if (Test-Path $_) { Remove-Item -Path $_ -Force }
+            @("package-lock.json", "yarn.lock", "pnpm-lock.yaml", "bun.lockb", "bun.lock") | ForEach-Object {
+                if (Test-Path $_) { Remove-Item -Path $_ -Force -ErrorAction Stop }
             }
         }
     }

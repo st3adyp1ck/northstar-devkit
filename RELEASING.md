@@ -2,14 +2,27 @@
 
 A short checklist for cutting a new version.
 
-1. **Bump the version** in three places (they're kept in sync manually,
-   not read from one file at runtime, to avoid adding a startup file-read
-   to every launch):
+1. **Bump the version** in every file that hardcodes it (they're kept in
+   sync manually, not read from one file at runtime, to avoid adding a
+   startup file-read to every launch). As of 3.8.0 that's:
    - `VERSION` (repo root - the single source of truth for what the
      number *should* be)
-   - `DevKit.ps1` - the `.VERSION` comment-help field and the banner text
-     inside `Show-Header`
+   - `DevKit.ps1` - the `.VERSION` comment-help field and the
+     `$DevKitVersion` fallback literal used if the `VERSION` file can't
+     be read
    - `lib\DevKit-Common.ps1` - the `.VERSION` comment-help field
+   - `lib\DevKit-UI.ps1` - the `.VERSION` comment-help field and
+     `Show-DevKitStartupBanner`'s `$version` fallback literal
+   - `gui\DevKit-GUI.ps1` - the `$DevKitVersion` fallback literal
+   - `gui\DevKit-Widget.ps1` - the `$DevKitVersion` fallback literal
+
+   Don't trust this list alone - new fallback sites have been added with
+   past releases without this checklist being updated. Before bumping,
+   grep for the *previous* version string across `*.ps1` to catch any
+   site this list is missing:
+   ```powershell
+   Get-ChildItem -Recurse -Filter *.ps1 | Select-String -SimpleMatch 'X.Y.Z'
+   ```
 2. **Update `CHANGELOG.md`** with a new `## [x.y.z] - YYYY-MM-DD` section.
    Follow the existing Added / Fixed / Changed structure.
 3. **Run the full check locally** before tagging:

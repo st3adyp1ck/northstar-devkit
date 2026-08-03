@@ -5,8 +5,10 @@
 .DESCRIPTION
     Lists Windows scheduled tasks with their state, last run time, and last
     result, flagging any nonzero result code. Reading the list requires no
-    admin rights. Optionally disables a single named task (which may require
-    admin rights depending on the task's owning scope).
+    admin rights. After the list, an interactive run offers to disable a
+    task by name right away; -Disable <TaskName> does the same
+    non-interactively (disabling may require admin rights depending on the
+    task's owning scope).
 
     Created by Northstar Software Development
     Website: https://www.northstarcoding.com
@@ -94,8 +96,17 @@ if (-not $Disable) {
     }
 
     Write-Host ""
-    Write-DevKitInfo "$($tasks.Count) task(s) listed. Use -Disable <TaskName> to disable one."
-    exit 0
+    if ([Console]::IsInputRedirected) {
+        Write-DevKitInfo "$($tasks.Count) task(s) listed. Use -Disable <TaskName> to disable one."
+        exit 0
+    }
+    Write-DevKitInfo "$($tasks.Count) task(s) listed."
+    $name = Read-Host "  Task name to disable (Enter to exit)"
+    if (-not $name) {
+        Write-DevKitInfo "No changes made."
+        exit 0
+    }
+    $Disable = $name
 }
 
 Write-DevKitStep "Looking up scheduled task '$Disable'"

@@ -1,0 +1,465 @@
+<Window
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    x:Name="WidgetWindow"
+    Title="Northstar DevKit Companion"
+    Width="517" Height="640" MinWidth="340" MinHeight="480"
+    WindowStartupLocation="Manual" Left="0" Top="60"
+    ResizeMode="NoResize"
+    WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+    Topmost="True"
+    FontFamily="Segoe UI Variable Text, Segoe UI"
+    TextOptions.TextFormattingMode="Display" TextOptions.TextRenderingMode="ClearType">
+
+    <!--
+        Northstar DevKit Companion - persistent desktop widget. Loose XAML
+        like DevKit-GUI.xaml, but the theme is NOT string-merged here:
+        DevKit-Widget.ps1 loads Theme.xaml into Application.Resources before
+        parsing this file, so keyless styles reach template-generated
+        scrollbars/popups and every dialog window. All dynamic content is
+        built in code against these x:Name handles. Lives alongside a WinForms
+        NotifyIcon so it survives DevKit itself closing.
+
+        Layout: a five-column root grid, left to right: TabWest(Auto) |
+        FlyoutWest(Auto) | Main(FIXED px) | FlyoutEast(Auto) | TabEast(Auto).
+        Column 2 (center) holds the widget itself (title / scrollable body /
+        bottom Settings expander / footer) and is a FIXED pixel width, never
+        "*": a star column is by definition "absorb whatever is left over",
+        so every rounding difference between the window's width and the
+        flyout's width landed on the main widget - which is what made the
+        flyout's INNER edge (its boundary against the widget) creep while the
+        user dragged its OUTER grip. With Main pinned and the docked edge
+        pinned, the outer grip can only ever move the outer edge. The GIT
+        pull-tab (BtnGitTab) each get their OWN column, toggled in code
+        (DevKit-Widget.ps1, Set-DevKitWidgetDock) so they always open on
+        whichever edge faces INTO the screen - west (columns 1/0) when
+        docked right, east (columns 3/4) when docked left - and so neither
+        one ever shares a column with Main or with each other; the unused
+        side's two Auto columns measure to 0 width since they hold no
+        children. The flyout is 0 wide until the pull-tab opens it; its own
+        grip sits on the flyout's OUTER edge (the far side from Main, facing
+        the pull-tab) and resizes its width. The main window itself is not
+        interactively resizable - only the persisted widgetWidth/
+        gitFlyoutWidth preferences size it, applied once at startup.
+    -->
+
+    <Window.Resources>
+        <ResourceDictionary>
+        </ResourceDictionary>
+    </Window.Resources>
+
+    <Border x:Name="RootBorder" Style="{StaticResource RootWindow}" Margin="8">
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/> <!-- 0: TabWest -->
+                <ColumnDefinition Width="Auto"/> <!-- 1: FlyoutWest -->
+                <ColumnDefinition x:Name="MainColumn" Width="475"/> <!-- 2: Main (FIXED, never "*") -->
+                <ColumnDefinition Width="Auto"/> <!-- 3: FlyoutEast -->
+                <ColumnDefinition Width="Auto"/> <!-- 4: TabEast -->
+            </Grid.ColumnDefinitions>
+
+            <Grid Grid.Column="2">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="36"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="26"/>
+                </Grid.RowDefinitions>
+
+                <!-- Title bar -->
+                <Border x:Name="TitleBar" Background="Transparent">
+                    <Grid Margin="12,0,8,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <Image x:Name="WidgetLogoImage" Width="18" Height="18" VerticalAlignment="Center"/>
+                        <TextBlock Grid.Column="1" VerticalAlignment="Center" Margin="8,0,0,0" FontSize="11">
+                            <Run Text="NORTHSTAR" FontWeight="SemiBold" Foreground="{StaticResource BrushMetalGradient}"/>
+                            <Run Text=" COMPANION" FontWeight="SemiBold" Foreground="{StaticResource BrushAccentBlue}"/>
+                        </TextBlock>
+                        <Button Grid.Column="3" x:Name="BtnPin" Style="{StaticResource ChromeButton}" Width="30" Height="24"
+                                Content="&#xE718;" ToolTip="Unpin (allow other windows to cover me)"/>
+                        <Button Grid.Column="4" x:Name="BtnHide" Style="{StaticResource ChromeButton}" Width="30" Height="24"
+                                Content="&#xE921;" ToolTip="Hide to system tray"/>
+                    </Grid>
+                </Border>
+
+                <!-- Sapphire-to-ember brand strip under the title bar -->
+                <Border Grid.Row="1" Height="2" Margin="12,0,12,0" CornerRadius="1"
+                        Background="{StaticResource BrushAccentGradient}"/>
+
+                <!-- Body -->
+                <ScrollViewer Grid.Row="2" x:Name="ContentScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Margin="12,2,12,8">
+
+                        <!-- Project selector -->
+                        <TextBlock Style="{StaticResource WidgetSectionHeader}" Text="ACTIVE PROJECT" Margin="2,0,0,4"/>
+                        <ComboBox x:Name="ProjectCombo" MaxDropDownHeight="260" Margin="0,2,0,4"
+                                  ToolTip="The project DevKit tools and the Git panel act on"/>
+                        <!-- Ambient git state of the active project (dirty/ahead/behind/stash) -->
+                        <TextBlock x:Name="GitBadgeText" Style="{StaticResource StatusText}" FontSize="9.5" Margin="2,0,0,6"
+                                   TextWrapping="Wrap" Visibility="Collapsed"/>
+                        <!-- .env drift hint (hidden unless the project drifts from its template) -->
+                        <Grid x:Name="EnvDriftRow" Margin="0,0,0,6" Visibility="Collapsed">
+                            <TextBlock x:Name="EnvDriftText" Style="{StaticResource StatusText}" FontSize="9.5" Margin="0,0,78,0"
+                                       TextWrapping="Wrap" Foreground="{StaticResource BrushAccentEmber}"/>
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top">
+                                <Button x:Name="BtnEnvFix" Style="{StaticResource GhostButton}" BorderThickness="0" Padding="4,0" FontSize="9.5"
+                                        Content="Fix..."
+                                        ToolTip="Copy the .env template in a terminal (you choose what to fill in)"/>
+                                <Button x:Name="BtnEnvSilence" Style="{StaticResource GhostButton}" BorderThickness="0" Padding="4,0" FontSize="9.5" Margin="4,0,0,0"
+                                        Content="Dismiss"
+                                        ToolTip="Hide this warning for this project (re-enable it later from Settings)"/>
+                            </StackPanel>
+                        </Grid>
+
+                        <!-- System gauges: three 270-degree radial dials (CPU / MEM / GPU).
+                             The arc geometry is computed and animated by DevKit-Widget.ps1. -->
+                        <Border Style="{StaticResource ToolCard}" Padding="10,12,10,10" Margin="0,0,0,10">
+                            <StackPanel>
+                                <UniformGrid Columns="3">
+                                    <StackPanel HorizontalAlignment="Center">
+                                        <Grid Width="88" Height="88">
+                                            <Path x:Name="CpuGaugeTrack" Stroke="{StaticResource BrushGaugeTrack}" StrokeThickness="7"
+                                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                                            <Path x:Name="CpuGaugeArc" Stroke="{StaticResource BrushGaugeArc}" StrokeThickness="7"
+                                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round">
+                                                <Path.Effect>
+                                                    <DropShadowEffect Color="#4FA3FF" Opacity="0.55" BlurRadius="9" ShadowDepth="0"/>
+                                                </Path.Effect>
+                                            </Path>
+                                            <TextBlock x:Name="CpuGaugeValue" Style="{StaticResource WidgetGaugeValue}" Text="..." VerticalAlignment="Center"/>
+                                        </Grid>
+                                        <TextBlock x:Name="CpuGaugeSub" Style="{StaticResource WidgetGaugeSub}" Text="" Visibility="Hidden"/>
+                                        <TextBlock Style="{StaticResource WidgetGaugeLabel}" Text="CPU" Margin="0,2,0,0"/>
+                                    </StackPanel>
+                                    <StackPanel HorizontalAlignment="Center">
+                                        <Grid Width="88" Height="88">
+                                            <Path x:Name="MemGaugeTrack" Stroke="{StaticResource BrushGaugeTrack}" StrokeThickness="7"
+                                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                                            <Path x:Name="MemGaugeArc" Stroke="{StaticResource BrushGaugeArc}" StrokeThickness="7"
+                                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round">
+                                                <Path.Effect>
+                                                    <DropShadowEffect Color="#4FA3FF" Opacity="0.55" BlurRadius="9" ShadowDepth="0"/>
+                                                </Path.Effect>
+                                            </Path>
+                                            <TextBlock x:Name="MemGaugeValue" Style="{StaticResource WidgetGaugeValue}" Text="..." VerticalAlignment="Center"/>
+                                        </Grid>
+                                        <TextBlock x:Name="MemGaugeSub" Style="{StaticResource WidgetGaugeSub}" Text="" Visibility="Hidden"/>
+                                        <TextBlock Style="{StaticResource WidgetGaugeLabel}" Text="MEM" Margin="0,2,0,0"/>
+                                    </StackPanel>
+                                    <StackPanel HorizontalAlignment="Center">
+                                        <Grid Width="88" Height="88">
+                                            <Path x:Name="GpuGaugeTrack" Stroke="{StaticResource BrushGaugeTrack}" StrokeThickness="7"
+                                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                                            <Path x:Name="GpuGaugeArc" Stroke="{StaticResource BrushGaugeArc}" StrokeThickness="7"
+                                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round">
+                                                <Path.Effect>
+                                                    <DropShadowEffect Color="#4FA3FF" Opacity="0.55" BlurRadius="9" ShadowDepth="0"/>
+                                                </Path.Effect>
+                                            </Path>
+                                            <TextBlock x:Name="GpuGaugeValue" Style="{StaticResource WidgetGaugeValue}" Text="..." VerticalAlignment="Center"/>
+                                        </Grid>
+                                        <TextBlock x:Name="GpuGaugeSub" Style="{StaticResource WidgetGaugeSub}" Text="" Visibility="Hidden"/>
+                                        <TextBlock Style="{StaticResource WidgetGaugeLabel}" Text="GPU" Margin="0,2,0,0"/>
+                                    </StackPanel>
+                                </UniformGrid>
+                                <TextBlock x:Name="MetricsHint" Style="{StaticResource StatusText}" FontSize="9.5" Margin="2,7,2,0" TextWrapping="Wrap" Visibility="Collapsed"/>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- System junk + one disk-free dial per ready drive. SYSTEM JUNK
+                             is the only static gauge here (100% arc = 10 GB cap); the disk
+                             gauges are built and reconciled at runtime in DevKit-Widget.ps1
+                             (Update-DevKitDiskGauges) so drives can come and go (USB sticks
+                             etc.) without a restart. A WrapPanel (not UniformGrid) holds them
+                             since the count varies - each gauge keeps its own fixed width and
+                             they wrap naturally as more drives show up. -->
+                        <Border Style="{StaticResource ToolCard}" Padding="10,12,10,10" Margin="0,0,0,10">
+                            <StackPanel>
+                                <WrapPanel x:Name="DiskGaugesPanel" Orientation="Horizontal" HorizontalAlignment="Center">
+                                    <StackPanel HorizontalAlignment="Center" Width="100" Margin="0,0,0,8">
+                                        <Grid Width="88" Height="88"
+                                              ToolTip="Reclaimable temp files, Windows Update cache and Recycle Bin. 100% = 10 GB.">
+                                            <Path x:Name="JunkGaugeTrack" Stroke="{StaticResource BrushGaugeTrack}" StrokeThickness="7"
+                                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                                            <Path x:Name="JunkGaugeArc" Stroke="{StaticResource BrushGaugeArc}" StrokeThickness="7"
+                                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round">
+                                                <Path.Effect>
+                                                    <DropShadowEffect Color="#4FA3FF" Opacity="0.55" BlurRadius="9" ShadowDepth="0"/>
+                                                </Path.Effect>
+                                            </Path>
+                                            <TextBlock x:Name="JunkGaugeValue" Style="{StaticResource WidgetGaugeValue}" Text="..." VerticalAlignment="Center"/>
+                                        </Grid>
+                                        <TextBlock x:Name="JunkGaugeSub" Style="{StaticResource WidgetGaugeSub}" Text="" Visibility="Hidden"/>
+                                        <TextBlock Style="{StaticResource WidgetGaugeLabel}" Text="SYSTEM JUNK" Margin="0,2,0,6"/>
+                                    </StackPanel>
+                                    <!-- Disk_<letter> gauges (e.g. "C:", "D:") are inserted here at
+                                         runtime, one per ready drive - see New-DevKitDynamicGaugeControl
+                                         and Update-DevKitDiskGauges in DevKit-Widget.ps1. -->
+                                </WrapPanel>
+                                <UniformGrid Columns="2">
+                                    <Button x:Name="BtnJunkClean" Style="{StaticResource AccentButton}" FontSize="10.5" Margin="0,0,3,0"
+                                            ToolTip="Delete temp files and empty the Recycle Bin (asks first)">Clean Now</Button>
+                                    <Button x:Name="BtnJunkTool" Style="{StaticResource GhostButton}" FontSize="10.5" Margin="3,0,0,0"
+                                            ToolTip="Open the full Clear Disk Junk tool in a terminal window">Cleanup Tool...</Button>
+                                </UniformGrid>
+                                <TextBlock x:Name="JunkStatusText" Style="{StaticResource StatusText}" FontSize="9.5" Margin="0,6,0,0"
+                                           TextWrapping="Wrap" HorizontalAlignment="Center" Visibility="Collapsed"/>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Node processes -->
+                        <Border Style="{StaticResource ToolCard}" Padding="12,10,12,11" Margin="0,0,0,10">
+                            <StackPanel>
+                                <Grid Margin="0,0,0,6">
+                                    <TextBlock Style="{StaticResource WidgetSectionHeader}" Text="NODE PROCESSES"/>
+                                    <Border x:Name="NodeCountBadge" Style="{StaticResource BadgeNeutral}" HorizontalAlignment="Right">
+                                        <TextBlock x:Name="NodeCountBadgeText" Style="{StaticResource BadgeNeutralText}" Text="0"/>
+                                    </Border>
+                                </Grid>
+                                <StackPanel x:Name="NodeListPanel"/>
+                                <TextBlock x:Name="OtherPortsText" Style="{StaticResource StatusText}" FontSize="10" Margin="0,6,0,0" TextWrapping="Wrap" Visibility="Collapsed"/>
+                                <TextBlock x:Name="ReservedPortsText" Style="{StaticResource StatusText}" FontSize="9.5" Margin="0,4,0,0" TextWrapping="Wrap"
+                                           Foreground="{StaticResource BrushAccentEmber}" Visibility="Collapsed"/>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Quick actions -->
+                        <Expander x:Name="QuickActionsExpander" Margin="0,0,0,10" ToolTip="Click to expand or collapse">
+                            <Expander.Header>
+                                <StackPanel>
+                                    <TextBlock Style="{StaticResource WidgetExpanderTitle}" Text="QUICK ACTIONS"/>
+                                    <TextBlock Style="{StaticResource WidgetExpanderSub}" Text="Common actions for the active project"/>
+                                </StackPanel>
+                            </Expander.Header>
+                            <StackPanel>
+                                <UniformGrid Rows="2" Columns="2">
+                                    <Button x:Name="BtnClearNpmCache" Style="{StaticResource GhostButton}" FontSize="11" Margin="0,0,4,4" ToolTip="Clear the detected package manager's cache (project or current dir)">Clear NPM Cache</Button>
+                                    <Button x:Name="BtnKillNode" Style="{StaticResource GhostButton}" FontSize="11" Margin="4,0,0,4" ToolTip="Kill every running node process (asks first)">Kill All Node</Button>
+                                    <Button x:Name="BtnKillPort" Style="{StaticResource GhostButton}" FontSize="11" Margin="0,4,4,0" ToolTip="Kill the process listening on a port you enter">Kill Port...</Button>
+                                    <Button x:Name="BtnDoctor" Style="{StaticResource GhostButton}" FontSize="11" Margin="4,4,0,0" ToolTip="Run the DevKit environment health check">Doctor</Button>
+                                </UniformGrid>
+                                <UniformGrid Rows="2" Columns="2" Margin="0,4,0,0">
+                                    <Button x:Name="BtnOpenEditor" Style="{StaticResource GhostButton}" FontSize="11" Margin="0,0,4,4" ToolTip="Open the active project in VS Code/Cursor">Editor</Button>
+                                    <Button x:Name="BtnOpenExplorer" Style="{StaticResource GhostButton}" FontSize="11" Margin="4,0,0,4" ToolTip="Open the active project folder in Explorer">Explorer</Button>
+                                    <Button x:Name="BtnOpenTerminal" Style="{StaticResource GhostButton}" FontSize="11" Margin="0,4,4,0" ToolTip="Open a terminal in the active project folder">Terminal</Button>
+                                    <Button x:Name="BtnRunScript" Style="{StaticResource GhostButton}" FontSize="11" Margin="4,4,0,0" ToolTip="Pick and run a package.json script from the active project">Run Script...</Button>
+                                </UniformGrid>
+                                <Button x:Name="BtnOpenDevKit" Style="{StaticResource AccentButton}" FontSize="11.5" Margin="0,8,0,0" Content="Open DevKit"/>
+                            </StackPanel>
+                        </Expander>
+
+                        <!-- Agents: Claude Code + Kimi Code CLI/MCP status, nested under one header -->
+                        <Expander x:Name="AgentsExpander" Margin="0,0,0,10" ToolTip="Click to expand or collapse">
+                            <Expander.Header>
+                                <StackPanel>
+                                    <TextBlock Style="{StaticResource WidgetExpanderTitle}" Text="AGENTS"/>
+                                    <TextBlock Style="{StaticResource WidgetExpanderSub}" Text="Claude Code &amp; Kimi Code - CLI and MCP server status"/>
+                                </StackPanel>
+                            </Expander.Header>
+                            <StackPanel>
+
+                                <!-- Shown until the first MCP status check completes -->
+                                <ProgressBar x:Name="McpLoadingBar" IsIndeterminate="True" Height="3" Margin="0,0,0,8" Visibility="Collapsed"/>
+
+                                <!-- Claude Code MCP status -->
+                                <Expander x:Name="ClaudeExpander" Margin="0,0,0,10" ToolTip="Click to expand or collapse">
+                                    <Expander.Header>
+                                        <StackPanel>
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Style="{StaticResource WidgetExpanderTitle}" Text="Claude Code"/>
+                                                <Border x:Name="ClaudeCliBadge" Style="{StaticResource BadgeNeutral}" Margin="8,0,0,0" VerticalAlignment="Center">
+                                                    <TextBlock x:Name="ClaudeCliBadgeText" Style="{StaticResource BadgeNeutralText}" Text="checking..."/>
+                                                </Border>
+                                            </StackPanel>
+                                            <TextBlock Style="{StaticResource WidgetExpanderSub}" Text="CLI &amp; MCP server status - this machine and the active project"/>
+                                        </StackPanel>
+                                    </Expander.Header>
+                                    <StackPanel>
+                                        <StackPanel x:Name="ClaudeMcpPanel">
+                                            <TextBlock Style="{StaticResource WidgetRowText}" Text="Checking MCP servers..."/>
+                                        </StackPanel>
+                                        <Button x:Name="BtnClaudeManage" Style="{StaticResource GhostButton}" FontSize="11" Margin="0,8,0,0" Content="Manage..."/>
+                                    </StackPanel>
+                                </Expander>
+
+                                <!-- Kimi Code MCP status -->
+                                <Expander x:Name="KimiExpander" Margin="0,0,0,4" ToolTip="Click to expand or collapse">
+                                    <Expander.Header>
+                                        <StackPanel>
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Style="{StaticResource WidgetExpanderTitle}" Text="Kimi Code"/>
+                                                <Border x:Name="KimiCliBadge" Style="{StaticResource BadgeNeutral}" Margin="8,0,0,0" VerticalAlignment="Center">
+                                                    <TextBlock x:Name="KimiCliBadgeText" Style="{StaticResource BadgeNeutralText}" Text="checking..."/>
+                                                </Border>
+                                            </StackPanel>
+                                            <TextBlock Style="{StaticResource WidgetExpanderSub}" Text="Configured MCP servers - this machine and the active project"/>
+                                        </StackPanel>
+                                    </Expander.Header>
+                                    <StackPanel>
+                                        <StackPanel x:Name="KimiMcpPanel">
+                                            <TextBlock Style="{StaticResource WidgetRowText}" Text="Checking MCP servers..."/>
+                                        </StackPanel>
+                                        <Button x:Name="BtnKimiManage" Style="{StaticResource GhostButton}" FontSize="11" Margin="0,8,0,0" Content="Manage..."/>
+                                    </StackPanel>
+                                </Expander>
+
+                            </StackPanel>
+                        </Expander>
+
+                    </StackPanel>
+                </ScrollViewer>
+
+                <!-- Widget settings: bottom row, expanding upward over the content -->
+                <Expander Grid.Row="3" x:Name="SettingsExpander" ExpandDirection="Up" Margin="12,2,12,8" ToolTip="Click to expand or collapse">
+                    <Expander.Header>
+                        <StackPanel>
+                            <TextBlock Style="{StaticResource WidgetExpanderTitle}" Text="Settings"/>
+                            <TextBlock Style="{StaticResource WidgetExpanderSub}" Text="Startup and window behavior"/>
+                        </StackPanel>
+                    </Expander.Header>
+                    <StackPanel>
+                        <CheckBox x:Name="ChkStartup" Content="Start with Windows" FontSize="12" Margin="0,4,0,0"
+                                  ToolTip="Launch the Companion automatically when you sign in to Windows (adds a reversible entry under HKCU Run - untick to remove it)"/>
+                        <TextBlock Style="{StaticResource WidgetExpanderSub}" Margin="26,2,0,0"
+                                   Text="Opens the Companion automatically after you sign in."/>
+                        <CheckBox x:Name="ChkTopmost" Content="Keep on top of other windows" FontSize="12" Margin="0,10,0,0"
+                                  ToolTip="Same as the pin button in the title bar"/>
+                        <TextBlock Style="{StaticResource WidgetExpanderSub}" Margin="26,2,0,0"
+                                   Text="Pins the widget above every other window."/>
+                        <TextBlock Style="{StaticResource WidgetSectionHeader}" Text="DEFAULT VIEW" Margin="0,14,0,5"/>
+                        <ComboBox x:Name="CmbDefaultView" MaxDropDownHeight="200"
+                                  ToolTip="Which screen edge the Companion docks to. Applies immediately and is remembered for the next launch.">
+                            <ComboBoxItem Content="Docked left - full height" Tag="Left"/>
+                            <ComboBoxItem Content="Docked right - full height" Tag="Right"/>
+                        </ComboBox>
+                        <TextBlock Style="{StaticResource WidgetExpanderSub}" Margin="2,4,0,0" TextWrapping="Wrap"
+                                   Text="Applies right away and is used again on the next launch. The widget is always full height and always docked to a screen edge; drag the title bar to move it - releasing it always snaps to whichever edge it is closer to. The window's width itself is fixed; the Git panel's own grip resizes just that panel."/>
+                        <TextBlock Style="{StaticResource WidgetSectionHeader}" Text="ENV DRIFT WARNINGS" Margin="0,14,0,5"/>
+                        <Button x:Name="BtnEnvDriftUnsilence" Style="{StaticResource GhostButton}" FontSize="11" HorizontalAlignment="Left" Padding="6,3"
+                                Content="Re-enable dismissed .env warnings"
+                                ToolTip="Un-hides the .env drift warning for every project you previously dismissed it on"/>
+                        <TextBlock Style="{StaticResource WidgetExpanderSub}" Margin="2,4,0,0" TextWrapping="Wrap"
+                                   Text="Dismissing the warning (via its Dismiss button) hides it for that project only. This brings back every dismissed warning."/>
+                    </StackPanel>
+                </Expander>
+
+                <!-- Footer -->
+                <Border Grid.Row="4" Background="{StaticResource BrushStatusBg}" BorderBrush="{StaticResource BrushSeparator}" BorderThickness="0,1,0,0">
+                    <Grid Margin="12,0,6,0">
+                        <TextBlock x:Name="LastUpdatedText" Style="{StaticResource StatusText}" FontSize="10" VerticalAlignment="Center" Text="starting..."/>
+                        <Button x:Name="BtnRefreshMcp" Style="{StaticResource GhostButton}" BorderThickness="0" Padding="6,1" FontSize="10"
+                                HorizontalAlignment="Right" VerticalAlignment="Center" Content="Refresh MCP"
+                                ToolTip="Re-check Claude and Kimi MCP server status"/>
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <!-- GitHub flyout: 0 wide until the GIT pull-tab opens it. Lives in
+                 column 1 (west) or column 3 (east) - its own dedicated
+                 column, never shared with Main or the pull-tab - toggled in
+                 code (Set-DevKitWidgetDock) to whichever side faces INTO the
+                 screen, mirroring the dock side. GitFlyoutGrip sits on the
+                 flyout's OUTER edge (the far side from the main widget,
+                 facing the pull-tab) - dragging it resizes the panel width;
+                 GitFlyoutInner's own alignment (Right, below) still anchors
+                 its content against the boundary with Main regardless of
+                 which side the grip is on. -->
+            <Border x:Name="GitFlyout" Grid.Column="1" Width="0" ClipToBounds="True"
+                    Background="{StaticResource BrushPanelBg}" BorderBrush="{StaticResource BrushSeparator}" BorderThickness="1,0,0,0">
+              <Grid>
+                <Grid x:Name="GitFlyoutInner" Width="300" HorizontalAlignment="Right">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <Grid Margin="12,12,12,8">
+                        <StackPanel>
+                            <TextBlock x:Name="GitFlyoutTitle" Style="{StaticResource WidgetExpanderTitle}" Text="Project" TextTrimming="CharacterEllipsis"/>
+                            <TextBlock x:Name="GitFlyoutBranch" Style="{StaticResource WidgetExpanderSub}" Text="" TextTrimming="CharacterEllipsis"/>
+                        </StackPanel>
+                        <Button x:Name="BtnGitClose" Style="{StaticResource ChromeButton}" Width="24" Height="22"
+                                HorizontalAlignment="Right" VerticalAlignment="Top" Content="&#xE106;"
+                                ToolTip="Close the Git panel"/>
+                    </Grid>
+
+                    <!-- Uncommitted changes: collapsed-by-default expander, header shows a
+                         live count badge; body (UncommittedFilesPanel) is rebuilt in code from
+                         Get-DevKitRepoOverview's DirtyFiles - see Update-DevKitGitUncommittedList
+                         in DevKit-Widget.ps1. Hidden entirely when DirtyFiles is empty. -->
+                    <Expander Grid.Row="1" x:Name="UncommittedExpander" Margin="12,0,12,8" ToolTip="Click to expand or collapse">
+                        <Expander.Header>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Style="{StaticResource WidgetExpanderTitle}" Text="UNCOMMITTED CHANGES"/>
+                                <Border x:Name="UncommittedCountBadge" Style="{StaticResource BadgeNeutral}" Margin="8,0,0,0" VerticalAlignment="Center">
+                                    <TextBlock x:Name="UncommittedCountBadgeText" Style="{StaticResource BadgeNeutralText}" Text="0"/>
+                                </Border>
+                            </StackPanel>
+                        </Expander.Header>
+                        <StackPanel x:Name="UncommittedFilesPanel"/>
+                    </Expander>
+
+                    <Border Grid.Row="2" Background="{StaticResource BrushInputBg}" BorderBrush="{StaticResource BrushCardBorder}"
+                            BorderThickness="1" CornerRadius="6" Margin="12,0,12,8">
+                        <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+                            <Grid>
+                                <!-- Fallback/messages (loading, not-a-repo, errors) -->
+                                <TextBlock x:Name="GitGraphText" FontSize="10.5"
+                                           Foreground="{StaticResource BrushTextDim}" Margin="8,6" TextWrapping="Wrap"
+                                           Text="Loading commit graph..."/>
+                                <!-- The drawn graph: lanes + S-curve links + nodes + ref pills,
+                                     built in code from Get-DevKitRepoOverview's Graph layout. -->
+                                <Canvas x:Name="GitGraphCanvas" VerticalAlignment="Top" HorizontalAlignment="Left"/>
+                            </Grid>
+                        </ScrollViewer>
+                    </Border>
+
+                    <StackPanel Grid.Row="3" Margin="12,0,12,12">
+                        <TextBlock x:Name="GitFlyoutStatus" Style="{StaticResource StatusText}" FontSize="9.5" TextWrapping="Wrap" Margin="0,0,0,6" Text=""/>
+                        <UniformGrid Columns="3">
+                            <Button x:Name="BtnGitFetch" Style="{StaticResource GhostButton}" FontSize="10.5" Margin="0,0,3,0" Content="Fetch"/>
+                            <Button x:Name="BtnGitPull" Style="{StaticResource GhostButton}" FontSize="10.5" Margin="3,0,3,0" Content="Pull"/>
+                            <Button x:Name="BtnGitPush" Style="{StaticResource GhostButton}" FontSize="10.5" Margin="3,0,0,0" Content="Push"/>
+                        </UniformGrid>
+                        <UniformGrid Columns="2" Margin="0,4,0,0">
+                            <Button x:Name="BtnGitOpenHub" Style="{StaticResource GhostButton}" FontSize="10.5" Margin="0,0,3,0" Content="Open on GitHub"/>
+                            <Button x:Name="BtnGitActions" Style="{StaticResource GhostButton}" FontSize="10.5" Margin="3,0,0,0" Content="Actions"/>
+                        </UniformGrid>
+                        <Button x:Name="BtnGitCleanup" Style="{StaticResource GhostButton}" FontSize="10.5" Margin="0,4,0,0" Content="Git Cleanup Tool"/>
+                    </StackPanel>
+                </Grid>
+                <Border x:Name="GitFlyoutGrip" Width="6" HorizontalAlignment="Right"
+                        Background="Transparent" Cursor="SizeWE" ToolTip="Drag to resize the Git panel width"/>
+              </Grid>
+            </Border>
+
+            <!-- GIT pull-tab: always visible/clickable regardless of the
+                 flyout's open/closed state - it both opens the panel and
+                 marks where it will appear. Owns its OWN column (0 west / 4
+                 east, never shared with Main or GitFlyout) at the TRUE outer
+                 edge of the window; Grid.Column, HorizontalAlignment and
+                 Style (GitTabButtonWest/East - see Theme.xaml) are all
+                 toggled together in code (Set-DevKitWidgetDock). -->
+            <Button x:Name="BtnGitTab" Grid.Column="0" Width="24" Height="76"
+                    HorizontalAlignment="Left" VerticalAlignment="Center"
+                    Style="{StaticResource GitTabButtonWest}" Padding="0"
+                    FontFamily="Segoe UI" FontSize="10" FontWeight="SemiBold"
+                    ToolTip="Git panel for the active project (select a project first)">
+                <TextBlock Text="GIT">
+                    <TextBlock.LayoutTransform>
+                        <RotateTransform Angle="90"/>
+                    </TextBlock.LayoutTransform>
+                </TextBlock>
+            </Button>
+        </Grid>
+    </Border>
+</Window>

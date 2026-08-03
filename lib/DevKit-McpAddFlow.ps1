@@ -18,22 +18,31 @@
 
     This file is dot-sourced by scripts; it does not produce output when
     loaded. It defensively dot-sources DevKit-Common.ps1 and
-    DevKit-McpCatalog.ps1 itself (guarded by their own load flags) in case
-    a caller dot-sources this file without loading those first.
+    DevKit-McpCatalog.ps1 itself (guarded by their own scope-aware load
+    guards) in case a caller dot-sources this file without loading those
+    first.
 
     Created by Northstar Software Development
     Website: https://www.northstarcoding.com
 #>
 
-# Prevent double-loading
-if ($global:DevKitMcpAddFlowLoaded) { return }
+# Prevent double-loading. Scope-aware on purpose: a $global: bool would
+# incorrectly skip loading for a sibling script invoked via `&` in the same
+# process (a distinct child scope that never inherits functions defined by
+# another sibling's dot-source), leaving it with the flag set but none of
+# the functions actually defined. Checking for the function itself detects
+# "already loaded in a scope this one can see" instead.
+if (Get-Command Add-DevKitMcpServerFromCatalogEntry -ErrorAction SilentlyContinue) { return }
 $global:DevKitMcpAddFlowLoaded = $true
 
-if (-not $global:DevKitCommonLoaded) {
+if (-not (Get-Command Write-DevKitHeader -ErrorAction SilentlyContinue)) {
     $commonPath = Join-Path $PSScriptRoot "DevKit-Common.ps1"
     if (Test-Path $commonPath) { . $commonPath }
 }
-if (-not $global:DevKitMcpCatalogLoaded) {
+# Same scope-aware function detection as the guard above: a $global: flag
+# here could be a stale survivor of an already-destroyed sibling scope,
+# which is exactly the crash this defensive load exists to prevent.
+if (-not (Get-Command Get-DevKitMcpCatalog -ErrorAction SilentlyContinue)) {
     $catalogPath = Join-Path $PSScriptRoot "DevKit-McpCatalog.ps1"
     if (Test-Path $catalogPath) { . $catalogPath }
 }
@@ -119,7 +128,8 @@ function Add-DevKitMcpServerFromCatalogEntry {
     $scopeEntries = @(
         @{ Key = '1'; Label = 'local   - this machine + project only (default)' },
         @{ Key = '2'; Label = 'project - shared with the team via .mcp.json' },
-        @{ Key = '3'; Label = 'user    - global, available in every project' }
+        @{ Key = '3'; Label = 'user    - global, available in every project' },
+        @{ Key = '0'; Label = 'Cancel' }
     )
     $scope = $null
     while (-not $scope) {
@@ -128,6 +138,9 @@ function Add-DevKitMcpServerFromCatalogEntry {
             { $_ -in @('1', 'local', '') } { $scope = 'local' }
             { $_ -in @('2', 'project') } { $scope = 'project' }
             { $_ -in @('3', 'user') } { $scope = 'user' }
+            # Escape also surfaces as '0' (Show-DevKitInteractiveMenu maps it),
+            # so this is the picker's only way out besides Ctrl+C.
+            '0' { return New-DevKitMcpAddFlowResult -Cancelled $true }
             default { Write-Host "  Invalid choice." -ForegroundColor Red }
         }
     }

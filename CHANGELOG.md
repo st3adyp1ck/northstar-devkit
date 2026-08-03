@@ -2,6 +2,300 @@
 
 All notable changes to Northstar DevKit are documented here.
 
+## [Unreleased]
+
+## [3.8.0] - 2026-08-02
+
+The companion widget becomes the main surface: a hand-drawn commit graph,
+ambient project awareness, and eight new toolkit utilities - plus a full-repo
+bug sweep that fixed two long-standing HIGH-severity bugs.
+
+### Added
+
+- **A real commit graph in the widget's Git flyout**, replacing the
+  monospace `git log --graph` dump. `Get-DevKitRepoOverview` now parses
+  `git log --all --topo-order -n 40` with record/unit separators,
+  `ConvertTo-DevKitGitGraphLayout` assigns lanes (the first-parent trunk
+  stays a straight vertical line; side branches and merges bend into it),
+  and `Render-DevKitGitGraph` draws it on a Canvas: gradient S-curve links
+  that flow from each branch's color into its parent's, bright lane nodes
+  with a HEAD ring, branch/tag pills, subject + hash/author/date lines,
+  tooltips, and a measured canvas width so horizontal scrolling appears
+  exactly when needed. Branch header now shows ahead/behind vs upstream.
+- **Disk Free dial** next to System Junk (`System.IO.DriveInfo` - arc shows
+  used space, the number shows free space, ember under 10% free).
+- **Node table upgrades**: an AGE column (5m/3h/2d), a confirmed per-process
+  kill button (stop the stale dev server, not all of node), click-to-open
+  `http://localhost:<port>` links, row tooltips, a friendlier empty state,
+  and an ember warning when common dev ports sit inside Hyper-V/winnat
+  reserved ranges (the "nothing is listening yet the port refuses to bind"
+  case - parsed from `netsh show excludedportrange` via the new
+  `ConvertFrom-DevKitExcludedPortRanges` in `lib/DevKit-Common.ps1`, cached
+  30 minutes).
+- **Ambient project awareness** under the widget's project selector: a git
+  badge with branch + uncommitted/ahead/behind/stash counts (refreshed every
+  2 minutes in the background), and an ember `.env` drift hint when the
+  project's `.env` is missing keys its template declares or leaves them
+  empty (key-name diff only - values are secrets and never read), with a
+  "Fix..." button that opens the real Copy-EnvTemplate tool.
+- **Reboot-pending / long-uptime hint** in the gauges card (documented
+  registry sentinels + LastBootUpTime), because a pending reboot explains a
+  whole class of phantom dev-machine weirdness.
+- **Four project launchers** in the widget's quick actions: Editor (VS
+  Code/Cursor), Explorer, Terminal (wt.exe or fallback), and Run Script...
+  (the new package.json script picker) - all enabled only with a project.
+- **Widget polish**: themed thin scrollbars everywhere (see Changed), a
+  sapphire-to-ember brand strip under the title bar, an ACTIVE PROJECT
+  label, a close button inside the Git flyout, an indeterminate progress
+  bar during the first MCP check, a green "Freed X" result, Enter submits
+  the Kill Port dialog, grip tooltips + hover fade on the invisible resize
+  grips, dock-aware grip resizing (a docked widget keeps its screen edge),
+  and a calmer HH:mm footer clock.
+- **GUI polish**: Run buttons on CAUTION-tagged (destructive) cards are now
+  ember DangerButtons; cards hover-highlight; dialogs get Enter-to-submit /
+  Escape-to-cancel, first-field focus, a close [x], and drag-by-title;
+  prompt dialogs show the tool's help excerpt (ember for safety notes) and
+  highlight the offending field on validation failure; search shows its
+  Ctrl+F hint, clears with Escape, restores the previous page when emptied,
+  and has a real no-results state; the pinned-project glyph renders in the
+  correct icon font (was a tofu box); first launch opens Getting Started;
+  launching a tool flashes "Launched ✓" on its button; nav items carry
+  their module's description as a tooltip; the projects page keeps its
+  scroll position across actions; the window resizes from any edge or
+  corner (was a single near-invisible grip).
+- **Theme system**: semantic success/warning tokens and badge styles
+  (`BrushSuccess*`, `BrushWarning*`, `BrushInfoSurface`, `BrushEmberSurface`,
+  `BrushGitTag`, `BadgeSuccess`, `BadgeWarning`), a shared keyboard
+  `DevKitFocusVisual` wired into buttons/nav/combo boxes, disabled-state
+  triggers on every button style, wrapping max-width tooltips, brand text
+  selection colors, an indeterminate ProgressBar state, a readable gauge
+  track ring, and deduplicated one-off color literals into named tokens.
+- **TUI polish**: the gradient engine's palette re-anchored to the logo's
+  sapphire/ember duality (was an old cyan ramp), the spinner matches and
+  shows elapsed seconds past 2s, the startup banner centers itself for any
+  version-string length, and static section chrome moved from Magenta to
+  White on both the menu header and search results.
+- **`ports/Show-ExcludedPortRanges.ps1`** - lists Hyper-V/winnat-reserved
+  TCP port ranges and flags common dev ports caught inside them; `-Port`
+  checks one port (exit 0 free / 1 reserved). The answer to "EACCES /
+  WinError 10013 with nothing listening".
+- **`ports/Test-DevEndpoint.ps1`** - HTTP health check: status code,
+  latency, redirect target, and TLS certificate days-remaining for https
+  URLs; with no `-Url` it probes every common dev port that's actually
+  listening.
+- **`git/Get-GitStandup.ps1`** - your commits across repos since N hours
+  ago (default 24), grouped per repo for standup notes; author resolved
+  from git config; never fetches, never mutates.
+- **`node/Start-PackageScript.ps1`** - arrow-key picker over a project's
+  package.json scripts, run with the auto-detected package manager
+  (`-Name` skips the picker).
+- **`node/Find-StaleNodeModules.ps1`** - finds every node_modules under a
+  root, reports size + age, and offers a gated cleanup (report-only by
+  default; deletion behind `Confirm-DevKitDestructiveAction` via the
+  long-path-safe shared helper).
+- **`system/Edit-HostsFile.ps1`** - view/add/remove/comment-toggle hosts
+  entries with a timestamped backup, admin gate with elevation offer, and
+  a DNS flush after each change - the "myapp.test" workflow without
+  googling where the file lives.
+- **`workflow/Compare-EnvFiles.ps1`** - `.env` vs template drift report
+  (missing / empty / extra keys; values never printed).
+- **`workflow/Convert-DevText.ps1`** - the "google-this" converter box:
+  Base64 and URL encode/decode, Unix timestamps (s/ms) to local time and
+  back, GUIDs, SHA-256, and JWT header/payload decoding (signature never
+  verified, and it says so). Optional `-Clipboard`.
+
+### Changed
+
+- **Both WPF apps now load the theme into `Application.Resources` before
+  parsing any window XAML** (the Application is created first), replacing
+  the old `Theme.xaml` string-merge into `Window.Resources`. Keyless
+  styles (ScrollBar, ToolTip, CheckBox) only reach template-generated
+  elements - every ScrollViewer's scrollbars, ComboBox popups - through
+  application resources, so scrollbars were stock light Windows chrome
+  and dialog windows lost implicit styles. One structural change fixes both.
+- **Maintenance report tools now offer to apply right after the report.**
+  The six report-then-flag tools - `Clear-DiskJunk.ps1`,
+  `Manage-StartupPrograms.ps1`, `Get-ScheduledTasksReport.ps1`,
+  `Manage-Services.ps1`, `Set-PowerPlan.ps1`, and `Set-VisualEffects.ps1` -
+  previously ended their default report with a "re-run with `-Apply` /
+  `-Disable <Name>` / ..." hint, a dead end for anyone launching via a
+  batch wrapper or the interactive menu (no way to add flags). An
+  interactive run now ends with an optional prompt to act immediately
+  (clean up now, entry/task name to toggle, service + startup type, plan
+  number or name, new visual-effects mode). The prompt only collects input
+  and sets the same variables the flags would have set, then falls into the
+  existing code path unchanged - same admin checks, same
+  `Confirm-DevKitDestructiveAction` gate. All flags keep working, and
+  piped/automated runs keep the old report-then-exit behavior via a
+  `[Console]::IsInputRedirected` guard.
+- **Package-manager detection recognizes modern bun**: bun >= 1.2's text
+  `bun.lock` is probed alongside the legacy binary `bun.lockb`, and the
+  nuke/full-clean lock-file delete lists include it.
+- The Agents menu's "List MCP Servers" entry now actually passes
+  `-UseActiveProject`, so the user/global vs project/local scope split its
+  help always promised is reachable from the menu.
+- The MCP add-from-catalog scope picker has a Cancel entry (Escape used to
+  loop forever).
+- Settings and the linked-projects registry merge with the on-disk document
+  before writing, so the long-running widget and a menu session no longer
+  silently discard each other's concurrent updates.
+- **Final-sweep performance pass.** The widget's metrics runspace now
+  caches its two slowest sensor reads per runspace - the ACPI
+  thermal-zone CPU temperature for 45s and the nvidia-smi GPU reading
+  for 10s - instead of re-running both on every 2-second cycle; GUI
+  startup compiles its three inline C# native helpers (taskbar AUMID,
+  WM_SETICON, edge-resize) in a single Add-Type invocation instead of
+  three separate compiler runs; the GUI search box debounces typing by
+  ~150ms, rendering one results page for a quickly typed query instead
+  of one per keystroke; `Find-StaleNodeModules` sizes each node_modules
+  with robocopy in list-only mode (roughly 5x faster than summing
+  `Get-ChildItem -Recurse`, and long-path-safe); and Test-DevEndpoint's
+  no-URL scan probes each listening port with a 2s timeout (was 3s).
+
+### Fixed
+
+- **The Agents "Manage..." dialogs never attached their content**
+  (`$root.Child` / `$dlg.Content` were never set) - clicking Manage opened
+  an invisible empty modal window that froze the widget until dismissed
+  with Escape. Found by rendering the real dialog in an off-screen probe.
+- **Every MCP menu tool crashed on second use within one DevKit session**
+  ("The term 'Get-DevKitMcpCatalog' is not recognized"): the three MCP
+  libs used `$global:` load-guards that outlived the menu dispatcher's
+  child scope while their functions did not. Guards now use function
+  detection, matching `lib/DevKit-Common.ps1`'s documented pattern.
+- **`Env-Restore` no longer destroys live secrets**: `Env-Backup` redacts
+  secret-like values to `***REDACTED***` by default, and restoring such a
+  backup used to write that literal over the real secrets. Redacted values
+  are now skipped (with a count + reminder to re-enter them).
+- **GUI argument rendering treated Int 1 as a switch and dropped Int 0**,
+  so e.g. `-Port 1` launched as a bare `-Port` and failed immediately.
+  Type-first branching fixes it, with new Pester coverage.
+- **The widget's metrics runspace could freeze the UI permanently** on a
+  wedged native call (nvidia-smi/WMI): it now gets the same
+  BeginStop-and-fresh-runspace recovery as the MCP and work runspaces.
+- **Switching projects while a git overview was in flight left the previous
+  project's graph on screen permanently**; declined refreshes now re-fire
+  when the work slot frees, and stale results for a since-switched project
+  are discarded instead of rendered.
+- Git actions (fetch/pull/push) color the status line ember on failure
+  (was friendly dim for errors too) and disable the repo buttons while
+  running; the junk gauge reads "of 10 GB" and its rescan clock no longer
+  resets when a scan is declined; the junk clean button is the visual
+  primary; the git graph's commit subjects no longer carry a trailing
+  newline (phantom second line / skewed truncation).
+- **Update-AiClis could downgrade a CLI** when the installed version was
+  newer than the channel's latest - versions are now compared as parsed
+  `[version]`s and only a strictly-greater remote queues an update.
+- **Clear-DiskJunk's Windows Update steps silently no-oped for non-admins**
+  while printing DONE; they're now admin-gated with a clear skip notice.
+- Manage-StartupPrograms: all-users Startup-folder entries now correctly
+  require elevation, and disabling over an existing backup name aborts
+  instead of silently destroying the earlier backup.
+- Set-PowerPlan's numeric pick no longer fails on duplicate-similar plan
+  names (selects by GUID); Show-DiskUsageReport validates `-Top`;
+  DevKit-Doctor labels the real system drive (not hardcoded "C:").
+- Docker-Cleanup's "Estimated reclaimable" regex now matches `docker
+  system df`'s actual output (was dead code); Git-SyncFork's git-missing
+  check is reachable (was dead code bypassed by the exception);
+  lock-file deletions in Nuke-And-Reinstall / Next-FullClean fail loudly
+  instead of printing DONE; Edit-Path no longer writes a leading empty
+  PATH segment on machines with an empty user PATH;
+  `Get-DevKitProcessByPort` prefers the live LISTEN row over stale
+  TIME_WAIT rows; the active-project header cache is invalidated on
+  unlink/relink/rename; `Read-DevKitTypedValue` honors `Min = 0` and
+  rejects out-of-range input instead of throwing; the GUI's project
+  picker "Browse..." sets the Active Project like "Use Selected" does;
+  the GUI's "Restart as Administrator" keeps `-NoWindowsTerminal`; clearing
+  the GUI search box restores the pre-search page instead of replaying a
+  stale search.
+- **The widget's System Junk clean touches only locations that always
+  work unelevated**: the contents of the user's own temp folder and the
+  Recycle Bin. `Windows\Temp` (where deletes silently no-op for
+  non-admins) and the Windows Update download cache still count toward
+  the gauge but are left to the real Clear-DiskJunk tool, and "Freed X"
+  is measured before/after on that same subset so the number stays
+  honest.
+- Set-PowerPlan parses `powercfg /list` output by line shape (GUID,
+  parenthesized name, optional active marker) instead of anchoring on
+  the English "Power Scheme GUID:" label, so it no longer breaks on
+  localized Windows.
+- Convert-DevText no longer hangs on piped/redirected stdin: EOF at the
+  mode picker exits cleanly as "Cancelled", and a mode that needs input
+  fails with a clear error instead of waiting on a Read-Host that can
+  never return.
+- The hardcoded version fallbacks in `DevKit.ps1` and `lib/DevKit-UI.ps1`
+  (used only when the repo-root `VERSION` file is unreadable) still said
+  `3.1.0`; they now read 3.8.0.
+
+## [3.7.0] - 2026-08-02
+
+A persistent companion for the desktop app: a small branded widget that
+keeps your system's vitals and your AI tooling's wiring on screen even after
+DevKit itself is closed.
+
+### Added
+
+- **Companion widget** (`gui/DevKit-Widget.ps1`, launched from the gauge
+  button in the DevKit title bar or the Getting Started page). A compact
+  always-on-top window - CPU, memory, and GPU load with best-effort
+  temperatures (ACPI thermal-zone counter; nvidia-smi when present; every
+  sensor honestly degrades to "n/a" rather than inventing numbers) - plus
+  the running Node.js processes with their listening ports, and any other
+  process squatting on a common dev port.
+- **Project selector** at the top of the widget, bound to the same Active
+  Project the GUI and terminal UI share - changes made in any of the three
+  front-ends show up in the others within seconds.
+- **Expandable Claude Code and Kimi Code boxes**: CLI presence/version plus
+  MCP servers for the user scope and the selected project, each with a
+  status badge - Connected / Disconnected / Requires Auth for Claude (from
+  the documented `claude mcp list` health check, run in a background
+  runspace so the widget never freezes), Configured / Disabled / Requires
+  Auth for Kimi (from its documented `mcp.json` files - Kimi has no headless
+  status command, so the widget says so rather than guessing).
+- **Quick actions**: Clear NPM Cache, Kill All Node, Kill Port..., and
+  Doctor launch the real DevKit tools in terminal windows; Open DevKit
+  brings up the main app.
+- **System-tray presence**: the widget lives in the tray with a dark branded
+  context menu (Show/Hide, Open DevKit, a reversible Start with Windows
+  toggle, Exit), balloon hints, re-registration after an Explorer restart,
+  and a single-instance guard with a summon event - clicking the gauge in
+  DevKit always resurfaces the running widget instead of starting a second
+  one. Closing the widget window only hides it.
+
+## [3.6.0] - 2026-08-02
+
+A branded desktop app for the toolkit - the same twelve manifests, the same
+sixty-plus scripts, now behind a native dark UI themed on the Northstar
+compass-rose logo.
+
+### Added
+
+- **Desktop GUI** (`gui/` + root `DevKit-GUI.bat`). A dependency-free WPF
+  shell (runs on both pwsh 7 and Windows PowerShell 5.1) that renders every
+  tool-category `_module.psd1` as a navigable page of tool cards: grouped
+  category navigation, live search across all tools, linked-project
+  management (link/pin/rename/relink/remove, set/clear active), and
+  validated dialogs for each item's declared inputs (project picker, file
+  picker, typed prompts with min/max checking). Cards flag what a tool needs
+  (`PROJECT`/`FILE`/`INPUT`) and surface a `CAUTION` chip for tools whose
+  help text carries a safety note.
+- **Tools launch in a real terminal window** - Windows Terminal when
+  installed, classic console otherwise, pwsh preferred with a powershell
+  fallback - with `-NoExit` so quick tools' output stays on screen. Every
+  script's existing interactivity (arrow-key menus, gradient banners,
+  spinners, confirmations, dev servers) works byte-for-byte unchanged; the
+  GUI is purely additive and the classic terminal UI (`DevKit.bat`) remains
+  fully supported.
+- **Brand system**: `gui/Theme.xaml` (palette, gradients, and control styles
+  extracted from the company logo - gunmetal backgrounds, brushed-silver
+  title text, sapphire and ember accents) plus committed logo assets
+  (`gui/Assets/`, regenerable via `gui/Build-Assets.ps1`), custom window
+  chrome, and a status bar showing active project, terminal, and version.
+- **Pester coverage for the GUI core** (`tests/Unit/GuiCore.Tests.ps1`):
+  argument-resolution parity with `Invoke-DevKitTool`, shell quoting,
+  terminal command building, and a catalog integrity check that every
+  manifest item points at a script that exists on disk.
+
 ## [3.5.0] - 2026-07-12
 
 A gradient startup banner and spinner engine, in-menu help across every

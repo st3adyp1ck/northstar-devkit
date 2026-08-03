@@ -3,7 +3,7 @@
 .SYNOPSIS
     Pester tests for Get-DevKitPackageManager (lib/DevKit-Common.ps1)
 .DESCRIPTION
-    Verifies package manager detection from lock files (bun.lockb,
+    Verifies package manager detection from lock files (bun.lock / bun.lockb,
     pnpm-lock.yaml, yarn.lock, package-lock.json) and, when no lock file is
     present, from package.json's corepack "packageManager" field.
 #>
@@ -70,10 +70,29 @@ Describe "Get-DevKitPackageManager" {
             $result.Command | Should -Be "bun"
         }
 
+        It "detects bun from bun.lock (the text lockfile bun writes since 1.2)" {
+            $dir = Join-Path $script:TestRoot "bun-text-lock-project"
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            New-Item -ItemType File -Path (Join-Path $dir "bun.lock") -Force | Out-Null
+
+            $result = Get-DevKitPackageManager -Path $dir
+            $result.Command | Should -Be "bun"
+        }
+
         It "prioritizes bun.lockb over other lock files when multiple are present" {
             $dir = Join-Path $script:TestRoot "multi-lock-project"
             New-Item -ItemType Directory -Path $dir -Force | Out-Null
             New-Item -ItemType File -Path (Join-Path $dir "bun.lockb") -Force | Out-Null
+            New-Item -ItemType File -Path (Join-Path $dir "package-lock.json") -Force | Out-Null
+
+            $result = Get-DevKitPackageManager -Path $dir
+            $result.Command | Should -Be "bun"
+        }
+
+        It "prioritizes bun.lock over other lock files when multiple are present" {
+            $dir = Join-Path $script:TestRoot "multi-lock-text-project"
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            New-Item -ItemType File -Path (Join-Path $dir "bun.lock") -Force | Out-Null
             New-Item -ItemType File -Path (Join-Path $dir "package-lock.json") -Force | Out-Null
 
             $result = Get-DevKitPackageManager -Path $dir

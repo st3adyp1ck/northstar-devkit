@@ -46,7 +46,7 @@ Write-DevKitInfo "Package manager: $($manager.Command)"
 if (-not $Force) {
     Write-Host "  WARNING: This will permanently delete:" -ForegroundColor Yellow
     Write-Host "    - node_modules" -ForegroundColor Gray
-    Write-Host "    - package-lock.json, yarn.lock, pnpm-lock.yaml, bun.lockb" -ForegroundColor Gray
+    Write-Host "    - package-lock.json, yarn.lock, pnpm-lock.yaml, bun.lockb, bun.lock" -ForegroundColor Gray
     Write-Host "    - .next, .turbo, and package-manager caches (node_modules\.cache, node_modules\.vite)" -ForegroundColor Gray
     Write-Host ""
     $confirm = Read-Host "  Type 'nuke' to confirm"
@@ -88,8 +88,8 @@ Invoke-DevKitInDirectory -Path $targetPath -ScriptBlock {
     $steps += @{
         Name = "Delete lock files"
         Action = {
-            @("package-lock.json", "yarn.lock", "pnpm-lock.yaml", "bun.lockb") | ForEach-Object {
-                if (Test-Path $_) { Remove-Item -Path $_ -Force }
+            @("package-lock.json", "yarn.lock", "pnpm-lock.yaml", "bun.lockb", "bun.lock") | ForEach-Object {
+                if (Test-Path $_) { Remove-Item -Path $_ -Force -ErrorAction Stop }
             }
         }
     }

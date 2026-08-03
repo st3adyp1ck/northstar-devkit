@@ -7,6 +7,8 @@
     registry key (HKCU), the all-users Run registry key (HKLM, read-only
     unless disabling one), and shortcuts in the current user's and all-users
     Startup folders - and can disable or re-enable a single entry by name.
+    After the report, an interactive run offers to toggle an entry right
+    away; -Disable / -Enable do the same non-interactively.
 
     Disabling is fully reversible and never touches Explorer's internal
     binary "StartupApproved" flag format: a Run value is renamed to
@@ -221,6 +223,30 @@ try {
 
 $allEntries = @($hkcuEntries) + @($hklmEntries) + @($folderEntries)
 
+if (-not $Disable -and -not $Enable) {
+    Show-DevKitStartupSourceGroup -Heading "(a) Current User (HKCU) - Run Registry" -Entries $hkcuEntries
+    Show-DevKitStartupSourceGroup -Heading "(b) All Users (HKLM) - Run Registry" -Entries $hklmEntries
+    Show-DevKitStartupSourceGroup -Heading "(c) Startup Folder Shortcuts (Current User + All Users)" -Entries $folderEntries -ShowScope
+
+    if ([Console]::IsInputRedirected) {
+        Write-DevKitInfo "Use -Disable <Name> / -Enable <Name> to toggle an entry (matched by its visible name)."
+        exit 0
+    }
+    $name = Read-Host "  Entry name to disable or re-enable (Enter to exit)"
+    if (-not $name) {
+        Write-DevKitInfo "No changes made."
+        exit 0
+    }
+    if (@($allEntries | Where-Object { $_.Name -eq $name -and -not $_.Disabled }).Count -gt 0) {
+        $Disable = $name
+    } elseif (@($allEntries | Where-Object { $_.Name -eq $name -and $_.Disabled }).Count -gt 0) {
+        $Enable = $name
+    } else {
+        Write-DevKitError "No startup entry named '$name' was found."
+        exit 1
+    }
+}
+
 if ($Disable) {
     $activeMatches = @($allEntries | Where-Object { $_.Name -eq $Disable -and -not $_.Disabled })
 
@@ -250,14 +276,35 @@ if ($Disable) {
         $target = $activeMatches[[int]$choice - 1]
     }
 
-    if ($target.Source -eq 'HKLM' -and -not (Test-DevKitAdmin)) {
-        Write-DevKitError "Disabling an HKLM (All Users) startup entry requires an elevated (Administrator) session."
+    # Moving an all-users Startup-folder shortcut needs elevation just like
+    # writing the HKLM Run key does.
+    $requiresAdmin = ($target.Source -eq 'HKLM') -or
+        ($target.Source -eq 'StartupFolder' -and $target.Scope -eq 'All Users')
+    if ($requiresAdmin -and -not (Test-DevKitAdmin)) {
+        Write-DevKitError "Disabling an All Users startup entry (HKLM or the common Startup folder) requires an elevated (Administrator) session."
         exit 1
     }
 
     if (-not (Confirm-DevKitDestructiveAction -Action "disable startup entry '$($target.Name)'" -Force:$Force)) {
         Write-DevKitInfo "Cancelled."
         exit 0
+    }
+
+    # A leftover backup under the same name (a DevKitDisabled_* registry
+    # value, or a same-named .lnk in the Disabled folder) must never be
+    # silently overwritten - abort this entry instead.
+    if ($target.Source -eq 'StartupFolder') {
+        $collisionPath = Join-Path (Join-Path (Split-Path -Parent $target.StartupFolder) "Disabled") (Split-Path -Leaf $target.ShortcutPath)
+        if (Test-Path -LiteralPath $collisionPath) {
+            Write-DevKitError "A disabled copy already exists at '$collisionPath' - refusing to overwrite it. Rename or remove it first."
+            exit 1
+        }
+    } else {
+        $backupValueName = "DevKitDisabled_$($target.ValueName)"
+        if (Get-ItemProperty -Path $target.RegistryPath -Name $backupValueName -ErrorAction SilentlyContinue) {
+            Write-DevKitError "A disabled backup value '$backupValueName' already exists under $($target.RegistryPath) - refusing to overwrite it. Rename or remove it first."
+            exit 1
+        }
     }
 
     Write-DevKitStep "Disabling '$($target.Name)'"
@@ -314,8 +361,12 @@ if ($Enable) {
         $target = $disabledMatches[[int]$choice - 1]
     }
 
-    if ($target.Source -eq 'HKLM' -and -not (Test-DevKitAdmin)) {
-        Write-DevKitError "Enabling an HKLM (All Users) startup entry requires an elevated (Administrator) session."
+    # Moving an all-users Startup-folder shortcut needs elevation just like
+    # writing the HKLM Run key does.
+    $requiresAdmin = ($target.Source -eq 'HKLM') -or
+        ($target.Source -eq 'StartupFolder' -and $target.Scope -eq 'All Users')
+    if ($requiresAdmin -and -not (Test-DevKitAdmin)) {
+        Write-DevKitError "Enabling an All Users startup entry (HKLM or the common Startup folder) requires an elevated (Administrator) session."
         exit 1
     }
 
@@ -325,6 +376,22 @@ if ($Enable) {
     }
 
     Write-DevKitStep "Enabling '$($target.Name)'"
+    # Mirror of the disable path's collision guard: if the app re-created its
+    # active entry after it was disabled (auto-updaters do this), restoring
+    # the older backup over the newer value/shortcut would silently destroy
+    # current state - abort instead.
+    if ($target.Source -eq 'StartupFolder') {
+        $restorePath = Join-Path $target.StartupFolder (Split-Path -Leaf $target.ShortcutPath)
+        if (Test-Path -LiteralPath $restorePath) {
+            Write-DevKitError "An active shortcut already exists at '$restorePath' - refusing to overwrite it with the older disabled copy. Remove the newer one first if you really want the backup back."
+            exit 1
+        }
+    } else {
+        if (Get-ItemProperty -Path $target.RegistryPath -Name $target.Name -ErrorAction SilentlyContinue) {
+            Write-DevKitError "An active value '$($target.Name)' already exists under $($target.RegistryPath) - refusing to overwrite it with the older disabled backup. Remove the newer one first if you really want the backup back."
+            exit 1
+        }
+    }
     try {
         if ($target.Source -eq 'StartupFolder') {
             $destination = Join-Path $target.StartupFolder (Split-Path -Leaf $target.ShortcutPath)
@@ -344,9 +411,4 @@ if ($Enable) {
     exit 0
 }
 
-Show-DevKitStartupSourceGroup -Heading "(a) Current User (HKCU) - Run Registry" -Entries $hkcuEntries
-Show-DevKitStartupSourceGroup -Heading "(b) All Users (HKLM) - Run Registry" -Entries $hklmEntries
-Show-DevKitStartupSourceGroup -Heading "(c) Startup Folder Shortcuts (Current User + All Users)" -Entries $folderEntries -ShowScope
-
-Write-DevKitInfo "Use -Disable <Name> / -Enable <Name> to toggle an entry (matched by its visible name)."
 exit 0

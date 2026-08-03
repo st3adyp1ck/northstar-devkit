@@ -23,3 +23,6 @@ desktop.ini
 env-backup-*.json
 devinfo-*.json
 .env
+
+# AI agent scratch/probe artifacts (test fixtures, screenshots, throwaway repos)
+.kimi/

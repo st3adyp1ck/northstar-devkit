@@ -352,6 +352,22 @@ foreach ($tool in $installed) {
     $currentDisplay = if ($current) { $current } else { 'unknown' }
     $latestDisplay = if ($latest) { $latest } else { 'unavailable (network?)' }
     $updateAvailable = ($current -and $latest -and $current -ne $latest)
+    if ($updateAvailable) {
+        # A bare string inequality treats ANY difference as an update -
+        # including a NEWER local build (e.g. current 2.0.0 vs npm latest
+        # 1.9.9), which would "update" = downgrade via npm install -g
+        # PACKAGE@latest. When both sides parse as [version], only a
+        # strictly-greater remote counts; if either side is unparsable
+        # (e.g. a prerelease tag), keep the string-inequality result.
+        try {
+            $currentVersion = [version]$current
+            $latestVersion = [version]$latest
+            $updateAvailable = ($latestVersion -gt $currentVersion)
+        } catch {
+            # Unparsable version on one or both sides - fall back to the
+            # original string-inequality behavior.
+        }
+    }
 
     # Defensive check (Test-DevKitAiCliVersionMismatch, above): treating a
     # version mismatch as a genuine "update" would risk npm-installing an

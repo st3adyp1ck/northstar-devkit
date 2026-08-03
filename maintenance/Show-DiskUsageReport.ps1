@@ -27,6 +27,11 @@ if (Test-Path $CommonModule) { . $CommonModule }
 
 Write-DevKitHeader "Disk Usage Report"
 
+if ($Top -lt 1) {
+    Write-DevKitError "Top must be a positive number."
+    exit 1
+}
+
 function Format-DevKitByteSize {
     param([Parameter(Mandatory = $true)][double]$Bytes)
     if ($Bytes -ge 1GB) { return "{0:N2} GB" -f ($Bytes / 1GB) }

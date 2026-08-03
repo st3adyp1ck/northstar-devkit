@@ -6,7 +6,9 @@
     Lists Windows power plans (via powercfg /list) with the active plan
     clearly marked, switches the active plan by name, and can unlock the
     hidden "Ultimate Performance" plan. Listing requires no admin rights;
-    unlocking Ultimate Performance does.
+    unlocking Ultimate Performance does. After the list, an interactive run
+    offers to switch plans right away (by number or name); -SetPlan does the
+    same non-interactively.
 
     Created by Northstar Software Development
     Website: https://www.northstarcoding.com
@@ -49,7 +51,11 @@ function Get-DevKitPowerPlanList {
 
     $plans = @()
     foreach ($line in $output) {
-        if ($line -match '^Power Scheme GUID:\s*([0-9a-fA-F-]{36})\s*\((.*?)\)\s*(\*)?\s*$') {
+        # Match the line SHAPE (guid + parenthesized name + optional active
+        # marker), not the label: powercfg /list is localized, so an anchor
+        # on the English "Power Scheme GUID:" kills the whole tool on
+        # non-English Windows.
+        if ($line -match '([0-9a-fA-F-]{36})\s*\((.*?)\)\s*(\*)?\s*$') {
             $plans += [PSCustomObject]@{
                 Guid   = $matches[1]
                 Name   = $matches[2]
@@ -112,6 +118,44 @@ if ($UnlockUltimate) {
     exit 0
 }
 
+# Set only when the interactive pick below is a number: the pick already
+# uniquely identifies a plan, so its GUID is carried through and the -SetPlan
+# block never re-matches by name (a -like on the name can hit "matches more
+# than one" when duplicate-similar plan names exist).
+$setPlanGuid = $null
+if (-not $SetPlan) {
+    try {
+        $plans = Get-DevKitPowerPlanList
+    } catch {
+        Write-DevKitError "$_"
+        exit 1
+    }
+
+    Show-DevKitPowerPlanTable -Plans $plans
+
+    if ([Console]::IsInputRedirected) {
+        Write-DevKitInfo "Use -SetPlan <name> to switch the active plan."
+        exit 0
+    }
+    if ($plans.Count -eq 0) { exit 0 }
+    $choice = Read-Host "  Plan to switch to (number or name, Enter to exit)"
+    if (-not $choice) {
+        Write-DevKitInfo "No changes made."
+        exit 0
+    }
+    if ($choice -match '^\d+$') {
+        $index = [int]$choice
+        if ($index -lt 1 -or $index -gt $plans.Count) {
+            Write-DevKitError "No plan number $choice - pick a number from 1 to $($plans.Count)."
+            exit 1
+        }
+        $setPlanGuid = $plans[$index - 1].Guid
+        $SetPlan = $plans[$index - 1].Name
+    } else {
+        $SetPlan = $choice
+    }
+}
+
 if ($SetPlan) {
     try {
         $plans = Get-DevKitPowerPlanList
@@ -120,7 +164,12 @@ if ($SetPlan) {
         exit 1
     }
 
-    $matched = @($plans | Where-Object { $_.Name -like "*$SetPlan*" })
+    if ($setPlanGuid) {
+        # Picked by number interactively - match the exact GUID, never the name.
+        $matched = @($plans | Where-Object { $_.Guid -eq $setPlanGuid })
+    } else {
+        $matched = @($plans | Where-Object { $_.Name -like "*$SetPlan*" })
+    }
 
     if ($matched.Count -eq 0) {
         Write-DevKitError "No power plan matches '$SetPlan'."
@@ -156,12 +205,4 @@ if ($SetPlan) {
     exit 0
 }
 
-try {
-    $plans = Get-DevKitPowerPlanList
-} catch {
-    Write-DevKitError "$_"
-    exit 1
-}
-
-Show-DevKitPowerPlanTable -Plans $plans
 exit 0

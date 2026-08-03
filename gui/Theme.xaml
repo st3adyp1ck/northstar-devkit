@@ -1,0 +1,1243 @@
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!--
+        Northstar DevKit - brand theme.
+        Palette extracted from the company logo (Futuristic Metallic Compass
+        Rose): gunmetal/steel body on black, a glowing sapphire-blue core,
+        and ember-orange accents. Loaded by DevKit-GUI.ps1 and
+        DevKit-Widget.ps1 into Application.Resources before any window XAML
+        is parsed (the Application is created first) - application scope is
+        what lets the keyless styles reach template-generated scrollbars,
+        popups, and dialog windows. No pack URIs, no compiled app.
+    -->
+
+    <!-- ==================== BRUSHES ==================== -->
+
+    <SolidColorBrush x:Key="BrushWindowBg" Color="#0A0D12"/>
+    <SolidColorBrush x:Key="BrushPanelBg" Color="#10151D"/>
+    <SolidColorBrush x:Key="BrushNavBg" Color="#0C1017"/>
+    <SolidColorBrush x:Key="BrushNavHover" Color="#151D29"/>
+    <SolidColorBrush x:Key="BrushNavSelectedBg" Color="#16202E"/>
+    <SolidColorBrush x:Key="BrushStatusBg" Color="#0B0F16"/>
+    <SolidColorBrush x:Key="BrushSeparator" Color="#1D2634"/>
+    <SolidColorBrush x:Key="BrushWindowBorder" Color="#232C3C"/>
+
+    <SolidColorBrush x:Key="BrushTextBright" Color="#E9EEF6"/>
+    <SolidColorBrush x:Key="BrushTextMuted" Color="#96A1B3"/>
+    <SolidColorBrush x:Key="BrushTextSteel" Color="#8E99AB"/>
+    <SolidColorBrush x:Key="BrushTextDim" Color="#5D6878"/>
+
+    <SolidColorBrush x:Key="BrushAccentBlue" Color="#4FA3FF"/>
+    <SolidColorBrush x:Key="BrushAccentBlueGlow" Color="#79C0FF"/>
+    <SolidColorBrush x:Key="BrushAccentEmber" Color="#FF6B3D"/>
+    <SolidColorBrush x:Key="BrushAccentEmberDeep" Color="#D94F2B"/>
+    <!-- Genuine red for destructive actions (node-kill button) - distinct from
+         the amber BrushWarning/BrushGitTag and orange BrushAccentEmber, which
+         both read as "caution", not "destructive". Tuned for contrast against
+         BrushCardBg's #1A2230-#141B27 dark gradient. -->
+    <SolidColorBrush x:Key="BrushDangerRed" Color="#F0454F"/>
+
+    <SolidColorBrush x:Key="BrushInputBg" Color="#0D1219"/>
+    <SolidColorBrush x:Key="BrushInputBorder" Color="#2B3547"/>
+
+    <SolidColorBrush x:Key="BrushScrollThumb" Color="#2B3547"/>
+    <SolidColorBrush x:Key="BrushScrollThumbHover" Color="#3A4657"/>
+
+    <SolidColorBrush x:Key="BrushChipBg" Color="#1B2534"/>
+    <SolidColorBrush x:Key="BrushCautionBg" Color="#2A1A12"/>
+
+    <!-- Card body: subtle vertical gunmetal gradient, lighter on hover. -->
+    <LinearGradientBrush x:Key="BrushCardBg" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#1A2230" Offset="0"/>
+        <GradientStop Color="#141B27" Offset="1"/>
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="BrushCardBgHover" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#1E2735" Offset="0"/>
+        <GradientStop Color="#161E2B" Offset="1"/>
+    </LinearGradientBrush>
+    <SolidColorBrush x:Key="BrushCardBorder" Color="#2B3547"/>
+    <SolidColorBrush x:Key="BrushCardBorderHover" Color="#4FA3FF"/>
+
+    <!-- Sapphire run-button gradients. -->
+    <LinearGradientBrush x:Key="BrushButtonGradient" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#4FA3FF" Offset="0"/>
+        <GradientStop Color="#2E7DD1" Offset="1"/>
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="BrushButtonGradientHover" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#79C0FF" Offset="0"/>
+        <GradientStop Color="#3E8FE0" Offset="1"/>
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="BrushButtonGradientPressed" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#2E7DD1" Offset="0"/>
+        <GradientStop Color="#22619F" Offset="1"/>
+    </LinearGradientBrush>
+
+    <!-- The logo's duality: sapphire core to ember rim, used for accent strips. -->
+    <LinearGradientBrush x:Key="BrushAccentGradient" StartPoint="0,0" EndPoint="1,0">
+        <GradientStop Color="#4FA3FF" Offset="0"/>
+        <GradientStop Color="#FF6B3D" Offset="1"/>
+    </LinearGradientBrush>
+
+    <!-- Brushed-silver title text. -->
+    <LinearGradientBrush x:Key="BrushMetalGradient" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#F4F7FB" Offset="0"/>
+        <GradientStop Color="#AAB4C4" Offset="1"/>
+    </LinearGradientBrush>
+
+    <!-- ==================== SEMANTIC TOKENS ==================== -->
+
+    <!-- Status/feedback semantics: a bright fg accent plus a matching dark
+         surface per state, a git-tag accent, and shared interaction-state
+         fills (popup background, pressed states). Consumed by the styles
+         below and by code-behind via FindResource. -->
+    <SolidColorBrush x:Key="BrushSuccess" Color="#3EDD8F"/>
+    <SolidColorBrush x:Key="BrushSuccessSurface" Color="#12261E"/>
+    <SolidColorBrush x:Key="BrushWarning" Color="#FFB020"/>
+    <SolidColorBrush x:Key="BrushWarningSurface" Color="#2A2110"/>
+    <SolidColorBrush x:Key="BrushInfoSurface" Color="#122C3D"/>
+    <SolidColorBrush x:Key="BrushEmberSurface" Color="#2A1A12"/>
+    <SolidColorBrush x:Key="BrushGitTag" Color="#FFB020"/>
+    <SolidColorBrush x:Key="BrushPopupBg" Color="#141B26"/>
+    <SolidColorBrush x:Key="BrushPressedBg" Color="#232E42"/>
+    <SolidColorBrush x:Key="BrushAccentEmberPressed" Color="#B03D20"/>
+
+    <!-- ==================== FOCUS VISUAL ==================== -->
+
+    <!-- One shared keyboard-focus ring for interactive controls - the
+         default dotted rectangle clashes with the dark theme. Referenced
+         via FocusVisualStyle on the button/nav/combobox styles below. -->
+    <Style x:Key="DevKitFocusVisual"><Setter Property="Control.Template"><Setter.Value><ControlTemplate><Border BorderBrush="{StaticResource BrushAccentBlueGlow}" BorderThickness="1.5" CornerRadius="6" Margin="-3" SnapsToDevicePixels="True"/></ControlTemplate></Setter.Value></Setter></Style>
+
+    <!-- ==================== WINDOW / TYPOGRAPHY ==================== -->
+
+    <Style x:Key="RootWindow" TargetType="Border">
+        <Setter Property="Background" Value="{StaticResource BrushWindowBg}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource BrushWindowBorder}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="10"/>
+        <Setter Property="Margin" Value="12"/>
+        <Setter Property="Effect">
+            <Setter.Value>
+                <DropShadowEffect Color="#000000" Opacity="0.55" BlurRadius="28" ShadowDepth="0"/>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="PageTitleText" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource BrushMetalGradient}"/>
+        <Setter Property="FontSize" Value="24"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
+
+    <Style x:Key="PageDescriptionText" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource BrushTextMuted}"/>
+        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="TextWrapping" Value="Wrap"/>
+        <Setter Property="LineHeight" Value="19"/>
+    </Style>
+
+    <Style x:Key="GroupTitle" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource BrushTextSteel}"/>
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
+
+    <Style x:Key="StatusText" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource BrushTextDim}"/>
+        <Setter Property="FontSize" Value="11.5"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+    </Style>
+
+    <!-- ==================== WINDOW CHROME BUTTONS ==================== -->
+
+    <Style x:Key="ChromeButton" TargetType="Button">
+        <Setter Property="Width" Value="40"/>
+        <Setter Property="Height" Value="28"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="Foreground" Value="{StaticResource BrushTextMuted}"/>
+        <Setter Property="FontFamily" Value="Segoe MDL2 Assets"/>
+        <Setter Property="FontSize" Value="10"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="FocusVisualStyle" Value="{StaticResource DevKitFocusVisual}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <!-- Bd's Background is a plain (not TemplateBound) SolidColorBrush so
+                         IsMouseOver can ColorAnimate its Color sub-property via
+                         Trigger.EnterActions/ExitActions. It IS frozen-and-shared across
+                         every button using this template, same as any Style/Template
+                         Freezable - but a Storyboard begun through EnterActions/
+                         ExitActions clones a frozen target into a fresh per-button
+                         instance the first time it animates it (verified empirically;
+                         see the longer note above ToolCardBorderBrush), so each button's
+                         hover state is fully independent despite the sharing. IsPressed
+                         still swaps the whole Background reference via a plain Setter
+                         (now explicitly TargetName="Bd" since Bd no longer forwards the
+                         Button's own Background property) - a full brush-object swap
+                         doesn't touch the hover animation's held Color, so it can stay
+                         instant for tactile, no-lag press feedback. -->
+                    <Border x:Name="Bd" CornerRadius="5">
+                        <Border.Background>
+                            <SolidColorBrush Color="Transparent"/>
+                        </Border.Background>
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter Property="Foreground" Value="{StaticResource BrushTextBright}"/>
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <ColorAnimation Storyboard.TargetName="Bd" Storyboard.TargetProperty="Background.Color" To="#1A2230" Duration="0:0:0.12"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <ColorAnimation Storyboard.TargetName="Bd" Storyboard.TargetProperty="Background.Color" To="Transparent" Duration="0:0:0.12"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter Property="Background" TargetName="Bd" Value="{StaticResource BrushPressedBg}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.45"/>
+                            <Setter Property="Cursor" Value="Arrow"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="ChromeCloseButton" TargetType="Button" BasedOn="{StaticResource ChromeButton}">
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Bd" CornerRadius="5">
+                        <Border.Background>
+                            <SolidColorBrush Color="Transparent"/>
+                        </Border.Background>
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter Property="Foreground" Value="#FFFFFF"/>
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <ColorAnimation Storyboard.TargetName="Bd" Storyboard.TargetProperty="Background.Color" To="#D94F2B" Duration="0:0:0.12"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <ColorAnimation Storyboard.TargetName="Bd" Storyboard.TargetProperty="Background.Color" To="Transparent" Duration="0:0:0.12"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter Property="Background" TargetName="Bd" Value="{StaticResource BrushAccentEmberPressed}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- ==================== GIT PULL-TAB (GLASS TAB) ==================== -->
+
+    <!-- BtnGitTab lives in its own dedicated Auto column at the TRUE outer
+         edge of the window (see DevKit-Widget.xaml root grid + Set-
+         DevKitWidgetDock) - it reads as a small frosted tab protruding from
+         the window's edge, rounded only on the outer corners so it lines up
+         with the rounded-corner language RootWindow uses elsewhere. Two
+         keyed variants (West/East) because the corner radius mirrors:
+         West sits at the window's left edge (rounded left corners), East at
+         the right edge (rounded right corners) - Set-DevKitWidgetDock swaps
+         the Style alongside the column/alignment toggle. Same EnterActions/
+         ExitActions ColorAnimation technique as ChromeButton, just animating
+         a semi-transparent frosted brush instead of a fully-transparent one. -->
+    <Style x:Key="GitTabButtonWest" TargetType="Button" BasedOn="{StaticResource ChromeButton}">
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Bd" CornerRadius="6,0,0,6" BorderThickness="1,1,0,1"
+                            BorderBrush="{StaticResource BrushCardBorder}">
+                        <Border.Background>
+                            <SolidColorBrush Color="#1FFFFFFF"/>
+                        </Border.Background>
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter Property="Foreground" Value="{StaticResource BrushTextBright}"/>
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <ColorAnimation Storyboard.TargetName="Bd" Storyboard.TargetProperty="Background.Color" To="#332B4F7F" Duration="0:0:0.12"/>
+                                        <ColorAnimation Storyboard.TargetName="Bd" Storyboard.TargetProperty="BorderBrush.Color" To="#4FA3FF" Duration="0:0:0.12"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <ColorAnimation Storyboard.TargetName="Bd" Storyboard.TargetProperty="Background.Color" To="#1FFFFFFF" Duration="0:0:0.12"/>
+                                        <ColorAnimation Storyboard.TargetName="Bd" Storyboard.TargetProperty="BorderBrush.Color" To="#2B3547" Duration="0:0:0.12"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter Property="Background" TargetName="Bd" Value="{StaticResource BrushPressedBg}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.45"/>
+                            <Setter Property="Cursor" Value="Arrow"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="GitTabButtonEast" TargetType="Button" BasedOn="{StaticResource ChromeButton}">
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Bd" CornerRadius="0,6,6,0" BorderThickness="0,1,1,1"
+                            BorderBrush="{StaticResource BrushCardBorder}">
+                        <Border.Background>
+                            <SolidColorBrush Color="#1FFFFFFF"/>
+                        </Border.Background>
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter Property="Foreground" Value="{StaticResource BrushTextBright}"/>
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <ColorAnimation Storyboard.TargetName="Bd" Storyboard.TargetProperty="Background.Color" To="#332B4F7F" Duration="0:0:0.12"/>
+                                        <ColorAnimation Storyboard.TargetName="Bd" Storyboard.TargetProperty="BorderBrush.Color" To="#4FA3FF" Duration="0:0:0.12"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <ColorAnimation Storyboard.TargetName="Bd" Storyboard.TargetProperty="Background.Color" To="#1FFFFFFF" Duration="0:0:0.12"/>
+                                        <ColorAnimation Storyboard.TargetName="Bd" Storyboard.TargetProperty="BorderBrush.Color" To="#2B3547" Duration="0:0:0.12"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter Property="Background" TargetName="Bd" Value="{StaticResource BrushPressedBg}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.45"/>
+                            <Setter Property="Cursor" Value="Arrow"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- ==================== LEFT NAV ==================== -->
+
+    <Style x:Key="NavHeader" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource BrushTextDim}"/>
+        <Setter Property="FontSize" Value="10.5"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Margin" Value="16,18,12,6"/>
+    </Style>
+
+    <!-- RadioButton reused as mutually-exclusive nav item. -->
+    <Style x:Key="NavRadioButton" TargetType="RadioButton">
+        <Setter Property="Foreground" Value="{StaticResource BrushTextMuted}"/>
+        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+        <Setter Property="FocusVisualStyle" Value="{StaticResource DevKitFocusVisual}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RadioButton">
+                    <Border x:Name="Bd" Background="Transparent" CornerRadius="6" Margin="8,1,8,1">
+                        <Grid>
+                            <Border x:Name="AccentBar" Width="3" HorizontalAlignment="Left"
+                                    Background="{StaticResource BrushAccentBlue}" CornerRadius="2"
+                                    Margin="4,8,0,8" Visibility="Collapsed"/>
+                            <ContentPresenter Margin="14,8,10,8" VerticalAlignment="Center"/>
+                        </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter Property="Background" TargetName="Bd" Value="{StaticResource BrushNavHover}"/>
+                            <Setter Property="Foreground" Value="{StaticResource BrushTextBright}"/>
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter Property="Background" TargetName="Bd" Value="{StaticResource BrushNavSelectedBg}"/>
+                            <Setter Property="Foreground" Value="{StaticResource BrushTextBright}"/>
+                            <Setter Property="FontWeight" Value="SemiBold"/>
+                            <Setter Property="Visibility" TargetName="AccentBar" Value="Visible"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- ==================== TOOL CARDS ==================== -->
+
+    <!-- Per-card animation seeds. NOTE on how this is safe to animate despite
+         being one shared Style applied to many cards (including ones
+         DevKit-GUI.ps1 creates dynamically at runtime for its tool catalog):
+         x:Shared="False" would be the textbook fix for "give every consumer
+         its own unfrozen clone", but it only works in COMPILED (BAML)
+         resource dictionaries - DevKit loads all XAML at runtime via
+         XamlReader (see file header), where x:Shared throws a
+         XamlParseException outright, and was tried and rejected here.
+         Empirically verified instead (see scratch probes from this change):
+         the Setter-assigned brush/transform below DOES get frozen and shared
+         across every Border using this Style, same as compiled XAML - BUT a
+         Storyboard begun via Trigger.EnterActions/ExitActions (unlike a
+         direct BeginAnimation() call on the retrieved object) transparently
+         clones a frozen Freezable into a fresh per-target instance the first
+         time it animates a compound TargetProperty path (e.g.
+         "BorderBrush.Color", or the nested TransformGroup path below) against
+         a specific element - confirmed with 2 live Borders sharing this
+         Style: animating one leaves the other's brush/transform completely
+         untouched (still frozen, still the original shared object). That
+         clone-on-first-animate behavior is what makes the Style.Triggers
+         below safe. -->
+    <SolidColorBrush x:Key="ToolCardBorderBrush" Color="#2B3547"/>
+    <TransformGroup x:Key="ToolCardHoverTransform">
+        <ScaleTransform ScaleX="1" ScaleY="1"/>
+        <TranslateTransform X="0" Y="0"/>
+    </TransformGroup>
+
+    <Style x:Key="ToolCard" TargetType="Border">
+        <Setter Property="Background" Value="{StaticResource BrushCardBg}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource ToolCardBorderBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="8"/>
+        <Setter Property="Padding" Value="16,13,16,13"/>
+        <Setter Property="Margin" Value="0,0,0,10"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="RenderTransform" Value="{StaticResource ToolCardHoverTransform}"/>
+        <Setter Property="RenderTransformOrigin" Value="0.5,0.5"/>
+        <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <!-- Background swap stays an instant Setter (BrushCardBgHover is a
+                     2-stop gradient; animating it isn't worth the extra complexity
+                     for a barely-perceptible fill shift) - the border color glow and
+                     the lift are the parts that actually read as "hover" here, so
+                     those are the ones eased in. -->
+                <Setter Property="Background" Value="{StaticResource BrushCardBgHover}"/>
+                <Trigger.EnterActions>
+                    <BeginStoryboard>
+                        <Storyboard>
+                            <ColorAnimation Storyboard.TargetProperty="BorderBrush.Color" To="#4FA3FF" Duration="0:0:0.15"/>
+                            <DoubleAnimation Storyboard.TargetProperty="RenderTransform.(TransformGroup.Children)[0].(ScaleTransform.ScaleX)" To="1.01" Duration="0:0:0.15"/>
+                            <DoubleAnimation Storyboard.TargetProperty="RenderTransform.(TransformGroup.Children)[0].(ScaleTransform.ScaleY)" To="1.01" Duration="0:0:0.15"/>
+                            <DoubleAnimation Storyboard.TargetProperty="RenderTransform.(TransformGroup.Children)[1].(TranslateTransform.Y)" To="-1" Duration="0:0:0.15"/>
+                        </Storyboard>
+                    </BeginStoryboard>
+                </Trigger.EnterActions>
+                <Trigger.ExitActions>
+                    <BeginStoryboard>
+                        <Storyboard>
+                            <ColorAnimation Storyboard.TargetProperty="BorderBrush.Color" To="#2B3547" Duration="0:0:0.15"/>
+                            <DoubleAnimation Storyboard.TargetProperty="RenderTransform.(TransformGroup.Children)[0].(ScaleTransform.ScaleX)" To="1" Duration="0:0:0.15"/>
+                            <DoubleAnimation Storyboard.TargetProperty="RenderTransform.(TransformGroup.Children)[0].(ScaleTransform.ScaleY)" To="1" Duration="0:0:0.15"/>
+                            <DoubleAnimation Storyboard.TargetProperty="RenderTransform.(TransformGroup.Children)[1].(TranslateTransform.Y)" To="0" Duration="0:0:0.15"/>
+                        </Storyboard>
+                    </BeginStoryboard>
+                </Trigger.ExitActions>
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <Style x:Key="CardTitle" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource BrushTextBright}"/>
+        <Setter Property="FontSize" Value="14"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
+
+    <Style x:Key="CardSubtitle" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource BrushTextMuted}"/>
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="TextWrapping" Value="Wrap"/>
+        <Setter Property="LineHeight" Value="17"/>
+        <Setter Property="Margin" Value="0,6,0,0"/>
+    </Style>
+
+    <Style x:Key="TagChip" TargetType="Border">
+        <Setter Property="Background" Value="{StaticResource BrushChipBg}"/>
+        <Setter Property="CornerRadius" Value="8"/>
+        <Setter Property="Padding" Value="8,2"/>
+        <Setter Property="Margin" Value="0,0,6,0"/>
+    </Style>
+
+    <Style x:Key="TagChipText" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource BrushTextSteel}"/>
+        <Setter Property="FontSize" Value="10"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
+
+    <Style x:Key="CautionChip" TargetType="Border">
+        <Setter Property="Background" Value="{StaticResource BrushEmberSurface}"/>
+        <Setter Property="CornerRadius" Value="8"/>
+        <Setter Property="Padding" Value="8,2"/>
+        <Setter Property="Margin" Value="0,0,6,0"/>
+    </Style>
+
+    <Style x:Key="CautionChipText" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource BrushAccentEmber}"/>
+        <Setter Property="FontSize" Value="10"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
+
+    <!-- ==================== BUTTONS ==================== -->
+
+    <Style x:Key="AccentButton" TargetType="Button">
+        <Setter Property="Background" Value="{StaticResource BrushButtonGradient}"/>
+        <Setter Property="Foreground" Value="#FFFFFF"/>
+        <Setter Property="FontSize" Value="12.5"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Padding" Value="18,7"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="FocusVisualStyle" Value="{StaticResource DevKitFocusVisual}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <!-- Bd's Background is a plain 2-stop gradient with named stops (not
+                         TemplateBound), so hover can ColorAnimate each stop's Color
+                         independently instead of swapping the whole gradient object -
+                         EnterActions/ExitActions clone the shared/frozen gradient (and
+                         its stops) into a per-button instance on first animate, same as
+                         ChromeButton above. IsPressed still swaps the whole Background
+                         reference to a distinct resource via a plain Setter
+                         (TargetName="Bd", since Bd no longer forwards the Button's own
+                         Background) - a full-object swap doesn't touch the hover
+                         animation's held per-stop Color, and keeps press feedback
+                         instant/tactile. -->
+                    <Border x:Name="Bd" CornerRadius="6" Padding="{TemplateBinding Padding}">
+                        <Border.Background>
+                            <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                <GradientStop x:Name="GradStopTop" Color="#4FA3FF" Offset="0"/>
+                                <GradientStop x:Name="GradStopBottom" Color="#2E7DD1" Offset="1"/>
+                            </LinearGradientBrush>
+                        </Border.Background>
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <ColorAnimation Storyboard.TargetName="GradStopTop" Storyboard.TargetProperty="Color" To="#79C0FF" Duration="0:0:0.12"/>
+                                        <ColorAnimation Storyboard.TargetName="GradStopBottom" Storyboard.TargetProperty="Color" To="#3E8FE0" Duration="0:0:0.12"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <ColorAnimation Storyboard.TargetName="GradStopTop" Storyboard.TargetProperty="Color" To="#4FA3FF" Duration="0:0:0.12"/>
+                                        <ColorAnimation Storyboard.TargetName="GradStopBottom" Storyboard.TargetProperty="Color" To="#2E7DD1" Duration="0:0:0.12"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter Property="Background" TargetName="Bd" Value="{StaticResource BrushButtonGradientPressed}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.45"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="PrimaryButton" TargetType="Button" BasedOn="{StaticResource AccentButton}">
+        <Setter Property="Padding" Value="22,8"/>
+    </Style>
+
+    <Style x:Key="GhostButton" TargetType="Button">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="Foreground" Value="{StaticResource BrushTextMuted}"/>
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="Padding" Value="14,6"/>
+        <Setter Property="BorderBrush" Value="{StaticResource BrushCardBorder}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="FocusVisualStyle" Value="{StaticResource DevKitFocusVisual}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <!-- Bd's Background/BorderBrush are plain SolidColorBrushes (not
+                         TemplateBindings), so IsMouseOver can ColorAnimate their Color
+                         sub-properties - EnterActions/ExitActions clone the shared/
+                         frozen brush into a per-button instance on first animate, same
+                         as ChromeButton above. BorderThickness/Padding stay
+                         TemplateBindings -
+                         nothing animates those, and callers do vary them per-instance
+                         (see BtnEnvFix/BtnRefreshMcp etc.). IsPressed still swaps the
+                         whole Background reference to a distinct resource via a plain
+                         Setter (TargetName="Bd") for instant, tactile press feedback. -->
+                    <Border x:Name="Bd"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="6" Padding="{TemplateBinding Padding}">
+                        <Border.Background>
+                            <SolidColorBrush Color="Transparent"/>
+                        </Border.Background>
+                        <Border.BorderBrush>
+                            <SolidColorBrush Color="#2B3547"/>
+                        </Border.BorderBrush>
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter Property="Foreground" Value="{StaticResource BrushTextBright}"/>
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <ColorAnimation Storyboard.TargetName="Bd" Storyboard.TargetProperty="Background.Color" To="#151D29" Duration="0:0:0.12"/>
+                                        <ColorAnimation Storyboard.TargetName="Bd" Storyboard.TargetProperty="BorderBrush.Color" To="#3A4657" Duration="0:0:0.12"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <ColorAnimation Storyboard.TargetName="Bd" Storyboard.TargetProperty="Background.Color" To="Transparent" Duration="0:0:0.12"/>
+                                        <ColorAnimation Storyboard.TargetName="Bd" Storyboard.TargetProperty="BorderBrush.Color" To="#2B3547" Duration="0:0:0.12"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter Property="Background" TargetName="Bd" Value="{StaticResource BrushChipBg}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.45"/>
+                            <Setter Property="Cursor" Value="Arrow"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="DangerButton" TargetType="Button" BasedOn="{StaticResource GhostButton}">
+        <Setter Property="Foreground" Value="{StaticResource BrushAccentEmber}"/>
+        <Setter Property="BorderBrush" Value="#8A3A24"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Bd"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="6" Padding="{TemplateBinding Padding}">
+                        <Border.Background>
+                            <SolidColorBrush Color="Transparent"/>
+                        </Border.Background>
+                        <Border.BorderBrush>
+                            <SolidColorBrush Color="#8A3A24"/>
+                        </Border.BorderBrush>
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <ColorAnimation Storyboard.TargetName="Bd" Storyboard.TargetProperty="Background.Color" To="#2A1712" Duration="0:0:0.12"/>
+                                        <ColorAnimation Storyboard.TargetName="Bd" Storyboard.TargetProperty="BorderBrush.Color" To="#FF6B3D" Duration="0:0:0.12"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <ColorAnimation Storyboard.TargetName="Bd" Storyboard.TargetProperty="Background.Color" To="Transparent" Duration="0:0:0.12"/>
+                                        <ColorAnimation Storyboard.TargetName="Bd" Storyboard.TargetProperty="BorderBrush.Color" To="#8A3A24" Duration="0:0:0.12"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter Property="Background" TargetName="Bd" Value="#3A1E15"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.45"/>
+                            <Setter Property="Cursor" Value="Arrow"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- ==================== INPUTS ==================== -->
+
+    <Style x:Key="SearchBox" TargetType="TextBox">
+        <Setter Property="Background" Value="{StaticResource BrushInputBg}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource BrushInputBorder}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Foreground" Value="{StaticResource BrushTextBright}"/>
+        <Setter Property="CaretBrush" Value="{StaticResource BrushAccentBlue}"/>
+        <Setter Property="SelectionBrush" Value="{StaticResource BrushAccentBlue}"/>
+        <Setter Property="SelectionOpacity" Value="0.35"/>
+        <Setter Property="FontSize" Value="12.5"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="TextBox">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="6">
+                        <ScrollViewer x:Name="PART_ContentHost" Margin="10,0,8,0" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter Property="BorderBrush" Value="{StaticResource BrushAccentBlue}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="InputBox" TargetType="TextBox" BasedOn="{StaticResource SearchBox}"/>
+
+    <Style x:Key="SearchWatermark" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource BrushTextDim}"/>
+        <Setter Property="FontSize" Value="12.5"/>
+        <Setter Property="IsHitTestVisible" Value="False"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+        <Setter Property="Margin" Value="11,0,0,0"/>
+    </Style>
+
+    <!-- ==================== SCROLLBARS / TOOLTIPS / MISC ==================== -->
+
+    <Style TargetType="ScrollBar">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="Width" Value="10"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ScrollBar">
+                    <Grid Background="Transparent">
+                        <Track x:Name="PART_Track" IsDirectionReversed="True">
+                            <Track.Thumb>
+                                <Thumb Margin="2">
+                                    <Thumb.Template>
+                                        <ControlTemplate TargetType="Thumb">
+                                            <Border x:Name="ThumbBd" Background="{StaticResource BrushScrollThumb}" CornerRadius="5"/>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter Property="Background" TargetName="ThumbBd" Value="{StaticResource BrushScrollThumbHover}"/>
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </Thumb.Template>
+                                </Thumb>
+                            </Track.Thumb>
+                        </Track>
+                    </Grid>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+        <Style.Triggers>
+            <Trigger Property="Orientation" Value="Horizontal">
+                <Setter Property="Height" Value="10"/>
+                <Setter Property="Width" Value="Auto"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="ScrollBar">
+                            <Grid Background="Transparent">
+                                <Track x:Name="PART_Track">
+                                    <Track.Thumb>
+                                        <Thumb Margin="2">
+                                            <Thumb.Template>
+                                                <ControlTemplate TargetType="Thumb">
+                                                    <Border x:Name="ThumbBd" Background="{StaticResource BrushScrollThumb}" CornerRadius="5"/>
+                                                    <ControlTemplate.Triggers>
+                                                        <Trigger Property="IsMouseOver" Value="True">
+                                                            <Setter Property="Background" TargetName="ThumbBd" Value="{StaticResource BrushScrollThumbHover}"/>
+                                                        </Trigger>
+                                                    </ControlTemplate.Triggers>
+                                                </ControlTemplate>
+                                            </Thumb.Template>
+                                        </Thumb>
+                                    </Track.Thumb>
+                                </Track>
+                            </Grid>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <Style TargetType="ToolTip">
+        <Setter Property="Background" Value="{StaticResource BrushPopupBg}"/>
+        <Setter Property="Foreground" Value="{StaticResource BrushTextMuted}"/>
+        <Setter Property="MaxWidth" Value="420"/>
+        <Setter Property="TextBlock.TextWrapping" Value="Wrap"/>
+        <Setter Property="BorderBrush" Value="{StaticResource BrushCardBorder}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Padding" Value="10,7"/>
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToolTip">
+                    <Border Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="6" Padding="{TemplateBinding Padding}">
+                        <Border.Effect>
+                            <DropShadowEffect Color="#000000" Opacity="0.4" BlurRadius="12" ShadowDepth="0"/>
+                        </Border.Effect>
+                        <ContentPresenter/>
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style TargetType="CheckBox">
+        <Setter Property="Foreground" Value="{StaticResource BrushTextBright}"/>
+        <Setter Property="FontSize" Value="12.5"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="CheckBox">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Border x:Name="Box" Width="17" Height="17" CornerRadius="4"
+                                Background="{StaticResource BrushInputBg}"
+                                BorderBrush="{StaticResource BrushInputBorder}" BorderThickness="1"
+                                VerticalAlignment="Center">
+                            <TextBlock x:Name="Mark" Text="&#x2713;" Foreground="{StaticResource BrushAccentBlue}"
+                                       FontSize="12" FontWeight="Bold" Visibility="Collapsed"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ContentPresenter Grid.Column="1" Margin="9,0,0,0" VerticalAlignment="Center"/>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter Property="Visibility" TargetName="Mark" Value="Visible"/>
+                            <Setter Property="BorderBrush" TargetName="Box" Value="{StaticResource BrushAccentBlue}"/>
+                        </Trigger>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter Property="BorderBrush" TargetName="Box" Value="#3A4657"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="ThinSeparator" TargetType="Border">
+        <Setter Property="Height" Value="1"/>
+        <Setter Property="Background" Value="{StaticResource BrushSeparator}"/>
+        <Setter Property="Margin" Value="12,10,12,4"/>
+    </Style>
+
+    <Style x:Key="ResizeGripDots" TargetType="ResizeGrip">
+        <Setter Property="Width" Value="14"/>
+        <Setter Property="Height" Value="14"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ResizeGrip">
+                    <Path Data="M0,12 L12,0 M4,12 L12,4 M8,12 L12,8" Stroke="#3A4657" StrokeThickness="1.5"/>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- ==================== WIDGET: COMBOBOX / EXPANDER / METRICS / BADGES ==================== -->
+
+    <Style TargetType="ComboBox">
+        <Setter Property="FocusVisualStyle" Value="{StaticResource DevKitFocusVisual}"/>
+        <Setter Property="Background" Value="{StaticResource BrushInputBg}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource BrushInputBorder}"/>
+        <Setter Property="Foreground" Value="{StaticResource BrushTextBright}"/>
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="Height" Value="30"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ComboBox">
+                    <Grid>
+                        <ToggleButton x:Name="ToggleButton" ClickMode="Press"
+                                      Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                      IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}"
+                                      Focusable="False">
+                            <ToggleButton.Template>
+                                <ControlTemplate TargetType="ToggleButton">
+                                    <Border x:Name="Bd" Background="{TemplateBinding Background}"
+                                            BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1"
+                                            CornerRadius="6">
+                                        <Grid>
+                                            <ContentPresenter Margin="10,0,24,0" VerticalAlignment="Center"
+                                                              Content="{TemplateBinding Content}"
+                                                              ContentTemplate="{TemplateBinding ContentTemplate}"/>
+                                            <TextBlock Text="&#x25BE;" Foreground="{StaticResource BrushTextMuted}"
+                                                       FontSize="10" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                       Margin="0,0,9,0" IsHitTestVisible="False"/>
+                                        </Grid>
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter Property="BorderBrush" Value="#3A4657"/>
+                                        </Trigger>
+                                        <Trigger Property="IsChecked" Value="True">
+                                            <Setter Property="BorderBrush" Value="{StaticResource BrushAccentBlue}"/>
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </ToggleButton.Template>
+                        </ToggleButton>
+                        <TextBox x:Name="PART_EditableTextBox" Visibility="Collapsed" IsReadOnly="True"/>
+                        <ContentPresenter x:Name="ContentSite" Margin="10,0,24,0" VerticalAlignment="Center"
+                                          IsHitTestVisible="False"
+                                          Content="{TemplateBinding SelectionBoxItem}"
+                                          ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"/>
+                        <Popup x:Name="Popup" Placement="Bottom" AllowsTransparency="True" Focusable="False"
+                               IsOpen="{TemplateBinding IsDropDownOpen}" PopupAnimation="Slide">
+                            <Border Background="{StaticResource BrushPopupBg}" BorderBrush="{StaticResource BrushCardBorder}"
+                                    BorderThickness="1" CornerRadius="6" Margin="0,4,0,0"
+                                    MinWidth="{TemplateBinding ActualWidth}"
+                                    MaxHeight="{TemplateBinding MaxDropDownHeight}">
+                                <Border.Effect>
+                                    <DropShadowEffect Color="#000000" Opacity="0.5" BlurRadius="14" ShadowDepth="0"/>
+                                </Border.Effect>
+                                <ScrollViewer CanContentScroll="True" VerticalScrollBarVisibility="Auto">
+                                    <ItemsPresenter/>
+                                </ScrollViewer>
+                            </Border>
+                        </Popup>
+                    </Grid>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+        <Style.Triggers>
+            <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.45"/>
+                <Setter Property="Cursor" Value="Arrow"/>
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <Style TargetType="ComboBoxItem">
+        <Setter Property="Foreground" Value="{StaticResource BrushTextMuted}"/>
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="Padding" Value="10,7"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ComboBoxItem">
+                    <Border x:Name="Bd" Background="Transparent" Padding="{TemplateBinding Padding}" CornerRadius="4" Margin="2,1">
+                        <ContentPresenter VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter Property="Background" TargetName="Bd" Value="{StaticResource BrushNavHover}"/>
+                            <Setter Property="Foreground" Value="{StaticResource BrushTextBright}"/>
+                        </Trigger>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter Property="Background" TargetName="Bd" Value="{StaticResource BrushNavSelectedBg}"/>
+                            <Setter Property="Foreground" Value="{StaticResource BrushTextBright}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style TargetType="Expander">
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Expander">
+                    <Border Background="{StaticResource BrushCardBg}" BorderBrush="{StaticResource BrushCardBorder}"
+                            BorderThickness="1" CornerRadius="8" SnapsToDevicePixels="True">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <!-- Content/ContentTemplate must be forwarded explicitly: a raw
+                                 ContentPresenter inside the ToggleButton's template presents the
+                                 ToggleButton's own (empty) Content, not the Expander's Header,
+                                 which left the section titles invisible. -->
+                            <ToggleButton x:Name="HeaderButton" IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}"
+                                          Content="{TemplateBinding Header}"
+                                          ContentTemplate="{TemplateBinding HeaderTemplate}"
+                                          Cursor="Hand">
+                                <ToggleButton.Template>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <Border x:Name="Hd" Background="Transparent" Padding="12,9" CornerRadius="8">
+                                            <Grid>
+                                                <ContentPresenter VerticalAlignment="Center" Margin="0,0,20,0"/>
+                                                <TextBlock x:Name="Chev" Text="&#x25BE;" Foreground="{StaticResource BrushTextDim}"
+                                                           FontSize="10" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                            </Grid>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter Property="Background" TargetName="Hd" Value="#1A2230"/>
+                                            </Trigger>
+                                            <Trigger Property="IsChecked" Value="True">
+                                                <Setter Property="Text" TargetName="Chev" Value="&#x25B4;"/>
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </ToggleButton.Template>
+                            </ToggleButton>
+                            <!-- Fade+unfold instead of an instant Visibility snap: WPF can't
+                                 animate Visibility or an Auto Height directly, so ExpandSite
+                                 grows from the top via ScaleY (RenderTransformOrigin "0.5,0")
+                                 while fading in/out. Visibility itself is still toggled - via
+                                 a DiscreteObjectKeyFrame inside each Storyboard rather than an
+                                 instant Trigger - so it flips to Visible at the START of the
+                                 expand animation (content must be laid out to fade in) and to
+                                 Collapsed only at the END of the collapse animation (so the
+                                 fade-out is actually seen before the space closes up). -->
+                            <ContentPresenter Grid.Row="1" x:Name="ExpandSite" Visibility="Collapsed" Opacity="0"
+                                              Margin="12,0,12,11" RenderTransformOrigin="0.5,0">
+                                <ContentPresenter.RenderTransform>
+                                    <ScaleTransform ScaleY="0"/>
+                                </ContentPresenter.RenderTransform>
+                            </ContentPresenter>
+                        </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <EventTrigger RoutedEvent="Expander.Expanded">
+                            <BeginStoryboard>
+                                <Storyboard>
+                                    <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ExpandSite" Storyboard.TargetProperty="Visibility">
+                                        <DiscreteObjectKeyFrame KeyTime="0:0:0" Value="{x:Static Visibility.Visible}"/>
+                                    </ObjectAnimationUsingKeyFrames>
+                                    <DoubleAnimation Storyboard.TargetName="ExpandSite" Storyboard.TargetProperty="Opacity"
+                                                      From="0" To="1" Duration="0:0:0.2">
+                                        <DoubleAnimation.EasingFunction>
+                                            <QuadraticEase EasingMode="EaseOut"/>
+                                        </DoubleAnimation.EasingFunction>
+                                    </DoubleAnimation>
+                                    <DoubleAnimation Storyboard.TargetName="ExpandSite" Storyboard.TargetProperty="RenderTransform.ScaleY"
+                                                      From="0" To="1" Duration="0:0:0.2">
+                                        <DoubleAnimation.EasingFunction>
+                                            <QuadraticEase EasingMode="EaseOut"/>
+                                        </DoubleAnimation.EasingFunction>
+                                    </DoubleAnimation>
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </EventTrigger>
+                        <EventTrigger RoutedEvent="Expander.Collapsed">
+                            <BeginStoryboard>
+                                <Storyboard>
+                                    <DoubleAnimation Storyboard.TargetName="ExpandSite" Storyboard.TargetProperty="Opacity"
+                                                      From="1" To="0" Duration="0:0:0.15">
+                                        <DoubleAnimation.EasingFunction>
+                                            <QuadraticEase EasingMode="EaseIn"/>
+                                        </DoubleAnimation.EasingFunction>
+                                    </DoubleAnimation>
+                                    <DoubleAnimation Storyboard.TargetName="ExpandSite" Storyboard.TargetProperty="RenderTransform.ScaleY"
+                                                      From="1" To="0" Duration="0:0:0.15">
+                                        <DoubleAnimation.EasingFunction>
+                                            <QuadraticEase EasingMode="EaseIn"/>
+                                        </DoubleAnimation.EasingFunction>
+                                    </DoubleAnimation>
+                                    <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ExpandSite" Storyboard.TargetProperty="Visibility">
+                                        <DiscreteObjectKeyFrame KeyTime="0:0:0.15" Value="{x:Static Visibility.Collapsed}"/>
+                                    </ObjectAnimationUsingKeyFrames>
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </EventTrigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style TargetType="ProgressBar">
+        <Setter Property="Height" Value="6"/>
+        <Setter Property="Minimum" Value="0"/>
+        <Setter Property="Maximum" Value="100"/>
+        <Setter Property="Foreground" Value="{StaticResource BrushButtonGradient}"/>
+        <Setter Property="Background" Value="#0D1219"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ProgressBar">
+                    <Grid>
+                        <Border x:Name="PART_Track" Background="{TemplateBinding Background}" CornerRadius="3"/>
+                        <Border x:Name="PART_Indicator" Background="{TemplateBinding Foreground}"
+                                CornerRadius="3" HorizontalAlignment="Left"/>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <!-- An indeterminate ProgressBar never sizes PART_Indicator,
+                             which collapsed this template's bar to zero width; stretch
+                             it into a full-width dim wash over the track instead. -->
+                        <Trigger Property="IsIndeterminate" Value="True">
+                            <Setter Property="HorizontalAlignment" TargetName="PART_Indicator" Value="Stretch"/>
+                            <Setter Property="Opacity" TargetName="PART_Indicator" Value="0.35"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Status badges (border + matching text style per state). -->
+    <Style x:Key="BadgeConnected" TargetType="Border">
+        <Setter Property="Background" Value="#122C3D"/>
+        <Setter Property="CornerRadius" Value="8"/>
+        <Setter Property="Padding" Value="7,1"/>
+    </Style>
+    <Style x:Key="BadgeConnectedText" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource BrushAccentBlueGlow}"/>
+        <Setter Property="FontSize" Value="9.5"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
+    <Style x:Key="BadgeDisconnected" TargetType="Border">
+        <Setter Property="Background" Value="#1B2029"/>
+        <Setter Property="CornerRadius" Value="8"/>
+        <Setter Property="Padding" Value="7,1"/>
+    </Style>
+    <Style x:Key="BadgeDisconnectedText" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="#6B7686"/>
+        <Setter Property="FontSize" Value="9.5"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
+    <Style x:Key="BadgeAuth" TargetType="Border">
+        <Setter Property="Background" Value="{StaticResource BrushEmberSurface}"/>
+        <Setter Property="CornerRadius" Value="8"/>
+        <Setter Property="Padding" Value="7,1"/>
+    </Style>
+    <Style x:Key="BadgeAuthText" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource BrushAccentEmber}"/>
+        <Setter Property="FontSize" Value="9.5"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
+    <Style x:Key="BadgeSuccess" TargetType="Border">
+        <Setter Property="Background" Value="{StaticResource BrushSuccessSurface}"/>
+        <Setter Property="CornerRadius" Value="8"/>
+        <Setter Property="Padding" Value="7,1"/>
+    </Style>
+    <Style x:Key="BadgeSuccessText" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource BrushSuccess}"/>
+        <Setter Property="FontSize" Value="9.5"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
+    <Style x:Key="BadgeWarning" TargetType="Border">
+        <Setter Property="Background" Value="{StaticResource BrushWarningSurface}"/>
+        <Setter Property="CornerRadius" Value="8"/>
+        <Setter Property="Padding" Value="7,1"/>
+    </Style>
+    <Style x:Key="BadgeWarningText" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource BrushWarning}"/>
+        <Setter Property="FontSize" Value="9.5"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
+    <Style x:Key="BadgeNeutral" TargetType="Border">
+        <Setter Property="Background" Value="{StaticResource BrushChipBg}"/>
+        <Setter Property="CornerRadius" Value="8"/>
+        <Setter Property="Padding" Value="7,1"/>
+    </Style>
+    <Style x:Key="BadgeNeutralText" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource BrushTextSteel}"/>
+        <Setter Property="FontSize" Value="9.5"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
+
+    <!-- Widget radial gauges: dim track ring + glowing value arc. -->
+    <SolidColorBrush x:Key="BrushGaugeTrack" Color="#2B3547"/>
+    <LinearGradientBrush x:Key="BrushGaugeArc" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#79C0FF" Offset="0"/>
+        <GradientStop Color="#2E7DD1" Offset="1"/>
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="BrushGaugeArcHot" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#FF8A5C" Offset="0"/>
+        <GradientStop Color="#D94F2B" Offset="1"/>
+    </LinearGradientBrush>
+
+    <Style x:Key="WidgetGaugeValue" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource BrushTextBright}"/>
+        <Setter Property="FontSize" Value="15"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="HorizontalAlignment" Value="Center"/>
+    </Style>
+    <Style x:Key="WidgetGaugeSub" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource BrushTextDim}"/>
+        <Setter Property="FontSize" Value="9"/>
+        <Setter Property="HorizontalAlignment" Value="Center"/>
+        <!-- Sub now sits below the gauge ring as a sibling (not inside it) for
+             CPU/MEM/GPU and the dynamically-built Disk gauges, so it needs top
+             clearance from the ring as well as the label below it - a few px
+             on each side keeps it from looking glued to either neighbor. Only
+             the static SYSTEM JUNK gauge still nests this inside its ring; the
+             small top margin reads fine there too. -->
+        <Setter Property="Margin" Value="0,3,0,3"/>
+    </Style>
+    <Style x:Key="WidgetGaugeLabel" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource BrushTextSteel}"/>
+        <Setter Property="FontSize" Value="10.5"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="HorizontalAlignment" Value="Center"/>
+    </Style>
+
+    <!-- Widget expander headers: readable title + always-visible subtitle. -->
+    <Style x:Key="WidgetExpanderTitle" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource BrushTextBright}"/>
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+    </Style>
+    <Style x:Key="WidgetExpanderSub" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource BrushTextDim}"/>
+        <Setter Property="FontSize" Value="9.5"/>
+        <Setter Property="Margin" Value="0,2,0,0"/>
+        <Setter Property="TextWrapping" Value="Wrap"/>
+    </Style>
+
+    <!-- Widget text roles. -->
+    <Style x:Key="WidgetSectionHeader" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource BrushTextDim}"/>
+        <Setter Property="FontSize" Value="10"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
+    <Style x:Key="WidgetMetricLabel" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource BrushTextSteel}"/>
+        <Setter Property="FontSize" Value="11"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+    </Style>
+    <Style x:Key="WidgetMetricValue" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource BrushTextBright}"/>
+        <Setter Property="FontSize" Value="11"/>
+        <Setter Property="HorizontalAlignment" Value="Right"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+    </Style>
+    <Style x:Key="WidgetRowText" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource BrushTextMuted}"/>
+        <Setter Property="FontSize" Value="11"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+    </Style>
+
+</ResourceDictionary>

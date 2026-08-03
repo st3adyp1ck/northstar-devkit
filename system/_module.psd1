@@ -6,7 +6,7 @@
             Key    = '1'
             Label  = 'Edit PATH Variable'
             Script = 'Edit-Path.ps1'
-            Help   = "Interactive and flag-driven editor for the User or Machine PATH environment variable, with duplicate- and missing-path detection. Use -Show for a read-only report of the current PATH; -Add/-Remove/-Clean (or the [A]/[R]/[C] options in the interactive menu you get by running it with no flags) write PATH for real via [Environment]::SetEnvironmentVariable. Editing Machine PATH requires Administrator privileges - the script offers to relaunch itself elevated if it isn't. Safety note: -Add, -Remove, -Clean, and their interactive equivalents each prompt with a y/n confirmation showing exactly what will change before writing, unless -Force is passed; -Show never mutates anything."
+            Help   = "Interactive and flag-driven editor for the User or Machine PATH environment variable, with duplicate- and missing-path detection. Use -Show for a read-only report of the current PATH; -Add/-Remove/-Clean (or the [A]/[R]/[C] options in the interactive menu you get by running it with no flags) write PATH for real via [Environment]::SetEnvironmentVariable. Editing Machine PATH requires Administrator privileges - the script offers to relaunch itself elevated if it isn't. Safety note: -Remove and -Clean (and their interactive equivalents) each prompt with a y/n confirmation showing exactly what will change before writing, unless -Force is passed; -Add writes immediately (additive, low-risk); -Show never mutates anything."
         }
         @{
             Key             = '2'
@@ -33,6 +33,13 @@
             Label  = 'Shell Reload (refresh env)'
             Script = 'Shell-Reload.ps1'
             Help   = "Refreshes this PowerShell session's environment variables from the registry and re-dot-sources your PowerShell profile scripts, without closing the terminal. -Full also merges every current User and Machine variable into the session, not just PATH and a short common list (TEMP/TMP/HOME/USERPROFILE/JAVA_HOME/NODE_PATH/PYTHONPATH/GOPATH); -ProfileOnly skips the environment refresh and only reloads profiles; -ShowDiff prints which variables changed as a result. Only affects this running session's in-memory environment - it never calls SetEnvironmentVariable, so there's nothing to confirm."
+        }
+        @{
+            Key        = '5'
+            Label      = 'Edit Hosts File'
+            Script     = 'Edit-HostsFile.ps1'
+            Help       = "View, add, remove, and comment-toggle entries in the Windows hosts file (%windir%\System32\drivers\etc\hosts). Use -Show (or the menu's default listing) for a read-only numbered report showing each entry's IP, hostnames, and commented state; run with no flags for an interactive [A]dd/[R]emove/[T]oggle/[Q]uit menu, or -Add ""ip hostname..."" / -Remove / -Toggle (by listing index or hostname pattern) for scripted changes. Use this to map local dev domains (e.g. 127.0.0.1 mysite.local) without opening Notepad as admin. Safety note: every mutation requires Administrator privileges (the script offers to relaunch itself elevated), is gated by the shared confirmation prompt unless -Force is passed, creates a timestamped backup under %LOCALAPPDATA%\NorthstarDevKit\hosts-backups\ before the first write of a session, writes the file back as plain ASCII preserving all comments and ordering, and clears the DNS client cache afterward. -Show never mutates anything. This menu item runs with -Show, so opening it from the DevKit menu gives the read-only listing without requiring admin elevation."
+            StaticArgs = @{ Show = $true }
         }
     )
 }

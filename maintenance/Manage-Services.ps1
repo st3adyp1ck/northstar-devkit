@@ -7,7 +7,9 @@
     commonly-tuned, non-critical Windows services, and can change one
     service's startup type. Reporting requires no admin rights; changing a
     startup type does. The report is informational only - it does not
-    recommend disabling anything.
+    recommend disabling anything. After the report, an interactive run
+    offers to change a service right away; -SetStartType with
+    -StartTypeValue does the same non-interactively.
 
     Created by Northstar Software Development
     Website: https://www.northstarcoding.com
@@ -47,6 +49,51 @@ $curatedServices = @(
     @{ Name = 'SysMain'; Label = 'Superfetch / Prefetch (SysMain)' }
 )
 
+if (-not $SetStartType -and -not $StartTypeValue) {
+    Write-Host "  Informational only. Some of these services (e.g. Windows Search, SysMain)" -ForegroundColor Yellow
+    Write-Host "  are genuinely useful for many users - whether to disable any of them is a" -ForegroundColor Yellow
+    Write-Host "  personal call based on your own usage, not a blanket recommendation." -ForegroundColor Yellow
+    Write-Host ""
+
+    Write-Host ("  {0,-16} {1,-42} {2,-11} {3}" -f "ServiceName", "Description", "StartType", "Status") -ForegroundColor Magenta
+    Write-Host ("  {0,-16} {1,-42} {2,-11} {3}" -f "-----------", "-----------", "---------", "------") -ForegroundColor Magenta
+
+    $listed = 0
+    foreach ($svc in $curatedServices) {
+        $service = $null
+        try {
+            $service = Get-Service -Name $svc.Name -ErrorAction Stop
+        } catch {
+            continue
+        }
+        $listed++
+        Write-Host ("  {0,-16} {1,-42} {2,-11} {3}" -f $service.Name, $svc.Label, $service.StartType, $service.Status) -ForegroundColor Gray
+    }
+
+    Write-Host ""
+    if ($listed -eq 0) {
+        Write-DevKitInfo "None of the curated services exist on this machine."
+        exit 0
+    }
+    if ([Console]::IsInputRedirected) {
+        Write-DevKitInfo "$listed of $($curatedServices.Count) curated service(s) found. Use -SetStartType <Name> -StartTypeValue <Automatic|Manual|Disabled> to change one."
+        exit 0
+    }
+    Write-DevKitInfo "$listed of $($curatedServices.Count) curated service(s) found."
+    $name = Read-Host "  Service name to change (Enter to exit)"
+    if (-not $name) {
+        Write-DevKitInfo "No changes made."
+        exit 0
+    }
+    $type = Read-Host "  Startup type for '$name' (Automatic/Manual/Disabled)"
+    if ($type -notin @('Automatic', 'Manual', 'Disabled')) {
+        Write-DevKitError "Invalid startup type '$type'. Expected Automatic, Manual, or Disabled."
+        exit 1
+    }
+    $SetStartType = $name
+    $StartTypeValue = $type
+}
+
 if ($SetStartType -and $StartTypeValue) {
     if (-not (Test-DevKitAdmin)) {
         Write-DevKitError "Changing a service's startup type requires an elevated (Administrator) session."
@@ -82,33 +129,6 @@ if ($SetStartType -and $StartTypeValue) {
 } elseif ($SetStartType -or $StartTypeValue) {
     Write-DevKitError "-SetStartType and -StartTypeValue must be used together."
     exit 1
-}
-
-Write-Host "  Informational only. Some of these services (e.g. Windows Search, SysMain)" -ForegroundColor Yellow
-Write-Host "  are genuinely useful for many users - whether to disable any of them is a" -ForegroundColor Yellow
-Write-Host "  personal call based on your own usage, not a blanket recommendation." -ForegroundColor Yellow
-Write-Host ""
-
-Write-Host ("  {0,-16} {1,-42} {2,-11} {3}" -f "ServiceName", "Description", "StartType", "Status") -ForegroundColor Magenta
-Write-Host ("  {0,-16} {1,-42} {2,-11} {3}" -f "-----------", "-----------", "---------", "------") -ForegroundColor Magenta
-
-$listed = 0
-foreach ($svc in $curatedServices) {
-    $service = $null
-    try {
-        $service = Get-Service -Name $svc.Name -ErrorAction Stop
-    } catch {
-        continue
-    }
-    $listed++
-    Write-Host ("  {0,-16} {1,-42} {2,-11} {3}" -f $service.Name, $svc.Label, $service.StartType, $service.Status) -ForegroundColor Gray
-}
-
-Write-Host ""
-if ($listed -eq 0) {
-    Write-DevKitInfo "None of the curated services exist on this machine."
-} else {
-    Write-DevKitInfo "$listed of $($curatedServices.Count) curated service(s) found. Use -SetStartType <Name> -StartTypeValue <Automatic|Manual|Disabled> to change one."
 }
 
 exit 0

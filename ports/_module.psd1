@@ -52,5 +52,20 @@
                 @{ Name = 'Port'; Type = 'Int'; Prompt = 'Enter port number'; Min = 1; Max = 65535; InvalidMessage = 'Invalid port number.' }
             )
         }
+        @{
+            Key    = '7'
+            Label  = 'Show Reserved Port Ranges (Hyper-V/winnat)'
+            Script = 'Show-ExcludedPortRanges.ps1'
+            Help   = "Lists the TCP port ranges Windows has reserved for Hyper-V/winnat ('netsh interface ipv4 show excludedportrange protocol=tcp') and flags which common dev ports fall inside one. Check this first when a dev server fails to bind with EACCES / WinError 10013 even though nothing is listening on the port. Fully read-only - a netsh 'show' command needs no admin and changes nothing. The script also supports '-Port N' directly to test a single port (exit 0 = free, 1 = reserved) for use in other scripts."
+        }
+        @{
+            Key     = '8'
+            Label   = 'Test Dev Endpoint (HTTP Health)'
+            Script  = 'Test-DevEndpoint.ps1'
+            Help    = "HTTP health check. Enter a URL to send it a HEAD request (falls back to GET when the server answers 405/501) and see the status code, latency, final URL after redirects, and - for https URLs - the TLS certificate's days-until-expiry (yellow under 30 days, red under 7). Leave the URL blank to instead probe http://localhost:<port> for every common dev port currently listening. Read-only - only network calls to localhost or the URL you enter; every request failure is reported as a clean 'not responding', never a crash."
+            Prompts = @(
+                @{ Name = 'Url'; Type = 'String'; Prompt = 'Enter URL to test (blank = scan listening dev ports)'; Optional = $true }
+            )
+        }
     )
 }

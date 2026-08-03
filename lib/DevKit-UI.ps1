@@ -16,7 +16,7 @@
     Created by Northstar Software Development
     Website: https://www.northstarcoding.com
 .VERSION
-    3.1.0
+    3.8.0
 #>
 
 # Prevent double-loading
@@ -26,38 +26,18 @@ $global:DevKitUiLoaded = $true
 # One-time native interop for a real Windows Console API probe (GetStdHandle
 # + GetConsoleMode + SetConsoleMode) confirming ENABLE_VIRTUAL_TERMINAL_
 # PROCESSING can actually be turned on for the current stdout handle, rather
-# than assuming truecolor support from the PowerShell version alone. Guarded
-# by -as [type] (Add-Type -TypeDefinition throws "type already exists" on a
-# second compile in the same process) combined with the file's own
-# $global:DevKitUiLoaded guard above - mirrors lib/DevKit-Common.ps1's
-# 'DevKit.NativeMethods' pattern exactly so re-dot-sourcing this file in the
-# same process never throws.
-if (-not ('DevKit.ConsoleInterop' -as [type])) {
-    Add-Type -TypeDefinition @'
-using System;
-using System.Runtime.InteropServices;
-namespace DevKit {
-    public static class ConsoleInterop {
-        [DllImport("kernel32.dll", SetLastError = true)]
-        public static extern IntPtr GetStdHandle(int nStdHandle);
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        public static extern bool GetConsoleMode(IntPtr hConsoleHandle, out int lpMode);
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        public static extern bool SetConsoleMode(IntPtr hConsoleHandle, int dwMode);
-    }
-}
-'@ -ErrorAction SilentlyContinue
-}
+# than assuming truecolor support from the PowerShell version alone. The
+# compile moved INTO Test-DevKitAnimationSupport: it's needed only when the
+# probe actually runs (the banner/gradient/spinner path), so tool runs that
+# never touch animation no longer pay the C# compile cost at dot-source time.
 
 # ==================== BRAND PALETTE ====================
 
-# Anchored on #00B4D8 - this project's existing brand blue (see README.md's
-# shields.io badges). Extended toward a deeper indigo/blue and a soft cyan
-# for a pleasant left-to-right gradient. Plain ordered array of hex strings
-# so Write-DevKitGradientText can interpolate between adjacent stops.
-$script:DevKitBrandPalette = @('#03045E', '#0077B6', '#00B4D8', '#90E0EF')
+# The logo's duality: deep sapphire ramping through its glowing core blues
+# into the ember-orange rim (the same stops as gui/Theme.xaml's button and
+# accent gradients). Plain ordered array of hex strings so
+# Write-DevKitGradientText can interpolate between adjacent stops.
+$script:DevKitBrandPalette = @('#2E7DD1', '#4FA3FF', '#79C0FF', '#FF6B3D')
 
 # Cached result of Test-DevKitAnimationSupport, computed at most once per
 # session ($null = not yet computed; caching a real $false is done via a
@@ -103,6 +83,27 @@ function Test-DevKitAnimationSupport {
                 $STD_OUTPUT_HANDLE = -11
                 $ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x0004
 
+                # Compiled here, not at dot-source time: only the animation
+                # path needs this type (guarded - one compile per process).
+                if (-not ('DevKit.ConsoleInterop' -as [type])) {
+                    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+namespace DevKit {
+    public static class ConsoleInterop {
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern IntPtr GetStdHandle(int nStdHandle);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool GetConsoleMode(IntPtr hConsoleHandle, out int lpMode);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool SetConsoleMode(IntPtr hConsoleHandle, int dwMode);
+    }
+}
+'@ -ErrorAction SilentlyContinue
+                }
+
                 $handle = [DevKit.ConsoleInterop]::GetStdHandle($STD_OUTPUT_HANDLE)
                 $handleValid = ($handle -ne [IntPtr]::Zero) -and ($handle.ToInt64() -ne -1)
                 if ($handleValid) {
@@ -142,7 +143,7 @@ function Write-DevKitGradientText {
     .PARAMETER Text
         The text to print.
     .EXAMPLE
-        Write-DevKitGradientText -Text "Northstar DevKit v3.1.0"
+        Write-DevKitGradientText -Text "Northstar DevKit v3.8.0"
     #>
     param(
         [Parameter(Mandatory = $true)]
@@ -219,7 +220,7 @@ function Show-DevKitStartupBanner {
     .EXAMPLE
         Show-DevKitStartupBanner
     #>
-    $version = '3.1.0'
+    $version = '3.8.0'
     try {
         $versionFile = Join-Path (Split-Path -Parent $PSScriptRoot) "VERSION"
         if (Test-Path $versionFile) {
@@ -346,8 +347,9 @@ function Invoke-DevKitWithSpinner {
         $frames = @($frameCodes | ForEach-Object { [char]$_ })
 
         $esc = [char]27
-        # Solid brand-anchor color (#00B4D8) for the spinner itself.
-        $colorOn = "$esc[38;2;0;180;216m"
+        # Solid sapphire-glow color (#79C0FF - the logo's core blue) for the
+        # spinner itself.
+        $colorOn = "$esc[38;2;121;192;255m"
         $colorOff = "$esc[0m"
 
         $consoleWidth = 80
@@ -363,6 +365,10 @@ function Invoke-DevKitWithSpinner {
                 $spinnerStarted = $true
                 $frame = $frames[$frameIndex % $frames.Count]
                 $line = "  $frame $Message..."
+                # Surface elapsed time once an op has run a couple of
+                # seconds, so a genuinely long operation doesn't look hung.
+                $elapsedSeconds = [int][Math]::Floor($stopwatch.Elapsed.TotalSeconds)
+                if ($elapsedSeconds -ge 2) { $line += " (${elapsedSeconds}s)" }
                 if ($line.Length -gt $padLen) { $line = $line.Substring(0, $padLen) }
                 Write-Host ([string][char]13 + $colorOn + $line.PadRight($padLen) + $colorOff) -NoNewline
                 $frameIndex++
