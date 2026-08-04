@@ -27,6 +27,15 @@ DevKit/
 │                           # generic, driven by each folder's _module.psd1
 ├── Setup-Path.bat          # Adds DevKit to PATH for global access
 ├── DevKit-GUI.bat          # Desktop GUI launcher (batch wrapper for gui/DevKit-GUI.ps1)
+├── Install.ps1 / .bat      # Portable installer: copies DevKit to a permanent per-user
+│                           # location, adds it to PATH, offers Start Menu/Desktop
+│                           # shortcuts and the two opt-in system/ integrations below.
+│                           # Runs unmodified from either a git clone or a USB/ build.
+├── Build-UsbPortable.ps1 / .bat  # Maintainer tool: mirrors the repo into USB/
+│                           # (gitignored, regenerated on demand) with dev-only
+│                           # clutter stripped (.git/.kimi/.github/tests/editor
+│                           # folders) - the result is what you copy to a flash
+│                           # drive and run Install.ps1 from on another machine.
 ├── VERSION                 # Single source of truth for the version number
 ├── CHANGELOG.md            # Release history
 ├── RELEASING.md            # Maintainer release checklist

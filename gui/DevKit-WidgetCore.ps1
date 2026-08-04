@@ -978,6 +978,165 @@ function Invoke-DevKitGitAction {
     return $result
 }
 
+# ==================== GITHUB PULL REQUESTS / ISSUES ====================
+# Read-only 'gh' CLI queries for the flyout's future PR/Issues panels. This
+# installed gh version has no '-C <path>' flag (only 'gh repo clone -C' takes
+# one), so the working directory is switched with Push-Location instead - the
+# same effect Get-DevKitRepoOverview gets from git's own -C flag.
+
+function ConvertFrom-DevKitGitHubCliError {
+    <#
+    .SYNOPSIS
+        Maps 'gh' stderr text to a friendly widget message instead of a raw
+        CLI dump, distinguishing "no GitHub context here" (not a git repo /
+        no remote / remote isn't GitHub) from a genuine CLI failure (auth,
+        network, rate limit) whose own message is already short enough to
+        surface as-is.
+    #>
+    param([string]$StdErr, [int]$ExitCode)
+    $text = "$StdErr".Trim()
+    if ($text -match '(?i)not a git repository') { return 'Not a git repository.' }
+    if ($text -match '(?i)no git remotes found') { return 'No git remote configured for this project.' }
+    if ($text -match '(?i)none of the git remotes|no known github host') { return 'No GitHub remote found for this project.' }
+    if ($text) { return $text }
+    return "gh failed (exit $ExitCode)."
+}
+
+function Get-DevKitGitHubPullRequests {
+    <#
+    .SYNOPSIS
+        Open GitHub pull requests for a project via 'gh pr list'. Never
+        throws - CLI-not-found, no-repo, no-GitHub-remote, and generic gh
+        failures (auth/network/rate-limit) all come back as a populated
+        result instead of propagating, since this runs in a background
+        runspace where an unhandled exception would silently kill the job.
+    #>
+    param([string]$Path)
+
+    $result = [PSCustomObject]@{
+        CliInstalled = $false
+        IsRepo       = $false
+        ErrorMessage = $null
+        PullRequests = @()
+        Truncated    = $false
+    }
+
+    $gh = Get-DevKitWindowsExecutable -Name 'gh'
+    if (-not $gh) { return $result }
+    $result.CliInstalled = $true
+
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) {
+        $result.ErrorMessage = 'No project selected.'
+        return $result
+    }
+
+    # '--limit' is requested one higher than the display cap so a full page
+    # can be distinguished from "exactly N results" - if gh returns the extra
+    # (N+1)th item, the real count exceeds the cap and the UI must say "N+"
+    # instead of silently showing a number that looks exact.
+    $prDisplayLimit = 50
+    try {
+        Push-Location -LiteralPath $Path
+        try {
+            $out = (& $gh.Source 'pr' 'list' '--json' 'number,title,author,url,isDraft,headRefName,baseRefName,updatedAt,reviewDecision,labels' '--state' 'open' '--limit' ([string]($prDisplayLimit + 1)) 2>&1 | Out-String)
+            $exitCode = $LASTEXITCODE
+        } finally {
+            Pop-Location
+        }
+        if ($exitCode -eq 0) {
+            $result.IsRepo = $true
+            $parsed = $out | ConvertFrom-Json
+            # Windows PowerShell 5.1 parses '[]' into an empty array; pwsh 7
+            # parses it into $null - normalize both to an empty array so the
+            # caller never has to special-case "no PRs" vs "not collected".
+            # NOTE: this must be a plain if/else assignment, not
+            # "$x = if (...) { @() } else { ... }" - an empty array that is
+            # the sole output of an if-EXPRESSION branch gets unrolled to
+            # zero pipeline objects, which silently reassigns $x to $null.
+            if ($null -eq $parsed) {
+                $result.PullRequests = @()
+            } else {
+                $all = @($parsed)
+                if ($all.Count -gt $prDisplayLimit) {
+                    $result.Truncated = $true
+                    $result.PullRequests = @($all[0..($prDisplayLimit - 1)])
+                } else {
+                    $result.PullRequests = $all
+                }
+            }
+        } else {
+            $result.ErrorMessage = ConvertFrom-DevKitGitHubCliError -StdErr $out -ExitCode $exitCode
+        }
+    } catch {
+        $result.ErrorMessage = "$_"
+    }
+    return $result
+}
+
+function Get-DevKitGitHubIssues {
+    <#
+    .SYNOPSIS
+        Open GitHub issues for a project via 'gh issue list'. Same never-
+        throws contract as Get-DevKitGitHubPullRequests. Note: the 'comments'
+        json field is an ARRAY of comment objects (verified empirically
+        against a real repo), not a count - callers wanting a count must use
+        its .Count.
+    #>
+    param([string]$Path)
+
+    $result = [PSCustomObject]@{
+        CliInstalled = $false
+        IsRepo       = $false
+        ErrorMessage = $null
+        Issues       = @()
+        Truncated    = $false
+    }
+
+    $gh = Get-DevKitWindowsExecutable -Name 'gh'
+    if (-not $gh) { return $result }
+    $result.CliInstalled = $true
+
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) {
+        $result.ErrorMessage = 'No project selected.'
+        return $result
+    }
+
+    # See the matching comment in Get-DevKitGitHubPullRequests - requesting
+    # one past the display cap makes an over-the-cap result set detectable.
+    $issueDisplayLimit = 50
+    try {
+        Push-Location -LiteralPath $Path
+        try {
+            $out = (& $gh.Source 'issue' 'list' '--json' 'number,title,author,url,labels,body,comments,updatedAt' '--state' 'open' '--limit' ([string]($issueDisplayLimit + 1)) 2>&1 | Out-String)
+            $exitCode = $LASTEXITCODE
+        } finally {
+            Pop-Location
+        }
+        if ($exitCode -eq 0) {
+            $result.IsRepo = $true
+            $parsed = $out | ConvertFrom-Json
+            # Same PS 5.1 vs pwsh 7 '[]' normalization as the PR fetch above,
+            # and the same reason this is a plain if/else assignment rather
+            # than an if-EXPRESSION (see the comment in the PR fetch above).
+            if ($null -eq $parsed) {
+                $result.Issues = @()
+            } else {
+                $all = @($parsed)
+                if ($all.Count -gt $issueDisplayLimit) {
+                    $result.Truncated = $true
+                    $result.Issues = @($all[0..($issueDisplayLimit - 1)])
+                } else {
+                    $result.Issues = $all
+                }
+            }
+        } else {
+            $result.ErrorMessage = ConvertFrom-DevKitGitHubCliError -StdErr $out -ExitCode $exitCode
+        }
+    } catch {
+        $result.ErrorMessage = "$_"
+    }
+    return $result
+}
 
 # ==================== .ENV DRIFT CHECK ====================
 # Compares a project's .env against its template (.env.example et al.) by KEY
@@ -1065,4 +1224,112 @@ function Get-DevKitEnvDrift {
     } catch {
         return $null
     }
+}
+
+# ==================== PER-PROJECT STICKY NOTES ====================
+# Backing store for the widget's Notes flyout: one JSON file holding every
+# project's little notes/prompts, keyed by a canonical form of the project
+# path. Lives beside settings.json in %LOCALAPPDATA% (user data - survives a
+# DevKit reinstall/upgrade in place). Pure file logic only; all rendering
+# and autosave timing lives in DevKit-Widget.ps1.
+
+function Get-DevKitNotesFile {
+    return Join-Path $env:LOCALAPPDATA 'NorthstarDevKit\notes.json'
+}
+
+function Get-DevKitNotesProjectKey {
+    # One canonical key per project folder - trailing-separator and casing
+    # differences in how the same path was registered must not fork its notes.
+    param([Parameter(Mandatory = $true)][string]$ProjectPath)
+    return $ProjectPath.TrimEnd('\', '/').ToLowerInvariant()
+}
+
+function Get-DevKitProjectNotes {
+    <#
+    .SYNOPSIS
+        Returns one project's saved sticky notes as an array of
+        PSCustomObjects (Id, Text, Color, UpdatedAt), newest first as saved.
+        Empty for a missing file, an unknown project, or a corrupt store.
+        Callers must wrap the call in @(...) - the repo-wide convention -
+        since an empty return unrolls to nothing in a pipeline.
+    #>
+    param(
+        [Parameter(Mandatory = $true)][string]$ProjectPath,
+        [string]$NotesFile
+    )
+    if (-not $NotesFile) { $NotesFile = Get-DevKitNotesFile }
+    if (-not (Test-Path -LiteralPath $NotesFile)) { return @() }
+    $key = Get-DevKitNotesProjectKey -ProjectPath $ProjectPath
+    try {
+        $data = Get-Content -LiteralPath $NotesFile -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        if (-not $data.projects) { return @() }
+        $entry = $data.projects.PSObject.Properties[$key]
+        if (-not $entry) { return @() }
+        $notes = @()
+        foreach ($n in @($entry.Value)) {
+            if ($null -eq $n) { continue }
+            $notes += [PSCustomObject]@{
+                Id        = [string]$n.id
+                Text      = [string]$n.text
+                Color     = [string]$n.color
+                UpdatedAt = [string]$n.updatedAt
+            }
+        }
+        return $notes
+    } catch { return @() }
+}
+
+function Save-DevKitProjectNotes {
+    <#
+    .SYNOPSIS
+        Persists one project's sticky notes - a read-modify-write of the
+        whole store, so every other project's notes are untouched. $Notes is
+        the full replacement list for this project; an empty list removes
+        the project's entry entirely rather than leaving empty stubs behind.
+        A corrupt store is silently rebuilt (same forgiving posture as
+        Get-DevKitSettings) - the notes being saved right now matter more
+        than a file some editor mangled.
+    #>
+    param(
+        [Parameter(Mandatory = $true)][string]$ProjectPath,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][array]$Notes,
+        [string]$NotesFile
+    )
+    if (-not $NotesFile) { $NotesFile = Get-DevKitNotesFile }
+    $key = Get-DevKitNotesProjectKey -ProjectPath $ProjectPath
+
+    $projects = [ordered]@{}
+    if (Test-Path -LiteralPath $NotesFile) {
+        try {
+            $data = Get-Content -LiteralPath $NotesFile -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+            if ($data.projects) {
+                foreach ($p in $data.projects.PSObject.Properties) {
+                    # @(...) so a one-note project stays a JSON ARRAY on the
+                    # way back out - member access unrolls single-element
+                    # arrays, and without this a lone note would round-trip
+                    # into a bare object.
+                    if ($p.Name -ne $key) { $projects[$p.Name] = @($p.Value) }
+                }
+            }
+        } catch { }
+    }
+
+    $list = @()
+    foreach ($n in $Notes) {
+        if ($null -eq $n) { continue }
+        $list += [ordered]@{
+            id        = [string]$n.Id
+            text      = [string]$n.Text
+            color     = [string]$n.Color
+            updatedAt = [string]$n.UpdatedAt
+        }
+    }
+    if ($list.Count -gt 0) { $projects[$key] = $list }
+
+    $dir = Split-Path -Parent $NotesFile
+    if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+    $store = [ordered]@{ schemaVersion = 1; projects = $projects }
+    # -InputObject, not pipeline: piping would unroll and serialize only the
+    # store's properties one at a time instead of the object itself.
+    Set-Content -LiteralPath $NotesFile -Value (ConvertTo-Json -InputObject $store -Depth 6) -Encoding UTF8
 }

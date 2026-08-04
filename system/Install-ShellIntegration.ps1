@@ -18,11 +18,15 @@
 
     Created by Northstar Software Development
     Website: https://www.northstarcoding.com
+.PARAMETER Force
+    Skip the confirmation prompt (used by Install.ps1's -Silent mode).
 .EXAMPLE
     .\Install-ShellIntegration.ps1
 #>
 [CmdletBinding()]
-param()
+param(
+    [switch]$Force
+)
 
 $CommonModule = Join-Path (Join-Path (Split-Path -Parent $PSScriptRoot) "lib") "DevKit-Common.ps1"
 if (Test-Path $CommonModule) { . $CommonModule }
@@ -50,7 +54,7 @@ Write-Host "    $keyPath" -ForegroundColor Gray
 Write-Host "  No administrator privileges are used or required." -ForegroundColor Yellow
 Write-Host ""
 
-if (-not (Confirm-DevKitDestructiveAction -Action "add a right-click 'Open Northstar DevKit Here' entry to the folder background context menu" -AffectedPaths @($keyPath))) {
+if (-not (Confirm-DevKitDestructiveAction -Action "add a right-click 'Open Northstar DevKit Here' entry to the folder background context menu" -AffectedPaths @($keyPath) -Force:$Force)) {
     Write-Host "`n  Cancelled.`n" -ForegroundColor Gray
     exit 0
 }

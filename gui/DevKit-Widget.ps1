@@ -52,6 +52,28 @@
 [CmdletBinding()]
 param()
 
+# Log any terminating startup error to disk before the process disappears.
+# This runs headless (WindowStyle Hidden, no console) both from Start with
+# Windows and from a normal launch, so an uncaught exception here is
+# otherwise completely invisible - the process just vanishes and it LOOKS
+# like a crash with no way to tell why. `trap` (not a wrapping try/catch)
+# is used deliberately: it stays in effect for the WHOLE script from this
+# point on, including the relaunch guards below and everything dot-sourced
+# afterward, without having to indent the entire file inside one big block.
+trap {
+    try {
+        $logDir = Join-Path $env:LOCALAPPDATA "NorthstarDevKit"
+        if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
+        $logPath = Join-Path $logDir "widget-startup.log"
+        $entry = "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] PID=$PID PSEdition=$($PSVersionTable.PSEdition) " +
+                 "$($_.Exception.GetType().FullName): $($_.Exception.Message)`n$($_.InvocationInfo.PositionMessage)`n"
+        Add-Content -LiteralPath $logPath -Value $entry -Encoding UTF8
+    } catch { }
+    # No 'continue': a startup-time terminating error means the process is in
+    # an unknown state, so let it keep propagating and exit rather than try
+    # to soldier on - the log entry above is what matters here.
+}
+
 # WPF requires STA (same guard as DevKit-GUI.ps1).
 if ([Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA') {
     $selfPath = $PSCommandPath
@@ -83,25 +105,94 @@ if ($PSHOME -like '*\WindowsApps\*') {
 # Single instance: a second launch signals the first to surface its window
 # (via a named event) and exits - so launching the widget from DevKit always
 # brings it up, even on shells that hide new tray icons from the overflow.
-$script:SummonEventName = 'Global\NorthstarDevKitCompanionSummon'
+#
+# Local\ (per-session) namespace, not Global\: the widget is a per-desktop
+# tray app, so each signed-in session gets its own instance - a Global\
+# mutex from one session would invisibly veto launches in every other one.
+#
+# The mutex and event are created with an ACL granting authenticated users
+# Synchronize+Modify where the runtime supports it (Windows PowerShell - and
+# the MSIX hop above means that is the usual final host). The default DACL
+# of an elevated process does NOT let a normal-elevation process open its
+# kernel objects, so without this an accidental "Run as administrator"
+# widget turns every later normal launch into a silent no-op: it can
+# neither take the mutex nor summon the owner. With the ACL, summoning
+# works across the elevation boundary (UIPI blocks window messages, not
+# kernel-object signaling); when even opening the mutex is denied, the
+# blocked branch below says so out loud instead of just vanishing.
+$script:InstanceMutexName = 'Local\NorthstarDevKitCompanion'
+$script:SummonEventName = 'Local\NorthstarDevKitCompanionSummon'
+$authUsersSid = New-Object System.Security.Principal.SecurityIdentifier([System.Security.Principal.WellKnownSidType]::AuthenticatedUserSid, $null)
 $script:InstanceMutex = $null
 $mutexCreated = $false
+$mutexBlocked = $false
 try {
-    $script:InstanceMutex = New-Object System.Threading.Mutex($true, 'Global\NorthstarDevKitCompanion', [ref]$mutexCreated)
-    if (-not $mutexCreated) {
-        try {
-            $summon = [System.Threading.EventWaitHandle]::OpenExisting($script:SummonEventName)
-            $summon.Set() | Out-Null
-            $summon.Dispose()
-        } catch { }
-        exit
+    if ($PSVersionTable.PSEdition -eq 'Desktop') {
+        $mutexSec = New-Object System.Security.AccessControl.MutexSecurity
+        $mutexSec.AddAccessRule((New-Object System.Security.AccessControl.MutexAccessRule($authUsersSid,
+            ([System.Security.AccessControl.MutexRights]::Synchronize -bor [System.Security.AccessControl.MutexRights]::Modify),
+            [System.Security.AccessControl.AccessControlType]::Allow)))
+        $script:InstanceMutex = New-Object System.Threading.Mutex($true, $script:InstanceMutexName, [ref]$mutexCreated, $mutexSec)
     }
+} catch [System.UnauthorizedAccessException] {
+    $mutexBlocked = $true
 } catch { }
+if (-not $script:InstanceMutex -and -not $mutexBlocked) {
+    try {
+        $script:InstanceMutex = New-Object System.Threading.Mutex($true, $script:InstanceMutexName, [ref]$mutexCreated)
+    } catch [System.UnauthorizedAccessException] {
+        $mutexBlocked = $true
+    } catch { }
+}
+if ($mutexBlocked) {
+    $summoned = $false
+    try {
+        $summon = [System.Threading.EventWaitHandle]::OpenExisting($script:SummonEventName)
+        $summon.Set() | Out-Null
+        $summon.Dispose()
+        $summoned = $true
+    } catch { }
+    if (-not $summoned) {
+        try {
+            Add-Type -AssemblyName PresentationFramework
+            [System.Windows.MessageBox]::Show(
+                ("The companion widget is already running at a different elevation level (it was probably started with " +
+                 """Run as administrator""), and this launch cannot reach it.`n`n" +
+                 "Close that instance first (Task Manager > powershell.exe / pwsh.exe running DevKit-Widget.ps1), " +
+                 "or sign out and back in, then launch the widget again."),
+                'Northstar DevKit Companion',
+                [System.Windows.MessageBoxButton]::OK,
+                [System.Windows.MessageBoxImage]::Warning) | Out-Null
+        } catch { }
+    }
+    exit
+}
+if ($script:InstanceMutex -and -not $mutexCreated) {
+    try {
+        $summon = [System.Threading.EventWaitHandle]::OpenExisting($script:SummonEventName)
+        $summon.Set() | Out-Null
+        $summon.Dispose()
+    } catch { }
+    exit
+}
 $script:SummonEvent = $null
 try {
     $eventCreated = $false
-    $script:SummonEvent = New-Object System.Threading.EventWaitHandle($false, [System.Threading.EventResetMode]::AutoReset, $script:SummonEventName, [ref]$eventCreated)
-} catch { }
+    if ($PSVersionTable.PSEdition -eq 'Desktop') {
+        $eventSec = New-Object System.Security.AccessControl.EventWaitHandleSecurity
+        $eventSec.AddAccessRule((New-Object System.Security.AccessControl.EventWaitHandleAccessRule($authUsersSid,
+            ([System.Security.AccessControl.EventWaitHandleRights]::Synchronize -bor [System.Security.AccessControl.EventWaitHandleRights]::Modify),
+            [System.Security.AccessControl.AccessControlType]::Allow)))
+        $script:SummonEvent = New-Object System.Threading.EventWaitHandle($false, [System.Threading.EventResetMode]::AutoReset, $script:SummonEventName, [ref]$eventCreated, $eventSec)
+    } else {
+        $script:SummonEvent = New-Object System.Threading.EventWaitHandle($false, [System.Threading.EventResetMode]::AutoReset, $script:SummonEventName, [ref]$eventCreated)
+    }
+} catch {
+    try {
+        $eventCreated = $false
+        $script:SummonEvent = New-Object System.Threading.EventWaitHandle($false, [System.Threading.EventResetMode]::AutoReset, $script:SummonEventName, [ref]$eventCreated)
+    } catch { }
+}
 
 $ErrorActionPreference = 'Stop'
 $GuiDir = $PSScriptRoot
@@ -183,7 +274,11 @@ foreach ($name in @(
     'MainColumn',
     'GitFlyout', 'GitFlyoutInner', 'GitFlyoutGrip', 'GitFlyoutTitle', 'GitFlyoutBranch', 'GitGraphText', 'GitGraphCanvas', 'GitFlyoutStatus',
     'UncommittedExpander', 'UncommittedCountBadgeText', 'UncommittedFilesPanel',
+    'TabCommits', 'TabPullRequests', 'TabIssues', 'PrCountBadge', 'PrCountBadgeText', 'IssuesCountBadge', 'IssuesCountBadgeText',
+    'GitTabCommitsView', 'GitTabPullRequestsView', 'GitTabIssuesView', 'PullRequestsPanel', 'IssuesPanel', 'GitFlyoutFooter',
     'BtnGitFetch', 'BtnGitPull', 'BtnGitPush', 'BtnGitOpenHub', 'BtnGitActions', 'BtnGitCleanup', 'BtnGitClose',
+    'SideTabStack', 'BtnNotesTab', 'NotesFlyout', 'NotesFlyoutInner', 'NotesFlyoutGrip',
+    'NotesFlyoutTitle', 'NotesFlyoutSub', 'BtnNoteAdd', 'BtnNotesClose', 'NotesPanel',
     'LastUpdatedText', 'BtnRefreshMcp', 'ContentScroll'
 )) {
     $ui[$name] = $window.FindName($name)
@@ -278,6 +373,7 @@ function Update-DevKitWidgetGeometry {
     # many small drag steps from accumulating rounding drift.
     $flyout = 0
     if ($script:GitFlyoutOpen) { $flyout = $script:FlyoutWidth }
+    elseif ($script:NotesFlyoutOpen) { $flyout = $script:NotesFlyoutWidth }
     $window.Width = $script:WidgetChromeWidth + $script:WidgetContentWidth + $flyout
     try {
         $wa = [System.Windows.SystemParameters]::WorkArea
@@ -317,6 +413,7 @@ function Set-DevKitWidgetDock {
         # sets while running), and its Completed handler would later pin
         # window.Left back to that stale OLD-side target.
         if ($script:GitFlyoutOpen) { Set-DevKitGitFlyout -Open $false -Instant }
+        if ($script:NotesFlyoutOpen) { Set-DevKitNotesFlyout -Open $false -Instant }
         $wa = [System.Windows.SystemParameters]::WorkArea
         $script:DockMode = $Mode
         # Full height in every mode - modes only set horizontal placement.
@@ -337,21 +434,29 @@ function Set-DevKitWidgetDock {
         # RIGHT (grip HorizontalAlignment="Right").
         if ($Mode -eq 'Right') {
             [Windows.Controls.Grid]::SetColumn($ui.GitFlyout, 1)
-            [Windows.Controls.Grid]::SetColumn($ui.BtnGitTab, 0)
-            $ui.BtnGitTab.HorizontalAlignment = 'Left'
+            [Windows.Controls.Grid]::SetColumn($ui.NotesFlyout, 1)
+            [Windows.Controls.Grid]::SetColumn($ui.SideTabStack, 0)
+            $ui.SideTabStack.HorizontalAlignment = 'Left'
             $ui.BtnGitTab.Style = Get-WidgetResource 'GitTabButtonWest'
+            $ui.BtnNotesTab.Style = Get-WidgetResource 'NotesTabButtonWest'
             $ui.GitFlyoutGrip.HorizontalAlignment = 'Left'
+            $ui.NotesFlyoutGrip.HorizontalAlignment = 'Left'
             # Panel content hugs the INNER edge (the boundary against Main) so
             # the open/close reveal unfurls outward from the widget instead of
             # the content sliding sideways under the clip.
             $ui.GitFlyoutInner.HorizontalAlignment = 'Right'
+            $ui.NotesFlyoutInner.HorizontalAlignment = 'Right'
         } else {
             [Windows.Controls.Grid]::SetColumn($ui.GitFlyout, 3)
-            [Windows.Controls.Grid]::SetColumn($ui.BtnGitTab, 4)
-            $ui.BtnGitTab.HorizontalAlignment = 'Right'
+            [Windows.Controls.Grid]::SetColumn($ui.NotesFlyout, 3)
+            [Windows.Controls.Grid]::SetColumn($ui.SideTabStack, 4)
+            $ui.SideTabStack.HorizontalAlignment = 'Right'
             $ui.BtnGitTab.Style = Get-WidgetResource 'GitTabButtonEast'
+            $ui.BtnNotesTab.Style = Get-WidgetResource 'NotesTabButtonEast'
             $ui.GitFlyoutGrip.HorizontalAlignment = 'Right'
+            $ui.NotesFlyoutGrip.HorizontalAlignment = 'Right'
             $ui.GitFlyoutInner.HorizontalAlignment = 'Left'
+            $ui.NotesFlyoutInner.HorizontalAlignment = 'Left'
         }
     } catch { }
     Sync-DevKitDockUi
@@ -482,11 +587,22 @@ function Set-DevKitStartupEnabled {
     param([bool]$Enabled)
     try {
         if ($Enabled) {
-            $shell = Get-DevKitWindowsExecutable -Name 'pwsh'
-            $shellPath = if ($shell) { $shell.Source } else { Join-Path $PSHOME 'powershell.exe' }
-            $widgetScript = Join-Path $GuiDir 'DevKit-Widget.ps1'
-            $command = "`"$shellPath`" -NoProfile -ExecutionPolicy Bypass -Sta -WindowStyle Hidden -File `"$widgetScript`""
-            Set-ItemProperty -Path $script:RunKeyPath -Name $script:RunValueName -Value $command
+            # Point at the .vbs startup launcher, NOT a resolved pwsh.exe
+            # path (Store-packaged pwsh lives in a version-stamped folder
+            # that moves on every background auto-update, so a baked-in
+            # path goes stale and the launch fails with no visible error)
+            # and NOT a .bat (a Run-key .bat flashes a console window at
+            # every sign-in). The 45 is a startup delay in seconds: at
+            # sign-in powershell.exe can fail to initialize with loader
+            # error 0xC0000142 while the logon storm is still settling -
+            # the identical launch works moments later - so the launcher
+            # waits it out and retries fast failures. Every path baked in
+            # here is stable: wscript.exe (System32) and the .vbs itself
+            # (moves only if DevKit is reinstalled/moved, which
+            # re-registers Startup anyway).
+            $launcher = Join-Path $GuiDir 'Start-Widget-Startup.vbs'
+            $wscript = Join-Path ([Environment]::SystemDirectory) 'wscript.exe'
+            Set-ItemProperty -Path $script:RunKeyPath -Name $script:RunValueName -Value "`"$wscript`" `"$launcher`" 45"
         } else {
             Remove-ItemProperty -Path $script:RunKeyPath -Name $script:RunValueName -ErrorAction SilentlyContinue
         }
@@ -544,36 +660,52 @@ $ui.TitleBar.Add_MouseLeftButtonUp({
     } catch { }
 })
 
-# ==================== GIT FLYOUT WIDTH GRIP ====================
+# ==================== FLYOUT WIDTH GRIPS (GIT + NOTES) ====================
 # The main widget window is NOT interactively width-resizable - its width
 # comes solely from the persisted preferences.widgetWidth, applied once at
 # startup via Get-DevKitWidgetWidth (window.Width assignment near the bottom
-# of this file). Only the Git flyout keeps a drag-to-resize grip, on its own
+# of this file). Only the flyouts keep drag-to-resize grips, each on its own
 # OUTER edge (the far side from the main widget, facing the pull-tab/window
-# edge - see GitFlyoutGrip in the XAML). It only ever adjusts
-# $script:FlyoutWidth - the main content width is untouched.
+# edge - see GitFlyoutGrip/NotesFlyoutGrip in the XAML). A drag only ever
+# adjusts that flyout's own width variable - the main content width is
+# untouched. One shared set of drag functions serves both flyouts, routed
+# by $Kind ('Git'/'Notes'); only one can be mid-drag at a time because only
+# one is ever open at a time.
 $script:FlyoutResizeActive = $false
+$script:FlyoutResizeKind = 'Git'
 $script:FlyoutResizeStartX = 0.0
 $script:FlyoutResizeStartWidth = 0.0
 
+function Get-DevKitFlyoutKindParts {
+    # The per-kind pieces the shared drag handlers need: the animated outer
+    # Border, the fixed-width inner content Grid, and the current width.
+    param([string]$Kind)
+    if ($Kind -eq 'Notes') {
+        return @{ Border = $ui.NotesFlyout; Inner = $ui.NotesFlyoutInner; Width = $script:NotesFlyoutWidth }
+    }
+    return @{ Border = $ui.GitFlyout; Inner = $ui.GitFlyoutInner; Width = $script:FlyoutWidth }
+}
+
 function Start-DevKitFlyoutGripDrag {
-    param($Sender, $MouseArgs)
+    param($Sender, $MouseArgs, [string]$Kind = 'Git')
     # Grabbing the grip within ~220ms of a flyout toggle would otherwise fight
     # that slide: while an animation is active on a property, WPF ignores plain
     # assignments to it, so every drag frame would be silently discarded and the
     # animation's Completed handler would then snap back to its own target.
     # Detach the animations and bump the token so that stale handler no-ops.
     $script:GitFlyoutAnimToken++
+    $parts = Get-DevKitFlyoutKindParts -Kind $Kind
     try {
         $window.BeginAnimation([Windows.Window]::WidthProperty, $null)
         $window.BeginAnimation([Windows.Window]::LeftProperty, $null)
-        $ui.GitFlyout.BeginAnimation([Windows.Controls.Border]::WidthProperty, $null)
-        $ui.GitFlyout.Width = $script:FlyoutWidth
+        $parts.Border.BeginAnimation([Windows.Controls.Border]::WidthProperty, $null)
+        $parts.Border.Width = $parts.Width
         Update-DevKitWidgetGeometry
     } catch { }
     $script:FlyoutResizeActive = $true
+    $script:FlyoutResizeKind = $Kind
     $script:FlyoutResizeStartX = $MouseArgs.GetPosition($null).X
-    $script:FlyoutResizeStartWidth = $script:FlyoutWidth
+    $script:FlyoutResizeStartWidth = $parts.Width
     $Sender.CaptureMouse() | Out-Null
 }
 
@@ -581,8 +713,8 @@ function Update-DevKitFlyoutGripDrag {
     param($Sender, $MouseArgs)
     if (-not $script:FlyoutResizeActive -or -not $Sender.IsMouseCaptured) { return }
     $dx = $MouseArgs.GetPosition($null).X - $script:FlyoutResizeStartX
-    # The grip now sits on the flyout's OUTER edge (away from Main, facing
-    # the pull-tab/window edge) in both dock modes, so "drag away from Main"
+    # The grip sits on the flyout's OUTER edge (away from Main, facing the
+    # pull-tab/window edge) in both dock modes, so "drag away from Main"
     # is what must widen the panel in each case. Right-docked (west/column-1
     # flyout): the outer edge is the flyout's LEFT edge, so dragging LEFT
     # (dx<0) widens it - newWidth = StartWidth - dx. Left-docked (east/
@@ -591,10 +723,11 @@ function Update-DevKitFlyoutGripDrag {
     # signs are the mirror image of the old inner-edge grip's formulas.)
     $newWidth = if ($script:DockMode -eq 'Right') { $script:FlyoutResizeStartWidth - $dx } else { $script:FlyoutResizeStartWidth + $dx }
     $newWidth = [math]::Min($script:MaxFlyoutWidth, [math]::Max($script:MinFlyoutWidth, $newWidth))
-    if ($newWidth -eq $script:FlyoutWidth) { return }
-    $script:FlyoutWidth = $newWidth
-    $ui.GitFlyout.Width = $newWidth
-    $ui.GitFlyoutInner.Width = $newWidth
+    $parts = Get-DevKitFlyoutKindParts -Kind $script:FlyoutResizeKind
+    if ($newWidth -eq $parts.Width) { return }
+    if ($script:FlyoutResizeKind -eq 'Notes') { $script:NotesFlyoutWidth = $newWidth } else { $script:FlyoutWidth = $newWidth }
+    $parts.Border.Width = $newWidth
+    $parts.Inner.Width = $newWidth
     # Main is a fixed column and the docked edge is re-pinned from the work
     # area, so this can only ever move the flyout's OUTER edge - the inner
     # boundary against the widget is arithmetically incapable of shifting.
@@ -606,14 +739,20 @@ function Stop-DevKitFlyoutGripDrag {
     if (-not $script:FlyoutResizeActive) { return }
     $script:FlyoutResizeActive = $false
     try { $Sender.ReleaseMouseCapture() } catch { }
-    Save-DevKitGitFlyoutWidthSetting
+    if ($script:FlyoutResizeKind -eq 'Notes') { Save-DevKitNotesFlyoutWidthSetting } else { Save-DevKitGitFlyoutWidthSetting }
 }
 
-$ui.GitFlyoutGrip.Add_MouseLeftButtonDown({ param($s, $e) Start-DevKitFlyoutGripDrag -Sender $s -MouseArgs $e })
+$ui.GitFlyoutGrip.Add_MouseLeftButtonDown({ param($s, $e) Start-DevKitFlyoutGripDrag -Sender $s -MouseArgs $e -Kind 'Git' })
 $ui.GitFlyoutGrip.Add_MouseMove({ param($s, $e) Update-DevKitFlyoutGripDrag -Sender $s -MouseArgs $e })
 $ui.GitFlyoutGrip.Add_MouseLeftButtonUp({ param($s, $e) Stop-DevKitFlyoutGripDrag -Sender $s })
 $ui.GitFlyoutGrip.Add_MouseEnter({ param($s, $e) $s.Background = Get-DevKitGitBrush '#264FA3FF' })
 $ui.GitFlyoutGrip.Add_MouseLeave({ param($s, $e) if (-not $s.IsMouseCaptured) { $s.Background = [Windows.Media.Brushes]::Transparent } })
+
+$ui.NotesFlyoutGrip.Add_MouseLeftButtonDown({ param($s, $e) Start-DevKitFlyoutGripDrag -Sender $s -MouseArgs $e -Kind 'Notes' })
+$ui.NotesFlyoutGrip.Add_MouseMove({ param($s, $e) Update-DevKitFlyoutGripDrag -Sender $s -MouseArgs $e })
+$ui.NotesFlyoutGrip.Add_MouseLeftButtonUp({ param($s, $e) Stop-DevKitFlyoutGripDrag -Sender $s })
+$ui.NotesFlyoutGrip.Add_MouseEnter({ param($s, $e) $s.Background = Get-DevKitGitBrush '#26E5C07B' })
+$ui.NotesFlyoutGrip.Add_MouseLeave({ param($s, $e) if (-not $s.IsMouseCaptured) { $s.Background = [Windows.Media.Brushes]::Transparent } })
 
 # "Keep on top" also has two front-ends (title-bar pin + Settings checkbox);
 # same pattern as the startup toggle.
@@ -1799,7 +1938,7 @@ $script:WorkKind = $null
 
 function Start-DevKitWorkJob {
     param(
-        # 'JunkScan' | 'JunkClean' | 'GitOverview' | 'GitFetch' | 'GitPull' | 'GitPush' | 'EnvDrift'
+        # 'JunkScan' | 'JunkClean' | 'GitOverview' | 'GitFetch' | 'GitPull' | 'GitPush' | 'EnvDrift' | 'GitHubPRs' | 'GitHubIssues'
         [Parameter(Mandatory = $true)][string]$Kind,
         [string]$ProjectPath
     )
@@ -1819,6 +1958,8 @@ function Start-DevKitWorkJob {
                 "@{ Git = (Get-DevKitRepoOverview -Path `$path -IncludeGraph `$$script:GitFlyoutOpen) }"
             }
             'EnvDrift'    { '@{ Drift = (Get-DevKitEnvDrift -Path $path) }' }
+            'GitHubPRs'    { '@{ PullRequests = (Get-DevKitGitHubPullRequests -Path $path) }' }
+            'GitHubIssues' { '@{ Issues = (Get-DevKitGitHubIssues -Path $path) }' }
             default {
                 # GitFetch/GitPull/GitPush: run the action, then immediately
                 # re-read the overview so the graph reflects the result.
@@ -1902,6 +2043,23 @@ function Update-DevKitWorkAsyncPoll {
                         Set-DevKitWidgetEnvDriftResult -Drift $result.Drift
                     }
                 }
+                'GitHubPRs' {
+                    # Same stale-project guard as GitOverview/EnvDrift. No
+                    # button fires this Kind yet (stage 2 adds that trigger,
+                    # plus a re-fire-when-free pending flag to match
+                    # GitRefreshPending/EnvDriftRefreshPending if it needs
+                    # one) - a stale result is simply dropped for now rather
+                    # than rendered under the wrong project.
+                    if (-not $script:WorkProjectPath -or -not $script:ActiveProjectPath -or $script:WorkProjectPath -eq $script:ActiveProjectPath) {
+                        Update-DevKitWidgetPullRequests -Result $result.PullRequests
+                    }
+                }
+                'GitHubIssues' {
+                    # Same stale-project guard; see GitHubPRs comment above.
+                    if (-not $script:WorkProjectPath -or -not $script:ActiveProjectPath -or $script:WorkProjectPath -eq $script:ActiveProjectPath) {
+                        Update-DevKitWidgetIssues -Result $result.Issues
+                    }
+                }
                 default {
                     # GitFetch/GitPull/GitPush: last output line to the status
                     # line, fresh overview to the graph - but only if the
@@ -1944,6 +2102,23 @@ function Update-DevKitWorkAsyncPoll {
             $ui.BtnJunkClean.IsEnabled = $true
             $ui.JunkStatusText.Text = 'Operation timed out - try again.'
             $ui.JunkStatusText.Visibility = 'Visible'
+        } elseif ($kind -eq 'GitHubPRs' -or $kind -eq 'GitHubIssues') {
+            # Checked ahead of the 'Git*' wildcard below - GitHubPRs/
+            # GitHubIssues would otherwise match it and wrongly stamp the git
+            # flyout's status line / re-enable git action buttons. Replace the
+            # stuck "Loading..." text left by Set-DevKitGitActiveTab, and
+            # un-stamp the per-tab fetch timestamp (back to MinValue) so the
+            # staleness check in Set-DevKitGitActiveTab doesn't block an
+            # immediate retry on the next tab visit - mirrors the Junk*/Git*
+            # branches above/below replacing their own stuck-loading UI.
+            $timeoutResult = [pscustomobject]@{ ErrorMessage = 'GitHub CLI did not answer (timed out) - switch tabs to retry.' }
+            if ($kind -eq 'GitHubPRs') {
+                $script:GitPrLastFetch = [datetime]::MinValue
+                Update-DevKitWidgetPullRequests -Result $timeoutResult
+            } else {
+                $script:GitIssuesLastFetch = [datetime]::MinValue
+                Update-DevKitWidgetIssues -Result $timeoutResult
+            }
         } elseif ($kind -like 'Git*') {
             $ui.GitFlyoutStatus.Text = 'git did not answer (timed out).'
             # A git ACTION that times out never produces an overview render,
@@ -2074,14 +2249,36 @@ function Save-DevKitGitFlyoutWidthSetting {
     } catch { }
 }
 
+function Get-DevKitNotesFlyoutWidthSetting {
+    # preferences.notesFlyoutWidth - same clamp/fallback contract as the Git
+    # flyout's width above, persisted independently so each panel keeps the
+    # width the user actually gave it.
+    try {
+        $w = [double](Get-DevKitSettings).preferences.notesFlyoutWidth
+        if ($w -gt 0) { return [math]::Min($script:MaxFlyoutWidth, [math]::Max($script:MinFlyoutWidth, $w)) }
+    } catch { }
+    return 300
+}
+
+function Save-DevKitNotesFlyoutWidthSetting {
+    try {
+        $settings = Get-DevKitSettings
+        $settings.preferences.notesFlyoutWidth = [int][math]::Round($script:NotesFlyoutWidth)
+        Set-DevKitSettings -Settings $settings
+    } catch { }
+}
+
 $script:FlyoutWidth = Get-DevKitGitFlyoutWidthSetting
 $script:GitFlyoutOpen = $false
+$script:NotesFlyoutWidth = Get-DevKitNotesFlyoutWidthSetting
+$script:NotesFlyoutOpen = $false
 $script:GitOverview = $null     # last Get-DevKitRepoOverview result
 $script:GitRefreshPending = $false   # a GitOverview was declined while the work runspace was busy
 $script:EnvDriftRefreshPending = $false   # an EnvDrift check was declined while the work runspace was busy
 
 function Get-DevKitWidgetFlyoutExtra {
     if ($script:GitFlyoutOpen) { return $script:FlyoutWidth }
+    if ($script:NotesFlyoutOpen) { return $script:NotesFlyoutWidth }
     return 0
 }
 
@@ -2174,6 +2371,8 @@ function Sync-DevKitWidgetGitState {
     $hasProject = $null -ne $script:ActiveProjectPath
     $ui.BtnGitTab.IsEnabled = $hasProject
     $ui.BtnGitTab.Opacity = if ($hasProject) { 1.0 } else { 0.45 }
+    $ui.BtnNotesTab.IsEnabled = $hasProject
+    $ui.BtnNotesTab.Opacity = if ($hasProject) { 1.0 } else { 0.45 }
     foreach ($b in @($ui.BtnOpenEditor, $ui.BtnOpenExplorer, $ui.BtnOpenTerminal, $ui.BtnRunScript)) {
         $b.IsEnabled = $hasProject
         $b.Opacity = if ($hasProject) { 1.0 } else { 0.45 }
@@ -2182,9 +2381,22 @@ function Sync-DevKitWidgetGitState {
         $ui.GitBadgeText.Visibility = 'Collapsed'
         $ui.EnvDriftRow.Visibility = 'Collapsed'
         if ($script:GitFlyoutOpen) { Set-DevKitGitFlyout -Open $false }
+        if ($script:NotesFlyoutOpen) { Set-DevKitNotesFlyout -Open $false }
         return
     }
+    # Project changed while the Notes panel is open: flush the old project's
+    # pending edits and re-render for the new one (closed panels just reload
+    # lazily on their next open).
+    if ($script:NotesFlyoutOpen -and $script:NotesProjectPath -ne $script:ActiveProjectPath) {
+        Open-DevKitWidgetNotesProject
+    }
     Start-DevKitGitRefresh   # keeps the ambient badge (and open flyout) current
+    # Active project changed under us - never leave the PR/Issues tabs (if
+    # currently shown) staring at the OLD project's data; reset to Commits,
+    # same as opening the flyout fresh. Set-DevKitGitActiveTab itself only
+    # re-fetches PRs/Issues lazily when THEIR tab is next selected, so this
+    # is cheap even when called redundantly (e.g. the initial project load).
+    Set-DevKitGitActiveTab -Tab 'Commits'
     if ($script:GitFlyoutOpen) {
         $ui.GitFlyoutTitle.Text = [string]$script:ActiveProjectName
     }
@@ -2237,6 +2449,11 @@ function Set-DevKitGitFlyout {
     param([bool]$Open, [switch]$Instant)
     if ($Open -eq $script:GitFlyoutOpen) { return }
     if ($Open -and -not $script:ActiveProjectPath) { return }
+    # Only one flyout at a time. Close-the-other INSTANTLY (not animated):
+    # both panels animate window.Width/Left, and two slides in flight would
+    # fight over them; the instant close settles the window synchronously
+    # before this open computes its own targets from the current geometry.
+    if ($Open -and $script:NotesFlyoutOpen) { Set-DevKitNotesFlyout -Open $false -Instant }
 
     # window.Width/Left and GitFlyout.Width are always animated together, in
     # lockstep (same target delta, same Duration/Easing), by this function -
@@ -2281,6 +2498,7 @@ function Set-DevKitGitFlyout {
             $ui.BtnGitTab.Foreground = Get-WidgetResource 'BrushAccentBlue'
             $ui.GitFlyoutTitle.Text = [string]$script:ActiveProjectName
             $ui.GitFlyoutStatus.Text = ''
+            Set-DevKitGitActiveTab -Tab 'Commits'   # never reopen mid-way through a stale PR/Issues tab
             Start-DevKitGitRefresh
         } else {
             $ui.BtnGitTab.Foreground = Get-WidgetResource 'BrushTextMuted'
@@ -2309,6 +2527,7 @@ function Set-DevKitGitFlyout {
         $ui.BtnGitTab.Foreground = Get-WidgetResource 'BrushAccentBlue'
         $ui.GitFlyoutTitle.Text = [string]$script:ActiveProjectName
         $ui.GitFlyoutStatus.Text = ''
+        Set-DevKitGitActiveTab -Tab 'Commits'   # never reopen mid-way through a stale PR/Issues tab
         Start-DevKitGitRefresh
     } else {
         $script:GitFlyoutOpen = $false
@@ -2578,6 +2797,418 @@ function Update-DevKitGitUncommittedList {
     foreach ($f in $files) { Add-DevKitUncommittedFileRow -Panel $ui.UncommittedFilesPanel -File $f }
 }
 
+# ==================== GITHUB PRs / ISSUES ====================
+# Tab strip (Commits | Pull Requests | Issues) lives in the Git flyout's
+# content-area row - Set-DevKitGitActiveTab swaps which of the three
+# GitTab*View siblings is Visible and lazily kicks off a background fetch via
+# Start-DevKitWorkJob. Update-DevKitWidgetPullRequests/Issues below (invoked
+# from Update-DevKitWorkAsyncPoll once that job completes) render the real
+# PR-row / issue-accordion lists via Add-DevKitPrRow / Add-DevKitIssueAccordion.
+$script:LastPrResult = $null
+$script:LastIssuesResult = $null
+$script:GitActiveTab = 'Commits'
+# Per-tab staleness tracking (path + timestamp), mirroring $script:EnvDriftLastCheck's
+# "re-check if more than 60s old" pattern, plus a path comparison so switching
+# to a DIFFERENT project always counts as stale even if under 60s old.
+$script:GitPrLastFetch = [datetime]::MinValue
+$script:GitPrLastPath = $null
+$script:GitIssuesLastFetch = [datetime]::MinValue
+$script:GitIssuesLastPath = $null
+
+function Set-DevKitGitPanelMessage {
+    # Clears Panel and drops in a single dim message line - covers both the
+    # "Loading X..." state (same idiom as GitGraphText's default "Loading
+    # commit graph..." text) and the placeholder count/error text once a
+    # fetch completes, since PullRequestsPanel/IssuesPanel have no XAML
+    # fallback text of their own.
+    param($Panel, [string]$Message)
+    $Panel.Children.Clear()
+    $line = New-Object Windows.Controls.TextBlock
+    $line.Text = $Message
+    $line.FontSize = 10.5
+    $line.Foreground = Get-WidgetResource 'BrushTextDim'
+    $line.TextWrapping = 'Wrap'
+    $line.Margin = '0,6,0,0'
+    $Panel.Children.Add($line) | Out-Null
+}
+
+function Set-DevKitGitActiveTab {
+    <#
+    .SYNOPSIS
+        Switches the Git flyout's Commits/Pull-Requests/Issues tab: toggles
+        the three GitTab*View panels' Visibility (and the Commits-only
+        footer's), syncs the RadioButton group's checked state, and - when
+        landing on PullRequests/Issues - lazily fires a background fetch if
+        no data has been fetched yet for the CURRENT active project, or the
+        last fetch is more than 60s old, or the active project changed since
+        that fetch.
+    #>
+    param([ValidateSet('Commits', 'PullRequests', 'Issues')][string]$Tab)
+
+    $script:GitActiveTab = $Tab
+    $ui.GitTabCommitsView.Visibility = if ($Tab -eq 'Commits') { 'Visible' } else { 'Collapsed' }
+    $ui.GitTabPullRequestsView.Visibility = if ($Tab -eq 'PullRequests') { 'Visible' } else { 'Collapsed' }
+    $ui.GitTabIssuesView.Visibility = if ($Tab -eq 'Issues') { 'Visible' } else { 'Collapsed' }
+    # Fetch/Pull/Push and the status line are meaningless outside Commits (a
+    # PR/Issues list isn't a git working-tree action) - hide the whole footer
+    # StackPanel (GitFlyoutStatus lives inside it) rather than treat the
+    # status line separately.
+    $ui.GitFlyoutFooter.Visibility = if ($Tab -eq 'Commits') { 'Visible' } else { 'Collapsed' }
+
+    # Keep the RadioButton group in sync when this was invoked programmatically
+    # (flyout open, project switch) rather than by the user clicking a tab -
+    # assigning IsChecked on the already-checked button is a no-op, and the
+    # Checked event only fires on the newly-checked one, which harmlessly
+    # re-enters this same Tab branch (idempotent, no guard flag needed).
+    $ui.TabCommits.IsChecked = ($Tab -eq 'Commits')
+    $ui.TabPullRequests.IsChecked = ($Tab -eq 'PullRequests')
+    $ui.TabIssues.IsChecked = ($Tab -eq 'Issues')
+
+    if (-not $script:ActiveProjectPath) { return }
+
+    if ($Tab -eq 'PullRequests') {
+        $stale = ($script:GitPrLastPath -ne $script:ActiveProjectPath) -or (((Get-Date) - $script:GitPrLastFetch).TotalSeconds -gt 60)
+        if ($stale) {
+            Set-DevKitGitPanelMessage -Panel $ui.PullRequestsPanel -Message 'Loading pull requests...'
+            if (Start-DevKitWorkJob -Kind 'GitHubPRs' -ProjectPath $script:ActiveProjectPath) {
+                $script:GitPrLastFetch = Get-Date
+                $script:GitPrLastPath = $script:ActiveProjectPath
+            } else {
+                # Work slot busy - render an error instead of leaving the
+                # "Loading..." text stuck. GitPrLastFetch/Path are left as-is
+                # (unstamped), so the NEXT switch to this tab still sees it
+                # as stale and retries - no separate pending-flag needed here.
+                Update-DevKitWidgetPullRequests -Result ([pscustomobject]@{ ErrorMessage = 'Busy with another operation - switch tabs to retry.' })
+            }
+        }
+    } elseif ($Tab -eq 'Issues') {
+        $stale = ($script:GitIssuesLastPath -ne $script:ActiveProjectPath) -or (((Get-Date) - $script:GitIssuesLastFetch).TotalSeconds -gt 60)
+        if ($stale) {
+            Set-DevKitGitPanelMessage -Panel $ui.IssuesPanel -Message 'Loading issues...'
+            if (Start-DevKitWorkJob -Kind 'GitHubIssues' -ProjectPath $script:ActiveProjectPath) {
+                $script:GitIssuesLastFetch = Get-Date
+                $script:GitIssuesLastPath = $script:ActiveProjectPath
+            } else {
+                Update-DevKitWidgetIssues -Result ([pscustomobject]@{ ErrorMessage = 'Busy with another operation - switch tabs to retry.' })
+            }
+        }
+    }
+}
+
+function Format-DevKitRelativeTime {
+    # Compact "X ago" for GitHub timestamps (PR/issue updatedAt, ISO 8601) -
+    # same compact-unit spirit as Format-DevKitNodeAge above, but extended
+    # out to weeks/months/years since these can be genuinely old (unlike
+    # node process uptime, which never is). Returns '' on an unparsable/
+    # empty timestamp so callers can just omit the "updated ..." clause.
+    param([string]$Iso)
+    if ([string]::IsNullOrWhiteSpace($Iso)) { return '' }
+    $then = $null
+    try {
+        $then = [datetime]::Parse($Iso, [System.Globalization.CultureInfo]::InvariantCulture,
+            ([System.Globalization.DateTimeStyles]::AdjustToUniversal -bor [System.Globalization.DateTimeStyles]::AssumeUniversal))
+    } catch {
+        return ''
+    }
+    $span = (Get-Date).ToUniversalTime() - $then
+    if ($span.TotalSeconds -lt 0) { $span = [timespan]::Zero }
+    if ($span.TotalMinutes -lt 1) { return 'just now' }
+    if ($span.TotalMinutes -lt 60) { return "$([int]$span.TotalMinutes)m ago" }
+    if ($span.TotalHours -lt 24) { return "$([int]$span.TotalHours)h ago" }
+    if ($span.TotalDays -lt 7) { return "$([int]$span.TotalDays)d ago" }
+    if ($span.TotalDays -lt 30) { return "$([int][math]::Floor($span.TotalDays / 7))w ago" }
+    if ($span.TotalDays -lt 365) { return "$([int][math]::Floor($span.TotalDays / 30))mo ago" }
+    return "$([int][math]::Floor($span.TotalDays / 365))y ago"
+}
+
+function Open-DevKitExternalUrl {
+    # Safe Start-Process wrapper for opening a URL in the default browser -
+    # same try/catch shape Open-DevKitRepoPage (BtnGitOpenHub) already uses,
+    # just with no status line to report failure into (PR rows/issue
+    # accordions don't have one - the Commits-only GitFlyoutFooter is hidden
+    # on these tabs), so a failure is silently swallowed rather than thrown.
+    param([string]$Url)
+    if ([string]::IsNullOrWhiteSpace($Url)) { return }
+    try { Start-Process $Url } catch { }
+}
+
+function Get-DevKitLabelChipBrush {
+    # GitHub label 'color' is a hex string with NO leading '#' (verified
+    # against real 'gh issue list --json labels' output). Builds the chip's
+    # background brush from that color and picks a white/black foreground
+    # via a standard perceptual-luminance check so the label text stays
+    # legible against ANY color GitHub allows - verified against real label
+    # colors: d73a4a (red, ~107 luma -> white), 0e8a16 (green, ~88 -> white),
+    # fbca04 (yellow, ~194 -> black).
+    param([string]$HexColor)
+    $hex = "$HexColor".TrimStart('#')
+    if ($hex -notmatch '^[0-9A-Fa-f]{6}$') { $hex = '6E7681' }  # GitHub's own default gray, used as a safe fallback
+    [byte]$r = [Convert]::ToInt32($hex.Substring(0, 2), 16)
+    [byte]$g = [Convert]::ToInt32($hex.Substring(2, 2), 16)
+    [byte]$b = [Convert]::ToInt32($hex.Substring(4, 2), 16)
+    $luminance = (0.299 * $r) + (0.587 * $g) + (0.114 * $b)
+    $fg = if ($luminance -gt 145) { [Windows.Media.Brushes]::Black } else { [Windows.Media.Brushes]::White }
+    $bg = [Windows.Media.SolidColorBrush]::new([Windows.Media.Color]::FromRgb($r, $g, $b))
+    return @{ Background = $bg; Foreground = $fg }
+}
+
+function New-DevKitLabelChip {
+    param([string]$Name, [string]$HexColor)
+    $colors = Get-DevKitLabelChipBrush -HexColor $HexColor
+    $chip = New-Object Windows.Controls.Border
+    $chip.Background = $colors.Background
+    $chip.CornerRadius = 8
+    $chip.Padding = '6,1'
+    $chip.Margin = '4,0,0,0'
+    $chip.VerticalAlignment = 'Center'
+    $text = New-Object Windows.Controls.TextBlock
+    $text.Text = $Name
+    $text.FontSize = 9
+    $text.FontWeight = 'SemiBold'
+    $text.Foreground = $colors.Foreground
+    $chip.Child = $text
+    return $chip
+}
+
+function Add-DevKitPrRow {
+    # One clickable PR card (ToolCard reuses its existing hover-lift/glow
+    # animation for free): "#N  Title" (ellipsis) + draft/review badges on
+    # the title line, "by author  |  head -> base  |  updated X ago" below.
+    # Clicking anywhere on the row opens the PR on GitHub, same as a node
+    # table port link.
+    param($Panel, $Pr)
+
+    $row = New-Object Windows.Controls.Border
+    $row.Style = Get-WidgetResource 'ToolCard'
+    $row.Cursor = [System.Windows.Input.Cursors]::Hand
+    $row.ToolTip = "Open #$($Pr.number) on GitHub"
+    $prUrl = [string]$Pr.url
+    $row.Add_MouseLeftButtonUp({ Open-DevKitExternalUrl -Url $prUrl }.GetNewClosure())
+
+    $stack = New-Object Windows.Controls.StackPanel
+
+    $titleGrid = New-Object Windows.Controls.Grid
+    $colTitle = New-Object Windows.Controls.ColumnDefinition; $colTitle.Width = [Windows.GridLength]::new(1, [Windows.GridUnitType]::Star)
+    $colBadges = New-Object Windows.Controls.ColumnDefinition; $colBadges.Width = [Windows.GridLength]::Auto
+    $titleGrid.ColumnDefinitions.Add($colTitle)
+    $titleGrid.ColumnDefinitions.Add($colBadges)
+
+    $titleText = New-Object Windows.Controls.TextBlock
+    $titleText.Style = Get-WidgetResource 'WidgetExpanderTitle'
+    $titleText.Text = "#$($Pr.number)  $($Pr.title)"
+    $titleText.TextTrimming = 'CharacterEllipsis'
+    $titleText.ToolTip = [string]$Pr.title
+    [Windows.Controls.Grid]::SetColumn($titleText, 0)
+    $titleGrid.Children.Add($titleText) | Out-Null
+
+    $badgePanel = New-Object Windows.Controls.StackPanel
+    $badgePanel.Orientation = 'Horizontal'
+    $badgePanel.Margin = '8,0,0,0'
+    if ($Pr.isDraft) {
+        $b = New-Object Windows.Controls.Border
+        $b.Style = Get-WidgetResource 'BadgeNeutral'
+        $b.VerticalAlignment = 'Center'
+        $t = New-Object Windows.Controls.TextBlock
+        $t.Style = Get-WidgetResource 'BadgeNeutralText'
+        $t.Text = 'DRAFT'
+        $b.Child = $t
+        $badgePanel.Children.Add($b) | Out-Null
+    }
+    $decision = [string]$Pr.reviewDecision
+    if ($decision -eq 'APPROVED') {
+        $b = New-Object Windows.Controls.Border
+        $b.Style = Get-WidgetResource 'BadgeSuccess'
+        $b.VerticalAlignment = 'Center'
+        $b.Margin = '4,0,0,0'
+        $t = New-Object Windows.Controls.TextBlock
+        $t.Style = Get-WidgetResource 'BadgeSuccessText'
+        $t.Text = 'APPROVED'
+        $b.Child = $t
+        $badgePanel.Children.Add($b) | Out-Null
+    } elseif ($decision -eq 'CHANGES_REQUESTED') {
+        $b = New-Object Windows.Controls.Border
+        $b.Style = Get-WidgetResource 'BadgeWarning'
+        $b.VerticalAlignment = 'Center'
+        $b.Margin = '4,0,0,0'
+        $t = New-Object Windows.Controls.TextBlock
+        $t.Style = Get-WidgetResource 'BadgeWarningText'
+        $t.Text = 'CHANGES REQUESTED'
+        $b.Child = $t
+        $badgePanel.Children.Add($b) | Out-Null
+    }
+    [Windows.Controls.Grid]::SetColumn($badgePanel, 1)
+    $titleGrid.Children.Add($badgePanel) | Out-Null
+    $stack.Children.Add($titleGrid) | Out-Null
+
+    $sub = New-Object Windows.Controls.TextBlock
+    $sub.Style = Get-WidgetResource 'WidgetExpanderSub'
+    $sub.TextTrimming = 'CharacterEllipsis'
+    $author = if ($Pr.author -and $Pr.author.login) { [string]$Pr.author.login } else { 'unknown' }
+    $subParts = @("by $author", "$($Pr.headRefName) -> $($Pr.baseRefName)")
+    $when = Format-DevKitRelativeTime -Iso ([string]$Pr.updatedAt)
+    if ($when) { $subParts += "updated $when" }
+    $sub.Text = ($subParts -join '  |  ')
+    $stack.Children.Add($sub) | Out-Null
+
+    $row.Child = $stack
+    $Panel.Children.Add($row) | Out-Null
+}
+
+function Get-DevKitIssueBodyText {
+    # Plain-text rendering of a GitHub issue body: no markdown renderer in
+    # this app (adding one is out of scope) - the raw markdown source reads
+    # fine on its own once triple-backtick code-fence markers are stripped
+    # so they don't clutter the text as stray backticks. Empty/null bodies
+    # (GitHub allows them) get a friendly placeholder instead of blank space.
+    param([string]$Body)
+    if ([string]::IsNullOrWhiteSpace($Body)) { return 'No description provided.' }
+    return ($Body -replace '```', '').Trim()
+}
+
+function Add-DevKitIssueAccordion {
+    # One collapsed-by-default Expander per issue - the shared Expander
+    # ControlTemplate in Theme.xaml already gives this the fade+unfold
+    # animation for free. Header = "#N  Title" (ellipsis) + label-color
+    # chips; Content = full body + comment count + an Open-on-GitHub link,
+    # matching Add-DevKitPrRow's safe Start-Process pattern.
+    param($Panel, $Issue)
+
+    $expander = New-Object Windows.Controls.Expander
+    $expander.IsExpanded = $false
+    $expander.Margin = '0,0,0,8'
+    $expander.ToolTip = 'Click to expand or collapse'
+
+    $headerGrid = New-Object Windows.Controls.Grid
+    $colTitle = New-Object Windows.Controls.ColumnDefinition; $colTitle.Width = [Windows.GridLength]::new(1, [Windows.GridUnitType]::Star)
+    $colChips = New-Object Windows.Controls.ColumnDefinition; $colChips.Width = [Windows.GridLength]::Auto
+    $headerGrid.ColumnDefinitions.Add($colTitle)
+    $headerGrid.ColumnDefinitions.Add($colChips)
+
+    $titleText = New-Object Windows.Controls.TextBlock
+    $titleText.Style = Get-WidgetResource 'WidgetExpanderTitle'
+    $titleText.Text = "#$($Issue.number)  $($Issue.title)"
+    $titleText.TextTrimming = 'CharacterEllipsis'
+    $titleText.ToolTip = [string]$Issue.title
+    [Windows.Controls.Grid]::SetColumn($titleText, 0)
+    $headerGrid.Children.Add($titleText) | Out-Null
+
+    $chipPanel = New-Object Windows.Controls.StackPanel
+    $chipPanel.Orientation = 'Horizontal'
+    $chipPanel.Margin = '8,0,0,0'
+    foreach ($lbl in @($Issue.labels)) {
+        if (-not $lbl) { continue }
+        $chipPanel.Children.Add((New-DevKitLabelChip -Name ([string]$lbl.name) -HexColor ([string]$lbl.color))) | Out-Null
+    }
+    [Windows.Controls.Grid]::SetColumn($chipPanel, 1)
+    $headerGrid.Children.Add($chipPanel) | Out-Null
+    $expander.Header = $headerGrid
+
+    $content = New-Object Windows.Controls.StackPanel
+
+    $bodyText = New-Object Windows.Controls.TextBlock
+    $bodyText.Style = Get-WidgetResource 'CardSubtitle'
+    $bodyText.Margin = 0
+    $bodyText.Text = Get-DevKitIssueBodyText -Body ([string]$Issue.body)
+    $content.Children.Add($bodyText) | Out-Null
+
+    $commentCount = 0
+    if ($Issue.comments) { $commentCount = @($Issue.comments).Count }
+    $meta = New-Object Windows.Controls.TextBlock
+    $meta.Style = Get-WidgetResource 'WidgetExpanderSub'
+    $meta.Margin = '0,8,0,0'
+    $suffix = if ($commentCount -ne 1) { 's' } else { '' }
+    $metaParts = @("$commentCount comment$suffix")
+    $when = Format-DevKitRelativeTime -Iso ([string]$Issue.updatedAt)
+    if ($when) { $metaParts += "updated $when" }
+    $meta.Text = ($metaParts -join '  |  ')
+    $content.Children.Add($meta) | Out-Null
+
+    $openBtn = New-Object Windows.Controls.Button
+    $openBtn.Style = Get-WidgetResource 'GhostButton'
+    $openBtn.FontSize = 10.5
+    $openBtn.Content = 'Open on GitHub'
+    $openBtn.HorizontalAlignment = 'Left'
+    $openBtn.Margin = '0,8,0,0'
+    $issueUrl = [string]$Issue.url
+    $openBtn.Add_Click({ Open-DevKitExternalUrl -Url $issueUrl }.GetNewClosure())
+    $content.Children.Add($openBtn) | Out-Null
+
+    $expander.Content = $content
+    $Panel.Children.Add($expander) | Out-Null
+}
+
+function Update-DevKitWidgetPullRequests {
+    # Full render: one clickable Add-DevKitPrRow card per open PR, or the
+    # CLI-not-found/not-a-repo/error/empty-state message in the same tone
+    # Render-DevKitMcpPanel/Start-DevKitAgentCli already use for other CLIs.
+    param($Result)
+    $script:LastPrResult = $Result
+    $ui.PullRequestsPanel.Children.Clear()
+    $count = 0
+    if (-not $Result) {
+        Set-DevKitGitPanelMessage -Panel $ui.PullRequestsPanel -Message 'No data.'
+    } elseif ($Result.ErrorMessage) {
+        Set-DevKitGitPanelMessage -Panel $ui.PullRequestsPanel -Message ([string]$Result.ErrorMessage)
+    } elseif (-not $Result.CliInstalled) {
+        Set-DevKitGitPanelMessage -Panel $ui.PullRequestsPanel -Message 'GitHub CLI (gh) not found on PATH - install it to see pull requests here.'
+    } elseif (-not $Result.IsRepo) {
+        Set-DevKitGitPanelMessage -Panel $ui.PullRequestsPanel -Message 'Not a GitHub repository.'
+    } else {
+        $prs = @($Result.PullRequests)
+        $count = $prs.Count
+        if ($count -eq 0) {
+            Set-DevKitGitPanelMessage -Panel $ui.PullRequestsPanel -Message 'No open pull requests.'
+        } else {
+            foreach ($pr in $prs) { Add-DevKitPrRow -Panel $ui.PullRequestsPanel -Pr $pr }
+        }
+    }
+    if ($Result -and $Result.Truncated) {
+        $ui.PrCountBadgeText.Text = "$count+"
+        $ui.PrCountBadge.ToolTip = "Showing the first $count open pull requests - there are more than that open."
+    } else {
+        $ui.PrCountBadgeText.Text = [string]$count
+        $ui.PrCountBadge.ToolTip = $null
+    }
+}
+
+function Update-DevKitWidgetIssues {
+    # Full render: one Add-DevKitIssueAccordion per open issue, or the
+    # CLI-not-found/not-a-repo/error/empty-state message in the same tone
+    # Render-DevKitMcpPanel/Start-DevKitAgentCli already use for other CLIs.
+    param($Result)
+    $script:LastIssuesResult = $Result
+    $ui.IssuesPanel.Children.Clear()
+    $count = 0
+    if (-not $Result) {
+        Set-DevKitGitPanelMessage -Panel $ui.IssuesPanel -Message 'No data.'
+    } elseif ($Result.ErrorMessage) {
+        Set-DevKitGitPanelMessage -Panel $ui.IssuesPanel -Message ([string]$Result.ErrorMessage)
+    } elseif (-not $Result.CliInstalled) {
+        Set-DevKitGitPanelMessage -Panel $ui.IssuesPanel -Message 'GitHub CLI (gh) not found on PATH - install it to see issues here.'
+    } elseif (-not $Result.IsRepo) {
+        Set-DevKitGitPanelMessage -Panel $ui.IssuesPanel -Message 'Not a GitHub repository.'
+    } else {
+        $issues = @($Result.Issues)
+        $count = $issues.Count
+        if ($count -eq 0) {
+            Set-DevKitGitPanelMessage -Panel $ui.IssuesPanel -Message 'No open issues.'
+        } else {
+            foreach ($issue in $issues) { Add-DevKitIssueAccordion -Panel $ui.IssuesPanel -Issue $issue }
+        }
+    }
+    if ($Result -and $Result.Truncated) {
+        $ui.IssuesCountBadgeText.Text = "$count+"
+        $ui.IssuesCountBadge.ToolTip = "Showing the first $count open issues - there are more than that open."
+    } else {
+        $ui.IssuesCountBadgeText.Text = [string]$count
+        $ui.IssuesCountBadge.ToolTip = $null
+    }
+}
+
+$ui.TabCommits.Add_Checked({ Set-DevKitGitActiveTab -Tab 'Commits' })
+$ui.TabPullRequests.Add_Checked({ Set-DevKitGitActiveTab -Tab 'PullRequests' })
+$ui.TabIssues.Add_Checked({ Set-DevKitGitActiveTab -Tab 'Issues' })
+
 function Update-DevKitWidgetGitFlyout {
     # Pure render of an already-collected overview, on the dispatcher thread.
     param($Overview)
@@ -2678,6 +3309,309 @@ function Start-DevKitGitAction {
 
 $ui.BtnGitTab.Add_Click({ Set-DevKitGitFlyout -Open (-not $script:GitFlyoutOpen) })
 $ui.BtnGitClose.Add_Click({ Set-DevKitGitFlyout -Open $false })
+
+# ==================== NOTES FLYOUT (PER-PROJECT STICKY NOTES) ====================
+# Little sticky notes/prompts scoped to the active project, behind the NOTES
+# pull-tab under GIT. Persistence is Get/Save-DevKitProjectNotes
+# (DevKit-WidgetCore.ps1, notes.json in %LOCALAPPDATA%); this section owns
+# rendering, the debounced autosave, and the slide-out panel - which reuses
+# the Git flyout's animation/geometry machinery wholesale (shared
+# Start-DevKitFlyoutSlide, shared anim token, shared grip handlers routed by
+# -Kind), since the two panels are mutually exclusive by design.
+
+$script:ActiveNotes = @()            # live note objects bound to the rendered cards
+$script:NotesProjectPath = $null     # the project the CURRENT cards belong to
+$script:NotesDirty = $false
+
+# Sticky-tint rotation for new notes: color KEYS are persisted (not hex), so
+# a future palette tweak restyles existing notes for free.
+$script:NoteColorOrder = @('amber', 'blue', 'green', 'violet')
+$script:NoteColorMap = @{
+    amber  = @{ Bg = '#2A2416'; Border = '#4E4122'; Accent = '#E5C07B' }
+    blue   = @{ Bg = '#16222E'; Border = '#28425E'; Accent = '#4FA3FF' }
+    green  = @{ Bg = '#18251A'; Border = '#2C4A30'; Accent = '#98C379' }
+    violet = @{ Bg = '#241A2B'; Border = '#44305C'; Accent = '#C678DD' }
+}
+
+# Debounced autosave: every keystroke re-arms this; the file is written at
+# most ~once per pause in typing. Add/remove/close/project-switch flush
+# immediately instead of waiting on it.
+$script:NotesSaveTimer = New-Object Windows.Threading.DispatcherTimer
+$script:NotesSaveTimer.Interval = [TimeSpan]::FromMilliseconds(800)
+$script:NotesSaveTimer.Add_Tick({
+    $script:NotesSaveTimer.Stop()
+    Save-DevKitWidgetNotesFlush
+})
+
+function Request-DevKitNotesAutosave {
+    # The per-card TextChanged closures call THIS instead of touching
+    # $script: state directly: a .GetNewClosure() block is bound to a fresh
+    # dynamic module, where $script:X resolves to that module's own (empty)
+    # script scope - $script:NotesSaveTimer would read $null and .Stop()
+    # would throw right inside the TextChanged event (surfacing as a bare
+    # "System error" to UIA callers). Function CALLS resolve normally from
+    # closures, and inside a normal function $script: is the real script
+    # scope again.
+    $script:NotesDirty = $true
+    $script:NotesSaveTimer.Stop()
+    $script:NotesSaveTimer.Start()
+}
+
+function Save-DevKitWidgetNotesFlush {
+    # Persists the CURRENT cards to the project they belong to
+    # ($script:NotesProjectPath - deliberately NOT ActiveProjectPath, so a
+    # flush that happens as part of a project switch still lands on the
+    # project the user actually typed into).
+    if (-not $script:NotesDirty -or -not $script:NotesProjectPath) { return }
+    try {
+        Save-DevKitProjectNotes -ProjectPath $script:NotesProjectPath -Notes @($script:ActiveNotes)
+        $script:NotesDirty = $false
+    } catch { }
+}
+
+function Open-DevKitWidgetNotesProject {
+    # Flush whatever project the cards currently belong to, then load and
+    # render the active project's notes.
+    Save-DevKitWidgetNotesFlush
+    $script:NotesProjectPath = $script:ActiveProjectPath
+    $script:ActiveNotes = @(Get-DevKitProjectNotes -ProjectPath $script:NotesProjectPath)
+    $script:NotesDirty = $false
+    $ui.NotesFlyoutSub.Text = [string]$script:ActiveProjectName
+    Update-DevKitWidgetNotesPanel
+}
+
+function Update-DevKitWidgetNotesPanel {
+    $ui.NotesPanel.Children.Clear()
+    if (@($script:ActiveNotes).Count -eq 0) {
+        $empty = New-Object Windows.Controls.TextBlock
+        $empty.Text = "No notes yet - '+ Note' adds a sticky for this project."
+        $empty.FontSize = 10.5
+        $empty.Foreground = Get-WidgetResource 'BrushTextDim'
+        $empty.TextWrapping = 'Wrap'
+        $empty.Margin = '2,6,2,0'
+        $ui.NotesPanel.Children.Add($empty) | Out-Null
+        return
+    }
+    foreach ($note in $script:ActiveNotes) {
+        $ui.NotesPanel.Children.Add((New-DevKitNoteCard -Note $note)) | Out-Null
+    }
+}
+
+function New-DevKitNoteCard {
+    # One sticky-note card: tinted rounded Border, colored accent bar on the
+    # left, a borderless multiline TextBox, and a footer with the last-edited
+    # time and a two-step delete ('x' -> 'sure?' for 3s -> gone) - lighter
+    # than a modal popup but still a guard against a stray click.
+    # Returns the card Border; its .Tag is the TextBox (used to focus a
+    # freshly added note).
+    param([Parameter(Mandatory = $true)]$Note)
+
+    $palette = $script:NoteColorMap[[string]$Note.Color]
+    if (-not $palette) { $palette = $script:NoteColorMap['amber'] }
+
+    $card = New-Object Windows.Controls.Border
+    $card.CornerRadius = 6
+    $card.BorderThickness = 1
+    $card.BorderBrush = Get-DevKitGitBrush $palette.Border
+    $card.Background = Get-DevKitGitBrush $palette.Bg
+    $card.Margin = '0,0,0,8'
+
+    $grid = New-Object Windows.Controls.Grid
+    $c0 = New-Object Windows.Controls.ColumnDefinition; $c0.Width = 'Auto'
+    $c1 = New-Object Windows.Controls.ColumnDefinition
+    $grid.ColumnDefinitions.Add($c0); $grid.ColumnDefinitions.Add($c1)
+
+    $accent = New-Object Windows.Controls.Border
+    $accent.Width = 3
+    $accent.Background = Get-DevKitGitBrush $palette.Accent
+    $accent.CornerRadius = New-Object Windows.CornerRadius(5, 0, 0, 5)
+    $grid.Children.Add($accent) | Out-Null
+
+    $body = New-Object Windows.Controls.Grid
+    [Windows.Controls.Grid]::SetColumn($body, 1)
+    $r0 = New-Object Windows.Controls.RowDefinition; $r0.Height = 'Auto'
+    $r1 = New-Object Windows.Controls.RowDefinition; $r1.Height = 'Auto'
+    $body.RowDefinitions.Add($r0); $body.RowDefinitions.Add($r1)
+
+    $tb = New-Object Windows.Controls.TextBox
+    $tb.Text = [string]$Note.Text
+    $tb.Background = [Windows.Media.Brushes]::Transparent
+    $tb.BorderThickness = 0
+    $tb.Foreground = Get-WidgetResource 'BrushTextBright'
+    $tb.CaretBrush = Get-DevKitGitBrush $palette.Accent
+    $tb.FontSize = 11.5
+    $tb.TextWrapping = 'Wrap'
+    $tb.AcceptsReturn = $true
+    $tb.MinHeight = 44
+    $tb.Padding = '8,6,8,2'
+    # Stable UIA ids (suffixed with the note id) so E2E checks can find a
+    # specific card's editor/delete without guessing among look-alikes.
+    [System.Windows.Automation.AutomationProperties]::SetAutomationId($tb, "NoteText_$($Note.Id)")
+    $body.Children.Add($tb) | Out-Null
+
+    $footer = New-Object Windows.Controls.Grid
+    [Windows.Controls.Grid]::SetRow($footer, 1)
+    $edited = New-Object Windows.Controls.TextBlock
+    $edited.FontSize = 9
+    $edited.Foreground = Get-WidgetResource 'BrushTextDim'
+    $edited.VerticalAlignment = 'Center'
+    $edited.Margin = '11,0,0,5'
+    $edited.Text = if ([string]::IsNullOrWhiteSpace([string]$Note.UpdatedAt)) { '' } else { "edited $(Format-DevKitRelativeTime -Iso ([string]$Note.UpdatedAt))" }
+    $footer.Children.Add($edited) | Out-Null
+
+    $del = New-Object Windows.Controls.Button
+    $del.Style = Get-WidgetResource 'ChromeButton'
+    $del.FontFamily = New-Object Windows.Media.FontFamily('Segoe MDL2 Assets')
+    $del.FontSize = 9
+    $del.Content = [char]0xE106
+    $del.MinWidth = 24
+    $del.Height = 18
+    $del.HorizontalAlignment = 'Right'
+    $del.Margin = '0,0,4,4'
+    $del.ToolTip = 'Delete this note'
+    $del.Tag = $false   # $true while in the 'sure?' confirm window
+    [System.Windows.Automation.AutomationProperties]::SetAutomationId($del, "NoteDelete_$($Note.Id)")
+    $footer.Children.Add($del) | Out-Null
+    $body.Children.Add($footer) | Out-Null
+
+    $grid.Children.Add($body) | Out-Null
+    $card.Child = $grid
+    $card.Tag = $tb
+
+    $tb.Add_TextChanged({
+        $Note.Text = $tb.Text
+        $Note.UpdatedAt = [DateTime]::UtcNow.ToString('o')
+        $edited.Text = 'edited just now'
+        Request-DevKitNotesAutosave   # NOT inline $script: sets - see the function's comment
+    }.GetNewClosure())
+
+    # Two-step delete. The revert timer is per-card; the token-free Tag flag
+    # is enough state because a re-render rebuilds the card (and its state)
+    # from scratch anyway.
+    $revert = New-Object Windows.Threading.DispatcherTimer
+    $revert.Interval = [TimeSpan]::FromSeconds(3)
+    $revert.Add_Tick({
+        $revert.Stop()
+        $del.Tag = $false
+        $del.FontFamily = New-Object Windows.Media.FontFamily('Segoe MDL2 Assets')
+        $del.FontSize = 9
+        $del.Content = [char]0xE106
+        $del.ClearValue([Windows.Controls.Control]::ForegroundProperty)
+    }.GetNewClosure())
+    $del.Add_Click({
+        if (-not $del.Tag) {
+            $del.Tag = $true
+            $del.FontFamily = New-Object Windows.Media.FontFamily('Segoe UI')
+            $del.FontSize = 9
+            $del.Content = 'sure?'
+            $del.Foreground = Get-WidgetResource 'BrushDangerRed'
+            $revert.Start()
+            return
+        }
+        $revert.Stop()
+        Remove-DevKitWidgetNote -Note $Note
+    }.GetNewClosure())
+
+    return $card
+}
+
+function Add-DevKitWidgetNote {
+    if (-not $script:NotesProjectPath) { return }
+    $color = $script:NoteColorOrder[@($script:ActiveNotes).Count % $script:NoteColorOrder.Count]
+    $note = [PSCustomObject]@{
+        Id        = [guid]::NewGuid().ToString('N')
+        Text      = ''
+        Color     = $color
+        UpdatedAt = [DateTime]::UtcNow.ToString('o')
+    }
+    # Newest on top, like a fresh sticky slapped over the pile.
+    $script:ActiveNotes = @($note) + @($script:ActiveNotes)
+    $script:NotesDirty = $true
+    Save-DevKitWidgetNotesFlush
+    Update-DevKitWidgetNotesPanel
+    try { $ui.NotesPanel.Children[0].Tag.Focus() | Out-Null } catch { }
+}
+
+function Remove-DevKitWidgetNote {
+    param([Parameter(Mandatory = $true)]$Note)
+    $script:ActiveNotes = @($script:ActiveNotes | Where-Object { $_.Id -ne $Note.Id })
+    $script:NotesDirty = $true
+    Save-DevKitWidgetNotesFlush
+    Update-DevKitWidgetNotesPanel
+}
+
+function Set-DevKitNotesFlyout {
+    param([bool]$Open, [switch]$Instant)
+    if ($Open -eq $script:NotesFlyoutOpen) { return }
+    if ($Open -and -not $script:ActiveProjectPath) { return }
+    # Only one flyout at a time - mirror of the guard in Set-DevKitGitFlyout
+    # (see the comment there for why the close is -Instant).
+    if ($Open -and $script:GitFlyoutOpen) { Set-DevKitGitFlyout -Open $false -Instant }
+
+    # Same lockstep window/flyout animation contract as Set-DevKitGitFlyout
+    # (see the long comment there). The two flyouts share one anim token:
+    # only one slide is ever in flight, and a toggle of either must stale-out
+    # the other's pending Completed handlers.
+    $script:GitFlyoutAnimToken++
+    $token = $script:GitFlyoutAnimToken
+    $curFlyoutWidth = $ui.NotesFlyout.Width
+    $curLeft = $window.Left
+    $contentWidth = $window.Width - $curFlyoutWidth
+    $targetFlyoutWidth = if ($Open) { $script:NotesFlyoutWidth } else { 0 }
+    $targetWindowWidth = $contentWidth + $targetFlyoutWidth
+
+    if ($Instant) {
+        $window.BeginAnimation([Windows.Window]::WidthProperty, $null)
+        $window.BeginAnimation([Windows.Window]::LeftProperty, $null)
+        $ui.NotesFlyout.BeginAnimation([Windows.Controls.Border]::WidthProperty, $null)
+        $ui.NotesFlyout.Width = $targetFlyoutWidth
+        $window.Width = $targetWindowWidth
+        if ($script:DockMode -eq 'Right') {
+            $contentLeft = $curLeft + $curFlyoutWidth
+            $window.Left = if ($Open) { $contentLeft - $targetFlyoutWidth } else { $contentLeft }
+        }
+        $script:NotesFlyoutOpen = $Open
+        if ($Open) {
+            $ui.NotesFlyoutInner.Width = $script:NotesFlyoutWidth
+            $ui.BtnNotesTab.Foreground = Get-DevKitGitBrush '#E5C07B'
+            Open-DevKitWidgetNotesProject
+        } else {
+            $ui.BtnNotesTab.Foreground = Get-WidgetResource 'BrushTextMuted'
+            Save-DevKitWidgetNotesFlush
+        }
+        return
+    }
+
+    if ($Open) {
+        $script:NotesFlyoutOpen = $true
+        $ui.NotesFlyoutInner.Width = $script:NotesFlyoutWidth
+        Start-DevKitFlyoutSlide -Target $ui.NotesFlyout -Property ([Windows.Controls.Border]::WidthProperty) -To $targetFlyoutWidth -Opening $true -Token $token
+        Start-DevKitFlyoutSlide -Target $window -Property ([Windows.Window]::WidthProperty) -To $targetWindowWidth -Opening $true -Token $token
+        if ($script:DockMode -eq 'Right') {
+            # Right-docked: pinned right edge, window grows leftward - same
+            # Left+Width lockstep as the Git flyout's open path.
+            $contentLeft = $window.Left + $curFlyoutWidth
+            $targetLeft = $contentLeft - $targetFlyoutWidth
+            Start-DevKitFlyoutSlide -Target $window -Property ([Windows.Window]::LeftProperty) -To $targetLeft -Opening $true -Token $token
+        }
+        $ui.BtnNotesTab.Foreground = Get-DevKitGitBrush '#E5C07B'
+        Open-DevKitWidgetNotesProject
+    } else {
+        $script:NotesFlyoutOpen = $false
+        Start-DevKitFlyoutSlide -Target $ui.NotesFlyout -Property ([Windows.Controls.Border]::WidthProperty) -To 0 -Opening $false -Token $token
+        Start-DevKitFlyoutSlide -Target $window -Property ([Windows.Window]::WidthProperty) -To $targetWindowWidth -Opening $false -Token $token
+        if ($script:DockMode -eq 'Right') {
+            $contentLeft = $window.Left + $curFlyoutWidth
+            Start-DevKitFlyoutSlide -Target $window -Property ([Windows.Window]::LeftProperty) -To $contentLeft -Opening $false -Token $token
+        }
+        $ui.BtnNotesTab.Foreground = Get-WidgetResource 'BrushTextMuted'
+        Save-DevKitWidgetNotesFlush
+    }
+}
+
+$ui.BtnNotesTab.Add_Click({ Set-DevKitNotesFlyout -Open (-not $script:NotesFlyoutOpen) })
+$ui.BtnNotesClose.Add_Click({ Set-DevKitNotesFlyout -Open $false })
+$ui.BtnNoteAdd.Add_Click({ Add-DevKitWidgetNote })
 $ui.BtnGitFetch.Add_Click({ Start-DevKitGitAction -Kind 'GitFetch' -Verb 'fetch' })
 $ui.BtnGitPull.Add_Click({ Start-DevKitGitAction -Kind 'GitPull' -Verb 'pull' })
 $ui.BtnGitPush.Add_Click({ Start-DevKitGitAction -Kind 'GitPush' -Verb 'push' })
@@ -3236,6 +4170,7 @@ if ($script:App) { $script:App.Run() | Out-Null } else { [Windows.Application]::
 
 # Run() only returns after a real Exit (Application.Shutdown()) - Closing
 # cancels every other path, and Hide() no longer ends the loop.
+try { Save-DevKitWidgetNotesFlush } catch { }   # any keystrokes still inside the autosave debounce window
 $script:FastTimer.Stop()
 $script:SlowTimer.Stop()
 $script:SummonTimer.Stop()

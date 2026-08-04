@@ -1336,11 +1336,38 @@ $ui.BtnClose.Add_Click({ $window.Close() })
 function Start-DevKitCompanionWidget {
     param([Windows.Controls.Button]$SourceButton)
     $widgetPath = Join-Path $GuiDir 'DevKit-Widget.ps1'
-    $shellExe = "$($script:TerminalProbe.Shell).exe"
+    # Launch the same shell the widget itself would hop to (a non-Store
+    # pwsh if one exists, else always-unpackaged Windows PowerShell 5.1 -
+    # see the MSIX relaunch guard in DevKit-Widget.ps1). Launching Store
+    # pwsh here would just add a relaunch hop AND make the crash watch
+    # below useless: the direct child would exit 0 almost instantly while
+    # the real widget lives in a grandchild this function never sees.
+    $shellExe = Get-Command pwsh -All -ErrorAction SilentlyContinue |
+        Where-Object { $_.Source -notlike '*\WindowsApps\*' } | Select-Object -First 1 -ExpandProperty Source
+    if (-not $shellExe) { $shellExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe' }
     try {
-        Start-Process $shellExe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Sta -WindowStyle Hidden -File `"$widgetPath`"" -WorkingDirectory $ScriptDir
+        $proc = Start-Process $shellExe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Sta -WindowStyle Hidden -File `"$widgetPath`"" -WorkingDirectory $ScriptDir -PassThru
         $ui.StatusTerminalText.Text = 'Companion widget launched - it lives in the system tray.'
         Register-DevKitGuiLaunchFeedback -Button $SourceButton
+        # "Launched" above is optimistic - if the process dies with a
+        # nonzero code within a few seconds (seen in the wild: loader
+        # error 0xC0000142 shortly after sign-in), say so instead of
+        # leaving a success message on screen with no widget anywhere.
+        # A fast EXIT 0 stays quiet on purpose: that is the normal
+        # second-launch path (summon the running instance and quit).
+        $watch = New-Object Windows.Threading.DispatcherTimer
+        $watch.Interval = [TimeSpan]::FromSeconds(6)
+        $watch.Add_Tick({
+            $watch.Stop()
+            if ($proc -and $proc.HasExited -and $proc.ExitCode -ne 0) {
+                $code = '0x{0:X8}' -f $proc.ExitCode
+                Show-DevKitGuiMessage -Title 'Widget failed to start' -IsError -Message (
+                    "The companion widget process exited immediately (code $code). " +
+                    "Try launching it again - if it keeps failing, check " +
+                    "$env:LOCALAPPDATA\NorthstarDevKit\widget-startup.log.")
+            }
+        }.GetNewClosure())
+        $watch.Start()
     } catch {
         Show-DevKitGuiMessage -Title 'Cannot launch widget' -Message "Failed to start the companion widget: $_" -IsError
     }

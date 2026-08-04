@@ -70,6 +70,7 @@ function Get-DevKitSettings {
             widgetDockMode     = 'Right'
             widgetWidth        = 380
             gitFlyoutWidth     = 300
+            notesFlyoutWidth   = 300
             envDriftSilencedProjects = @()
         }
     }

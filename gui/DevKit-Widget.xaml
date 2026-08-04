@@ -392,38 +392,108 @@
                                 ToolTip="Close the Git panel"/>
                     </Grid>
 
-                    <!-- Uncommitted changes: collapsed-by-default expander, header shows a
-                         live count badge; body (UncommittedFilesPanel) is rebuilt in code from
-                         Get-DevKitRepoOverview's DirtyFiles - see Update-DevKitGitUncommittedList
-                         in DevKit-Widget.ps1. Hidden entirely when DirtyFiles is empty. -->
-                    <Expander Grid.Row="1" x:Name="UncommittedExpander" Margin="12,0,12,8" ToolTip="Click to expand or collapse">
-                        <Expander.Header>
+                    <!-- Tab strip: Commits (existing graph/uncommitted view) | Pull
+                         Requests | Issues - mutually exclusive via GroupName, styled
+                         with GitTabButton (Theme.xaml) for a horizontal underline-
+                         accent look. Only one of the three GitTab*View siblings below
+                         (content-area row, Grid.Row=2) is Visible at a time - toggled
+                         in code by Set-DevKitGitActiveTab (DevKit-Widget.ps1), which
+                         also swaps the footer's (GitFlyoutFooter, Grid.Row=3)
+                         Visibility - Fetch/Pull/Push/Open-on-GitHub/Actions/Cleanup +
+                         the status line only make sense for Commits - and lazily
+                         fetches PR/Issue data on first switch (or when stale, or the
+                         active project changed since the last fetch) via
+                         Start-DevKitWorkJob -Kind 'GitHubPRs'/'GitHubIssues'. -->
+                    <UniformGrid Grid.Row="1" Columns="3" Margin="12,0,12,6">
+                        <RadioButton x:Name="TabCommits" Style="{StaticResource GitTabButton}" GroupName="GitFlyoutTabs"
+                                     IsChecked="True" Content="Commits" ToolTip="Commit graph and uncommitted changes"/>
+                        <RadioButton x:Name="TabPullRequests" Style="{StaticResource GitTabButton}" GroupName="GitFlyoutTabs"
+                                     ToolTip="Open pull requests">
                             <StackPanel Orientation="Horizontal">
-                                <TextBlock Style="{StaticResource WidgetExpanderTitle}" Text="UNCOMMITTED CHANGES"/>
-                                <Border x:Name="UncommittedCountBadge" Style="{StaticResource BadgeNeutral}" Margin="8,0,0,0" VerticalAlignment="Center">
-                                    <TextBlock x:Name="UncommittedCountBadgeText" Style="{StaticResource BadgeNeutralText}" Text="0"/>
+                                <TextBlock Text="PRs" VerticalAlignment="Center"/>
+                                <Border x:Name="PrCountBadge" Style="{StaticResource BadgeNeutral}" Margin="5,0,0,0" VerticalAlignment="Center">
+                                    <TextBlock x:Name="PrCountBadgeText" Style="{StaticResource BadgeNeutralText}" Text="0"/>
                                 </Border>
                             </StackPanel>
-                        </Expander.Header>
-                        <StackPanel x:Name="UncommittedFilesPanel"/>
-                    </Expander>
+                        </RadioButton>
+                        <RadioButton x:Name="TabIssues" Style="{StaticResource GitTabButton}" GroupName="GitFlyoutTabs"
+                                     ToolTip="Open issues">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="Issues" VerticalAlignment="Center"/>
+                                <Border x:Name="IssuesCountBadge" Style="{StaticResource BadgeNeutral}" Margin="5,0,0,0" VerticalAlignment="Center">
+                                    <TextBlock x:Name="IssuesCountBadgeText" Style="{StaticResource BadgeNeutralText}" Text="0"/>
+                                </Border>
+                            </StackPanel>
+                        </RadioButton>
+                    </UniformGrid>
 
-                    <Border Grid.Row="2" Background="{StaticResource BrushInputBg}" BorderBrush="{StaticResource BrushCardBorder}"
-                            BorderThickness="1" CornerRadius="6" Margin="12,0,12,8">
-                        <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
-                            <Grid>
-                                <!-- Fallback/messages (loading, not-a-repo, errors) -->
-                                <TextBlock x:Name="GitGraphText" FontSize="10.5"
-                                           Foreground="{StaticResource BrushTextDim}" Margin="8,6" TextWrapping="Wrap"
-                                           Text="Loading commit graph..."/>
-                                <!-- The drawn graph: lanes + S-curve links + nodes + ref pills,
-                                     built in code from Get-DevKitRepoOverview's Graph layout. -->
-                                <Canvas x:Name="GitGraphCanvas" VerticalAlignment="Top" HorizontalAlignment="Left"/>
-                            </Grid>
+                    <!-- Content area: three swappable panels stacked in the SAME cell
+                         (same overlap idiom as GitGraphText/GitGraphCanvas below) -
+                         Visibility toggled by Set-DevKitGitActiveTab, never more than
+                         one Visible at once. -->
+                    <Grid Grid.Row="2">
+                        <!-- Commits tab: the ORIGINAL UncommittedExpander + commit-graph
+                             Border, unchanged internally, just re-parented into their own
+                             Auto/* rows so the graph still fills remaining height exactly
+                             as it did when these were GitFlyoutInner's own rows 1 and 2. -->
+                        <Grid x:Name="GitTabCommitsView">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+
+                            <!-- Uncommitted changes: collapsed-by-default expander, header shows a
+                                 live count badge; body (UncommittedFilesPanel) is rebuilt in code from
+                                 Get-DevKitRepoOverview's DirtyFiles - see Update-DevKitGitUncommittedList
+                                 in DevKit-Widget.ps1. Hidden entirely when DirtyFiles is empty. -->
+                            <Expander Grid.Row="0" x:Name="UncommittedExpander" Margin="12,0,12,8" ToolTip="Click to expand or collapse">
+                                <Expander.Header>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Style="{StaticResource WidgetExpanderTitle}" Text="UNCOMMITTED CHANGES"/>
+                                        <Border x:Name="UncommittedCountBadge" Style="{StaticResource BadgeNeutral}" Margin="8,0,0,0" VerticalAlignment="Center">
+                                            <TextBlock x:Name="UncommittedCountBadgeText" Style="{StaticResource BadgeNeutralText}" Text="0"/>
+                                        </Border>
+                                    </StackPanel>
+                                </Expander.Header>
+                                <StackPanel x:Name="UncommittedFilesPanel"/>
+                            </Expander>
+
+                            <Border Grid.Row="1" Background="{StaticResource BrushInputBg}" BorderBrush="{StaticResource BrushCardBorder}"
+                                    BorderThickness="1" CornerRadius="6" Margin="12,0,12,8">
+                                <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+                                    <Grid>
+                                        <!-- Fallback/messages (loading, not-a-repo, errors) -->
+                                        <TextBlock x:Name="GitGraphText" FontSize="10.5"
+                                                   Foreground="{StaticResource BrushTextDim}" Margin="8,6" TextWrapping="Wrap"
+                                                   Text="Loading commit graph..."/>
+                                        <!-- The drawn graph: lanes + S-curve links + nodes + ref pills,
+                                             built in code from Get-DevKitRepoOverview's Graph layout. -->
+                                        <Canvas x:Name="GitGraphCanvas" VerticalAlignment="Top" HorizontalAlignment="Left"/>
+                                    </Grid>
+                                </ScrollViewer>
+                            </Border>
+                        </Grid>
+
+                        <!-- Pull Requests tab: empty until Set-DevKitGitActiveTab fetches -
+                             stage 3 renders real PR rows into PullRequestsPanel; Update-
+                             DevKitWidgetPullRequests (DevKit-Widget.ps1) currently only
+                             places a placeholder count line here. -->
+                        <ScrollViewer x:Name="GitTabPullRequestsView" Visibility="Collapsed"
+                                      VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                            <StackPanel x:Name="PullRequestsPanel" Margin="12,0,12,8"/>
                         </ScrollViewer>
-                    </Border>
 
-                    <StackPanel Grid.Row="3" Margin="12,0,12,12">
+                        <!-- Issues tab: empty until Set-DevKitGitActiveTab fetches - stage 3
+                             renders real issue accordions into IssuesPanel; Update-DevKit
+                             WidgetIssues (DevKit-Widget.ps1) currently only places a
+                             placeholder count line here. -->
+                        <ScrollViewer x:Name="GitTabIssuesView" Visibility="Collapsed"
+                                      VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                            <StackPanel x:Name="IssuesPanel" Margin="12,0,12,8"/>
+                        </ScrollViewer>
+                    </Grid>
+
+                    <StackPanel x:Name="GitFlyoutFooter" Grid.Row="3" Margin="12,0,12,12">
                         <TextBlock x:Name="GitFlyoutStatus" Style="{StaticResource StatusText}" FontSize="9.5" TextWrapping="Wrap" Margin="0,0,0,6" Text=""/>
                         <UniformGrid Columns="3">
                             <Button x:Name="BtnGitFetch" Style="{StaticResource GhostButton}" FontSize="10.5" Margin="0,0,3,0" Content="Fetch"/>
@@ -442,24 +512,77 @@
               </Grid>
             </Border>
 
-            <!-- GIT pull-tab: always visible/clickable regardless of the
-                 flyout's open/closed state - it both opens the panel and
-                 marks where it will appear. Owns its OWN column (0 west / 4
-                 east, never shared with Main or GitFlyout) at the TRUE outer
-                 edge of the window; Grid.Column, HorizontalAlignment and
-                 Style (GitTabButtonWest/East - see Theme.xaml) are all
-                 toggled together in code (Set-DevKitWidgetDock). -->
-            <Button x:Name="BtnGitTab" Grid.Column="0" Width="24" Height="76"
-                    HorizontalAlignment="Left" VerticalAlignment="Center"
-                    Style="{StaticResource GitTabButtonWest}" Padding="0"
-                    FontFamily="Segoe UI" FontSize="10" FontWeight="SemiBold"
-                    ToolTip="Git panel for the active project (select a project first)">
-                <TextBlock Text="GIT">
-                    <TextBlock.LayoutTransform>
-                        <RotateTransform Angle="90"/>
-                    </TextBlock.LayoutTransform>
-                </TextBlock>
-            </Button>
+            <!-- Notes flyout: the Git flyout's sibling - same dedicated
+                 column (1 west / 3 east), same 0-width-until-opened slide,
+                 same OUTER-edge resize grip; only one of the two flyouts is
+                 ever open at a time (Set-DevKitGitFlyout / Set-DevKit-
+                 NotesFlyout each instant-close the other before opening).
+                 Content is per-project sticky notes, rendered in code
+                 (Update-DevKitWidgetNotesPanel) into NotesPanel. -->
+            <Border x:Name="NotesFlyout" Grid.Column="1" Width="0" ClipToBounds="True"
+                    Background="{StaticResource BrushPanelBg}" BorderBrush="{StaticResource BrushSeparator}" BorderThickness="1,0,0,0">
+              <Grid>
+                <Grid x:Name="NotesFlyoutInner" Width="300" HorizontalAlignment="Right">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <Grid Margin="12,12,12,8">
+                        <StackPanel>
+                            <TextBlock x:Name="NotesFlyoutTitle" Style="{StaticResource WidgetExpanderTitle}" Text="NOTES" TextTrimming="CharacterEllipsis"/>
+                            <TextBlock x:Name="NotesFlyoutSub" Style="{StaticResource WidgetExpanderSub}" Text="" TextTrimming="CharacterEllipsis"/>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top">
+                            <Button x:Name="BtnNoteAdd" Style="{StaticResource GhostButton}" FontSize="10.5" Padding="8,2"
+                                    Margin="0,0,6,0" VerticalAlignment="Top" Content="+ Note"
+                                    ToolTip="Add a new sticky note for this project"/>
+                            <Button x:Name="BtnNotesClose" Style="{StaticResource ChromeButton}" Width="24" Height="22"
+                                    VerticalAlignment="Top" Content="&#xE106;"
+                                    ToolTip="Close the Notes panel"/>
+                        </StackPanel>
+                    </Grid>
+
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel x:Name="NotesPanel" Margin="12,0,12,12"/>
+                    </ScrollViewer>
+                </Grid>
+                <Border x:Name="NotesFlyoutGrip" Width="6" HorizontalAlignment="Right"
+                        Background="Transparent" Cursor="SizeWE" ToolTip="Drag to resize the Notes panel width"/>
+              </Grid>
+            </Border>
+
+            <!-- Side pull-tabs: always visible/clickable regardless of the
+                 flyouts' open/closed state - each both opens its panel and
+                 marks where it will appear. The stack owns its OWN column
+                 (0 west / 4 east, never shared with Main or the flyouts) at
+                 the TRUE outer edge of the window; Grid.Column and
+                 HorizontalAlignment move on the STACK, while each button's
+                 Style ((Git|Notes)TabButtonWest/East - see Theme.xaml) is
+                 swapped per-button - all toggled together in code
+                 (Set-DevKitWidgetDock). -->
+            <StackPanel x:Name="SideTabStack" Grid.Column="0" VerticalAlignment="Center" HorizontalAlignment="Left">
+                <Button x:Name="BtnGitTab" Width="24" Height="76"
+                        Style="{StaticResource GitTabButtonWest}" Padding="0"
+                        FontFamily="Segoe UI" FontSize="10" FontWeight="SemiBold"
+                        ToolTip="Git panel for the active project (select a project first)">
+                    <TextBlock Text="GIT">
+                        <TextBlock.LayoutTransform>
+                            <RotateTransform Angle="90"/>
+                        </TextBlock.LayoutTransform>
+                    </TextBlock>
+                </Button>
+                <Button x:Name="BtnNotesTab" Width="24" Height="76" Margin="0,10,0,0"
+                        Style="{StaticResource NotesTabButtonWest}" Padding="0"
+                        FontFamily="Segoe UI" FontSize="10" FontWeight="SemiBold"
+                        ToolTip="Sticky notes for the active project (select a project first)">
+                    <TextBlock Text="NOTES">
+                        <TextBlock.LayoutTransform>
+                            <RotateTransform Angle="90"/>
+                        </TextBlock.LayoutTransform>
+                    </TextBlock>
+                </Button>
+            </StackPanel>
         </Grid>
     </Border>
 </Window>

@@ -26,3 +26,7 @@ devinfo-*.json
 
 # AI agent scratch/probe artifacts (test fixtures, screenshots, throwaway repos)
 .kimi/
+
+# Generated portable distribution (Build-UsbPortable.ps1) - rebuild on demand,
+# never hand-edit or commit its contents.
+/USB/
