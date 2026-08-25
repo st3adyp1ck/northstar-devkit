@@ -46,7 +46,9 @@ anyhow.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+tracing-appender.workspace = true
 portable-pty = "0.9"
 which = "7"
+dunce = "1"
 uuid = { version = "1", features = ["v4"] }
 devkit-host = { path = "../../crates/devkit-host" }

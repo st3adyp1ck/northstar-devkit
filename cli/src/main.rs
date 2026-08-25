@@ -30,7 +30,13 @@ enum Command {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Stderr, not the default stdout: `devkit catalog` prints real JSON to
+    // stdout meant to be piped/parsed, and the sidecar's forwarded stderr
+    // (tracing::warn! from crates/devkit-host) would otherwise interleave
+    // with it on the same stream, corrupting it for any consumer stricter
+    // than a human eyeballing the terminal.
     tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),

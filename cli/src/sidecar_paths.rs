@@ -20,7 +20,10 @@ pub fn resolve() -> anyhow::Result<SidecarSpec> {
         program: pwsh,
         script,
         cwd,
-        default_timeout: Duration::from_secs(30),
+        // See app/src-tauri/src/paths.rs's to_sidecar_spec() for why 60s,
+        // not 30s: the sidecar's cold DevKit.Core.psm1 import can be slower
+        // than a per-call timeout tuned around an already-warm process.
+        default_timeout: Duration::from_secs(60),
     })
 }
 

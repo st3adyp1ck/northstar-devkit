@@ -49,23 +49,57 @@ $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 [Console]::InputEncoding = [System.Text.Encoding]::UTF8
 
-$script:RepoRoot = $PSScriptRoot | Split-Path -Parent
-$script:CoreModulePath = Join-Path $PSScriptRoot 'DevKit.Core.psm1'
-$script:MethodsScriptPath = Join-Path $PSScriptRoot 'RpcMethods.ps1'
-$script:ProtocolScriptPath = Join-Path $PSScriptRoot 'RpcProtocol.ps1'
+# Defense in depth against Win32 verbatim ("\\?\"-prefixed) paths: pwsh will
+# RUN a script invoked via a verbatim path (so $PSScriptRoot inherits the
+# prefix), but its own providers reject the prefix - Test-Path returns FALSE
+# for files that exist (reproduced on pwsh 7.6.5), which killed every lane at
+# init when the Tauri release build passed its canonicalized resource_dir
+# here. The Rust host now strips the prefix itself (app/src-tauri/src/
+# paths.rs), but normalize again here so no other/future host can reintroduce
+# the same silent breakage.
+$script:ScriptRoot = $PSScriptRoot
+if ($script:ScriptRoot.StartsWith('\\?\UNC\')) {
+    $script:ScriptRoot = '\\' + $script:ScriptRoot.Substring(8)
+} elseif ($script:ScriptRoot.StartsWith('\\?\')) {
+    $script:ScriptRoot = $script:ScriptRoot.Substring(4)
+}
+
+$script:RepoRoot = $script:ScriptRoot | Split-Path -Parent
+$script:CoreModulePath = Join-Path $script:ScriptRoot 'DevKit.Core.psm1'
+$script:MethodsScriptPath = Join-Path $script:ScriptRoot 'RpcMethods.ps1'
+$script:ProtocolScriptPath = Join-Path $script:ScriptRoot 'RpcProtocol.ps1'
 
 . $script:ProtocolScriptPath
 
 function Write-DevKitRpcDiag {
+    <#
+    .SYNOPSIS
+        Startup/shutdown/malformed-input diagnostics to stderr - always on
+        (the -VerboseRpc switch used to gate this, but nothing ever passed
+        it, so this whole trail was silently never emitted in production).
+        The Rust host forwards every sidecar stderr line into its own
+        tracing output, which now goes to a real log file
+        (%LOCALAPPDATA%\NorthstarDevKit\logs\devkit.log) - this is the
+        PowerShell-side half of that trail, cheap enough to always run.
+    #>
     param([string]$Message)
-    if ($VerboseRpc) {
-        [Console]::Error.WriteLine("[devkit-rpc] $Message")
-    }
+    [Console]::Error.WriteLine("[devkit-rpc] $Message")
 }
 
 # ==================== SHARED QUEUES ====================
 
 $script:OutQueue = [System.Collections.Concurrent.BlockingCollection[string]]::new()
+
+# Shared across the three lane runspaces (passed by live reference, like the
+# queues) to SERIALIZE their DevKit.Core imports. PowerShell's script/
+# attribute compilation caches are process-wide statics with known
+# thread-safety holes - three runspaces importing the same module chain at
+# the same instant can nondeterministically die with "An item with the same
+# key has already been added. Key: AllowEmptyString" (observed on a real
+# install: metrics lane lost the race while work/slow booted fine). Costing
+# ~2x/3x a single ~180ms import on background threads at startup is nothing;
+# a lane that never comes up is everything.
+$script:ImportLock = [System.Object]::new()
 $script:LaneQueues = @{
     metrics = [System.Collections.Concurrent.BlockingCollection[object]]::new()
     slow    = [System.Collections.Concurrent.BlockingCollection[object]]::new()
@@ -111,14 +145,55 @@ function Start-DevKitRpcLane {
     $rs.SessionStateProxy.SetVariable('MethodsScriptPath', $script:MethodsScriptPath)
     $rs.SessionStateProxy.SetVariable('ProtocolScriptPath', $script:ProtocolScriptPath)
     $rs.SessionStateProxy.SetVariable('RepoRoot', $script:RepoRoot)
+    $rs.SessionStateProxy.SetVariable('ImportLock', $script:ImportLock)
 
     $ps = [powershell]::Create()
     $ps.Runspace = $rs
     [void]$ps.AddScript({
         $ErrorActionPreference = 'Stop'
         . $ProtocolScriptPath
-        Import-Module $CoreModulePath -Force -Global
-        . $MethodsScriptPath
+
+        # If Import-Module/dot-sourcing itself throws (a PS-version
+        # incompatibility, a missing dependency, anything environment-
+        # specific that doesn't reproduce on every machine), this lane's
+        # runspace thread would otherwise just die here silently - nothing
+        # else in this script is watching $ps.BeginInvoke()'s handle, so
+        # every request later routed to this lane would sit in
+        # $InQueue.GetConsumingEnumerable() forever with NOTHING consuming
+        # it, hanging until each caller's own timeout with zero diagnostic
+        # trail. Catch it, log it loudly (always - not gated behind
+        # -VerboseRpc, this is exactly the failure mode that needs to be
+        # visible by default), and keep draining the queue anyway so every
+        # request gets an honest, immediate error instead of a silent hang.
+        $importError = $null
+        $sw = [System.Diagnostics.Stopwatch]::StartNew()
+        # Hold $ImportLock (one live object shared by all three lanes) across
+        # the whole import: pwsh's compilation caches are process-wide
+        # statics that concurrent same-module imports can corrupt - see the
+        # lock's declaration comment. Monitor over lock{} since this is a
+        # plain scriptblock, and Exit in finally so an import that THROWS
+        # can't leave the other two lanes deadlocked behind it.
+        [System.Threading.Monitor]::Enter($ImportLock)
+        try {
+            Import-Module $CoreModulePath -Force -Global
+            . $MethodsScriptPath
+        } catch {
+            $importError = $_
+        } finally {
+            [System.Threading.Monitor]::Exit($ImportLock)
+        }
+        $sw.Stop()
+
+        if ($importError) {
+            [Console]::Error.WriteLine("[devkit-rpc][$LaneName] FAILED to initialize after $($sw.Elapsed.TotalMilliseconds)ms: $($importError.Exception.Message)")
+            [Console]::Error.WriteLine($importError.ScriptStackTrace)
+            foreach ($request in $InQueue.GetConsumingEnumerable()) {
+                $line = ConvertTo-DevKitRpcLine (New-DevKitRpcFailure -Id $request.id -Kind 'LaneInitFailed' -Message "The '$LaneName' lane failed to initialize: $($importError.Exception.Message)")
+                $OutQueue.Add($line)
+            }
+            return
+        }
+        [Console]::Error.WriteLine("[devkit-rpc][$LaneName] ready after $($sw.Elapsed.TotalMilliseconds)ms")
 
         # Per-lane event emitter: lets a long-running method (e.g. a tool
         # run streaming stdout) push unsolicited "event" lines onto the same
@@ -132,13 +207,13 @@ function Start-DevKitRpcLane {
         }.GetNewClosure()
 
         foreach ($request in $InQueue.GetConsumingEnumerable()) {
-            $sw = [System.Diagnostics.Stopwatch]::StartNew()
+            $reqSw = [System.Diagnostics.Stopwatch]::StartNew()
             try {
                 $result = Invoke-DevKitRpcMethod -Method $request.method -Params $request.params -EmitEvent $emitEvent
-                $sw.Stop()
-                $line = ConvertTo-DevKitRpcLine (New-DevKitRpcSuccess -Id $request.id -Result $result -Ms $sw.Elapsed.TotalMilliseconds)
+                $reqSw.Stop()
+                $line = ConvertTo-DevKitRpcLine (New-DevKitRpcSuccess -Id $request.id -Result $result -Ms $reqSw.Elapsed.TotalMilliseconds)
             } catch {
-                $sw.Stop()
+                $reqSw.Stop()
                 $line = ConvertTo-DevKitRpcLine (New-DevKitRpcFailure -Id $request.id -Message $_.Exception.Message -Detail $_.ScriptStackTrace)
             }
             $OutQueue.Add($line)

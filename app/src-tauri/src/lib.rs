@@ -5,16 +5,72 @@ mod tray;
 
 use commands::{emit_visibility, set_window_visible};
 use tauri::{Emitter, Manager, RunEvent, WindowEvent};
+use tracing_subscriber::prelude::*;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
+    // A release build is `windows_subsystem = "windows"` (see main.rs) - it
+    // has no console, so tracing::info!/warn!/error! previously went to a
+    // stdout that doesn't exist anywhere. Log to a real file too (same
+    // %LOCALAPPDATA%\NorthstarDevKit app-data folder settings.json already
+    // uses), so a failure on a real install - like the sidecar never
+    // becoming responsive - leaves an actual trail instead of nothing.
+    // The WorkerGuard must outlive the whole run() call (dropping it stops
+    // the background flush thread and can silently lose buffered lines),
+    // so it's bound here, not thrown away.
+    let _log_guard = init_logging();
 
+    run_app();
+}
+
+/// Sets up tracing: always to a rotating file under
+/// %LOCALAPPDATA%\NorthstarDevKit\logs\devkit.log, plus stdout in debug
+/// builds only (harmless no-op in release, where stdout goes nowhere, but
+/// keeps `pnpm tauri dev`'s terminal output unchanged). Returns the
+/// non-blocking writer's guard, which the caller must keep alive for the
+/// whole process lifetime - dropping it stops the flush thread and can
+/// silently lose buffered lines.
+fn init_logging() -> Option<tracing_appender::non_blocking::WorkerGuard> {
+    fn make_env_filter() -> tracing_subscriber::EnvFilter {
+        tracing_subscriber::EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"))
+    }
+
+    let log_dir = std::env::var_os("LOCALAPPDATA")
+        .map(std::path::PathBuf::from)
+        .map(|p| p.join("NorthstarDevKit").join("logs"));
+
+    let Some(log_dir) = log_dir else {
+        // No LOCALAPPDATA (shouldn't happen on real Windows) - fall back to
+        // stdout-only rather than fail startup over a missing log file.
+        tracing_subscriber::fmt().with_env_filter(make_env_filter()).init();
+        return None;
+    };
+
+    if let Err(e) = std::fs::create_dir_all(&log_dir) {
+        eprintln!("devkit: could not create log directory {}: {e}", log_dir.display());
+        tracing_subscriber::fmt().with_env_filter(make_env_filter()).init();
+        return None;
+    }
+
+    let file_appender = tracing_appender::rolling::daily(&log_dir, "devkit.log");
+    let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+    let file_layer = tracing_subscriber::fmt::layer()
+        .with_writer(non_blocking)
+        .with_ansi(false);
+    let registry = tracing_subscriber::registry()
+        .with(make_env_filter())
+        .with(file_layer);
+
+    #[cfg(debug_assertions)]
+    registry.with(tracing_subscriber::fmt::layer()).init();
+    #[cfg(not(debug_assertions))]
+    registry.init();
+
+    Some(guard)
+}
+
+fn run_app() {
     tauri::Builder::default()
         // Must be registered before any other plugin/setup work per the
         // plugin's own docs: it needs to intercept a second launch as early
@@ -50,16 +106,28 @@ pub fn run() {
         ])
         .setup(|app| {
             let handle = app.handle().clone();
+            tracing::info!(version = env!("CARGO_PKG_VERSION"), "devkit starting");
 
             let resolved = paths::resolve(&handle)?;
             tracing::info!(
                 pwsh = %resolved.pwsh.display(),
                 script = %resolved.rpc_script.display(),
+                cwd = %resolved.sidecar_cwd.display(),
                 "resolved sidecar paths"
             );
             let spec = resolved.to_sidecar_spec();
 
+            // Timed separately from "resolved sidecar paths" above: this
+            // only measures how long the pwsh.exe process itself took to
+            // spawn, NOT how long DevKit.Core.psm1's import inside it takes
+            // (PsHost::spawn returns as soon as the child process exists,
+            // before the sidecar has necessarily finished importing and
+            // started consuming its lane queues - see host.rs). Logged
+            // regardless so a slow spawn (vs. a slow-but-spawned sidecar)
+            // is at least distinguishable after the fact.
+            let spawn_started = std::time::Instant::now();
             let host = tauri::async_runtime::block_on(devkit_host::PsHost::spawn(spec))?;
+            tracing::info!(elapsed_ms = spawn_started.elapsed().as_millis(), "sidecar process spawned");
             app.manage(host.clone());
 
             // Forward every sidecar event (streamed tool output, push

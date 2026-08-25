@@ -233,6 +233,22 @@ impl PsHost {
             .stderr(Stdio::piped())
             .kill_on_drop(true);
 
+        // Piped stdio redirects the STREAMS but does not, on its own, stop
+        // Windows from allocating a visible console for a console-subsystem
+        // child like pwsh.exe - without this flag a real (non-dev-loopback)
+        // launch shows an empty console window sitting behind the app,
+        // since all of pwsh's actual output goes through the pipes instead
+        // of that console. CREATE_NO_WINDOW (0x08000000) suppresses the
+        // allocation entirely. See std::os::windows::process::CommandExt.
+        #[cfg(windows)]
+        {
+            // tokio::process::Command exposes creation_flags() natively on
+            // Windows (no std::os::windows::process::CommandExt import
+            // needed - that's only for std::process::Command).
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+
         let mut child = cmd.spawn()?;
         let stdin = child.stdin.take().expect("piped stdin");
         let stdout = child.stdout.take().expect("piped stdout");

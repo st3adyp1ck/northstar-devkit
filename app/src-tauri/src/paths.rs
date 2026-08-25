@@ -26,7 +26,17 @@ pub fn resolve(app: &tauri::AppHandle) -> anyhow::Result<ResolvedPaths> {
             .to_path_buf();
         (repo_root.join("core").join("Invoke-DevKitRpc.ps1"), repo_root)
     } else {
-        let resource_dir = app.path().resource_dir()?;
+        // resource_dir() canonicalizes on Windows, which returns a
+        // `\\?\C:\...` verbatim path. pwsh will happily RUN a script from a
+        // verbatim path, but $PSScriptRoot then inherits the prefix and
+        // PowerShell's own providers reject it - Test-Path returns false
+        // for files that exist (reproduced on pwsh 7.6.5), so
+        // DevKit.Core.psm1's library-existence checks throw and every lane
+        // dies at init. dunce::simplified strips the prefix whenever the
+        // path is representable without it (always, for a normal install
+        // path); dev builds never hit this since CARGO_MANIFEST_DIR is a
+        // plain path.
+        let resource_dir = dunce::simplified(&app.path().resource_dir()?).to_path_buf();
         (
             resource_dir.join("core").join("Invoke-DevKitRpc.ps1"),
             resource_dir,
@@ -63,7 +73,17 @@ impl ResolvedPaths {
             program: self.pwsh.clone(),
             script: self.rpc_script.clone(),
             cwd: self.sidecar_cwd.clone(),
-            default_timeout: Duration::from_secs(30),
+            // The sidecar's "alive" flag flips true as soon as pwsh.exe
+            // spawns, not once DevKit.Core.psm1 (which dot-sources ~7
+            // files, some multiple thousand lines) has actually finished
+            // importing in its lane runspace - a request sent in that
+            // window just queues until the lane starts consuming. On a
+            // freshly-installed exe that cold-import can be materially
+            // slower than on a dev machine that's already run it dozens of
+            // times (AV real-time scanning of newly-written files, no OS
+            // page-cache warmth, etc.) - 60s gives that real headroom
+            // instead of hard-failing every panel on first launch.
+            default_timeout: Duration::from_secs(60),
         }
     }
 }

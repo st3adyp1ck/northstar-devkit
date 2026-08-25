@@ -21,7 +21,19 @@
 
 $ErrorActionPreference = 'Stop'
 
-$script:RepoRoot = Split-Path -Parent $PSScriptRoot
+# Same verbatim-path ("\\?\") normalization as Invoke-DevKitRpc.ps1's header
+# (see the comment there): if this module is ever imported via a verbatim
+# path, $PSScriptRoot inherits the prefix and the Test-Path checks below
+# reject files that exist. Strip it so the guard below only ever fails for
+# files that are genuinely missing.
+$script:ModuleRoot = $PSScriptRoot
+if ($script:ModuleRoot.StartsWith('\\?\UNC\')) {
+    $script:ModuleRoot = '\\' + $script:ModuleRoot.Substring(8)
+} elseif ($script:ModuleRoot.StartsWith('\\?\')) {
+    $script:ModuleRoot = $script:ModuleRoot.Substring(4)
+}
+
+$script:RepoRoot = Split-Path -Parent $script:ModuleRoot
 $script:ToolsLibDir = Join-Path $script:RepoRoot 'tools\lib'
 
 $filesToLoad = @(
@@ -30,8 +42,8 @@ $filesToLoad = @(
     (Join-Path $script:ToolsLibDir 'DevKit-McpCatalog.ps1')
     (Join-Path $script:ToolsLibDir 'DevKit-McpList.ps1')
     (Join-Path $script:ToolsLibDir 'DevKit-McpAddFlow.ps1')
-    (Join-Path $PSScriptRoot 'DevKit-WidgetCore.ps1')
-    (Join-Path $PSScriptRoot 'DevKit-GuiCore.ps1')
+    (Join-Path $script:ModuleRoot 'DevKit-WidgetCore.ps1')
+    (Join-Path $script:ModuleRoot 'DevKit-GuiCore.ps1')
 )
 
 foreach ($file in $filesToLoad) {
