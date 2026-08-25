@@ -1,0 +1,157 @@
+/**
+ * Northstar DevKit design tokens - carried forward from gui/Theme.xaml's
+ * palette (gunmetal/silver, sapphire + ember accents), redefined as a
+ * modern glass/depth system for the Tauri rebuild. This app is a fixed
+ * dark-brand desktop tool (not a themeable web page), so tokens commit to
+ * one palette rather than branching on prefers-color-scheme - matches the
+ * WPF original, which never had a light mode.
+ */
+
+:root {
+  /* ---------- brand: gunmetal ground ---------- */
+  --gm-950: #0d1219;
+  --gm-900: #131a26;
+  --gm-850: #182031;
+  --gm-800: #1a2230;
+  --gm-700: #2b3547;
+  --gm-600: #3a4657;
+  --gm-500: #4d5b70;
+  --gm-400: #6b7a90;
+
+  /* ---------- brand: sapphire ---------- */
+  --sapphire-900: #14335c;
+  --sapphire-700: #2e7dd1;
+  --sapphire-600: #3e8fe0;
+  --sapphire-500: #4fa3ff;
+  --sapphire-400: #79c0ff;
+  --sapphire-300: #a9d6ff;
+
+  /* ---------- brand: ember ---------- */
+  --ember-800: #6b2a18;
+  --ember-700: #8a3a24;
+  --ember-600: #d94f2b;
+  --ember-500: #ff6b3d;
+  --ember-400: #ff8f66;
+
+  /* ---------- signal colors ---------- */
+  --signal-amber: #ffb020;
+  --signal-green: #98c379;
+  --signal-cyan: #56b6c2;
+  --signal-violet: #c678dd;
+  --signal-sand: #e5c07b;
+  --signal-red: #ef5350;
+
+  /* ---------- surface system ---------- */
+  --surface-app: var(--gm-950);
+  --surface-panel: color-mix(in srgb, var(--gm-900) 88%, transparent);
+  --surface-panel-solid: var(--gm-900);
+  --surface-raised: var(--gm-850);
+  --surface-sunken: var(--gm-950);
+  --surface-glass: color-mix(in srgb, var(--gm-800) 55%, transparent);
+  --surface-glass-strong: color-mix(in srgb, var(--gm-800) 78%, transparent);
+  --surface-overlay: color-mix(in srgb, #000000 55%, transparent);
+  --surface-border: color-mix(in srgb, var(--sapphire-400) 14%, var(--gm-700));
+  --surface-border-strong: color-mix(in srgb, var(--sapphire-400) 28%, var(--gm-700));
+  --surface-hover: color-mix(in srgb, var(--sapphire-500) 10%, transparent);
+  --surface-active: color-mix(in srgb, var(--sapphire-500) 18%, transparent);
+  --surface-skeleton: color-mix(in srgb, var(--gm-700) 55%, transparent);
+
+  /* ---------- text ---------- */
+  --text-primary: #f2f5f9;
+  --text-secondary: #aab4c4;
+  --text-tertiary: #737f92;
+  --text-on-accent: #061019;
+  --text-link: var(--sapphire-400);
+
+  /* ---------- semantic ---------- */
+  --accent: var(--sapphire-500);
+  --accent-strong: var(--sapphire-400);
+  --accent-soft: color-mix(in srgb, var(--sapphire-500) 16%, transparent);
+  --danger: var(--ember-500);
+  --danger-strong: var(--ember-400);
+  --danger-soft: color-mix(in srgb, var(--ember-500) 16%, transparent);
+  --success: var(--signal-green);
+  --warning: var(--signal-amber);
+
+  /* ---------- elevation (shadows) ---------- */
+  --shadow-sm: 0 1px 2px color-mix(in srgb, #000 40%, transparent);
+  --shadow-md: 0 4px 16px color-mix(in srgb, #000 45%, transparent);
+  --shadow-lg: 0 12px 40px color-mix(in srgb, #000 55%, transparent);
+  --shadow-glow-accent: 0 0 24px color-mix(in srgb, var(--sapphire-500) 35%, transparent);
+  --shadow-glow-danger: 0 0 24px color-mix(in srgb, var(--ember-500) 35%, transparent);
+  --shadow-inset: inset 0 1px 3px color-mix(in srgb, #000 45%, transparent);
+  --shadow-glass-highlight: inset 0 1px 0 color-mix(in srgb, #fff 8%, transparent);
+  --shadow-focus-ring: 0 0 0 4px color-mix(in srgb, var(--sapphire-400) 22%, transparent);
+
+  /* ---------- radius ---------- */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 22px;
+  --radius-pill: 999px;
+
+  /* ---------- type scale ---------- */
+  --font-sans: "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: "Cascadia Code", "Cascadia Mono", ui-monospace, "Consolas", monospace;
+  --text-2xs: 11px;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-md: 14px;
+  --text-lg: 16px;
+  --text-xl: 20px;
+  --text-2xl: 26px;
+
+  /* ---------- motion ---------- */
+  --ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 360ms;
+  /* Gauge's rAF arc-fill isn't a CSS transition, but it reads this var at
+     animation start so it still honors the reduced-motion zeroing below. */
+  --duration-gauge: 480ms;
+  /* Continuous loading indicators (Button's spinner) can't drop to 0ms like
+     a discrete transition without losing their meaning, so reduced-motion
+     slows this one instead of zeroing it - see the media query below. */
+  --duration-spin: 0.8s;
+
+  /* ---------- spacing ---------- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 0ms;
+    --duration-base: 0ms;
+    --duration-slow: 0ms;
+    --duration-gauge: 0ms;
+    /* Slowed rather than zeroed - a spinner at 0s duration is just gone,
+       which reads as "not loading" instead of "loading, gently." */
+    --duration-spin: 2.4s;
+  }
+}
+
+/*
+ * App-level twin of the media query above: settings.preferences.enableAnimations
+ * (the "Animations" checkbox in QuickActionsPanel) drives this attribute via
+ * useSyncAnimationsAttribute, zeroing the exact same tokens so every consumer -
+ * motion.ts's motionReduced()/motionDuration(), every plain-CSS animation/
+ * transition built on --duration-*, GitGraph's draw-in - collapses the same way
+ * it already does for prefers-reduced-motion, with no per-component changes.
+ * Kept as a separate selector rather than folding into the media query so the
+ * two stay independently togglable (an OS accessibility setting is not the
+ * same axis as an in-app preference).
+ */
+:root[data-animations="off"] {
+  --duration-fast: 0ms;
+  --duration-base: 0ms;
+  --duration-slow: 0ms;
+  --duration-gauge: 0ms;
+  --duration-spin: 2.4s;
+}

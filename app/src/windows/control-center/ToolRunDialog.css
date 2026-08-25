@@ -1,0 +1,121 @@
+.tool-run-dialog__overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--surface-overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  backdrop-filter: blur(4px);
+}
+
+.tool-run-dialog {
+  width: min(640px, 90vw);
+  max-height: 80vh;
+  overflow-y: auto;
+  box-shadow: var(--shadow-lg);
+}
+
+.tool-run-dialog__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.tool-run-dialog__title {
+  font-size: var(--text-lg);
+  font-weight: 700;
+}
+
+.tool-run-dialog__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+
+.tool-run-dialog__script {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--text-tertiary);
+}
+
+.tool-run-dialog__help {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin: var(--space-3) 0;
+}
+
+.tool-run-dialog__warning {
+  background: color-mix(in srgb, var(--signal-amber) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--signal-amber) 40%, transparent);
+  color: var(--signal-amber);
+  font-size: var(--text-xs);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-3);
+}
+
+.tool-run-dialog__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.tool-run-dialog__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.tool-run-dialog__field input,
+.tool-run-dialog__field select {
+  height: 32px;
+  background: var(--surface-raised);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  padding: 0 var(--space-2);
+  font-size: var(--text-sm);
+}
+
+.tool-run-dialog__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.tool-run-dialog__console {
+  margin-top: var(--space-3);
+  background: var(--surface-sunken);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  max-height: 220px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+
+.tool-run-dialog__console-line {
+  animation: tool-run-dialog-line-in var(--duration-fast) var(--ease-standard);
+}
+
+@keyframes tool-run-dialog-line-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.tool-run-dialog__console-err {
+  color: var(--ember-400);
+}

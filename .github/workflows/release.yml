@@ -1,0 +1,62 @@
+name: Release
+
+# Cuts a signed DevKit release whenever a version tag is pushed, e.g.:
+#   git tag v4.0.1 && git push origin v4.0.1
+#
+# Builds the Tauri app in app/ (NSIS only, Windows-only - see
+# app/src-tauri/tauri.conf.json), signs the updater artifacts with the
+# minisign key in the TAURI_SIGNING_PRIVATE_KEY(_PASSWORD) secrets, and
+# publishes a DRAFT GitHub Release (installer + .sig + latest.json) for a
+# human to review and publish. The updater's endpoint
+# (releases/latest/download/latest.json) only resolves once a release is
+# published, so drafts are invisible to the in-app updater until then.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install frontend dependencies
+        working-directory: app
+        run: pnpm install --frozen-lockfile
+
+      - name: Build, sign, and publish
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Minisign private key generated for the updater (no password set
+          # on the key itself - the _PASSWORD secret is safe to leave unset).
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: app
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Northstar DevKit ${{ github.ref_name }}'
+          releaseBody: 'See CHANGELOG.md for the full list of changes in this release.'
+          releaseDraft: true
+          prerelease: false

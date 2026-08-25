@@ -1,0 +1,44 @@
+.devkit-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: 20px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-2xs);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.devkit-badge--neutral {
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  border-color: var(--surface-border);
+}
+
+.devkit-badge--accent {
+  background: var(--accent-soft);
+  color: var(--sapphire-300);
+  border-color: color-mix(in srgb, var(--sapphire-500) 40%, transparent);
+}
+
+.devkit-badge--danger {
+  background: var(--danger-soft);
+  color: var(--ember-400);
+  border-color: color-mix(in srgb, var(--ember-500) 40%, transparent);
+}
+
+.devkit-badge--success {
+  background: color-mix(in srgb, var(--signal-green) 16%, transparent);
+  color: var(--signal-green);
+  border-color: color-mix(in srgb, var(--signal-green) 40%, transparent);
+}
+
+.devkit-badge--warning {
+  background: color-mix(in srgb, var(--signal-amber) 16%, transparent);
+  color: var(--signal-amber);
+  border-color: color-mix(in srgb, var(--signal-amber) 40%, transparent);
+}

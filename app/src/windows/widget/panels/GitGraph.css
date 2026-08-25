@@ -1,0 +1,257 @@
+.git-graph {
+  margin-top: var(--space-2);
+}
+
+.git-graph__scroll {
+  max-height: 360px;
+  overflow-y: auto;
+  overflow-x: auto;
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+  border: 1px solid var(--surface-border);
+  transition: mask-image var(--duration-fast) var(--ease-standard);
+}
+
+/* Only applied once the graph actually overflows horizontally - hints "more lanes this way" instead of squishing them. */
+.git-graph__scroll--fade-left {
+  -webkit-mask-image: linear-gradient(to right, transparent, black 20px);
+  mask-image: linear-gradient(to right, transparent, black 20px);
+}
+
+.git-graph__scroll--fade-right {
+  -webkit-mask-image: linear-gradient(to left, transparent, black 20px);
+  mask-image: linear-gradient(to left, transparent, black 20px);
+}
+
+.git-graph__scroll--fade-left.git-graph__scroll--fade-right {
+  -webkit-mask-image: linear-gradient(to right, transparent, black 20px, black calc(100% - 20px), transparent);
+  mask-image: linear-gradient(to right, transparent, black 20px, black calc(100% - 20px), transparent);
+}
+
+.git-graph__canvas {
+  position: relative;
+}
+
+.git-graph__svg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+
+/* Draw-in for commit nodes - plays once per node on its first DOM insertion
+   (a fresh graph mount, or a genuinely new commit appended by a poll);
+   React reuses the DOM node for hashes it has already rendered, so this
+   never replays just because the panel re-fetched. */
+.git-graph__node {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: git-graph-node-in var(--duration-slow) var(--ease-spring) both;
+}
+
+@keyframes git-graph-node-in {
+  from {
+    opacity: 0;
+    transform: scale(0.35);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.git-graph__row {
+  all: unset;
+  box-sizing: border-box;
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding-right: var(--space-2);
+  cursor: pointer;
+  min-width: 0;
+  transition: background var(--duration-fast) var(--ease-standard);
+}
+
+.git-graph__row:hover {
+  background: var(--surface-hover);
+}
+
+.git-graph__row--selected {
+  background: var(--surface-active);
+}
+
+.git-graph__refs {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.git-graph__ref-pill {
+  font-size: 10px;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-raised);
+  border: 1px solid var(--surface-border-strong);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.git-graph__ref-pill--head {
+  background: var(--accent-soft);
+  color: var(--sapphire-300);
+  border-color: color-mix(in srgb, var(--sapphire-400) 50%, transparent);
+}
+
+.git-graph__ref-pill--tag {
+  color: var(--signal-sand);
+  border-color: color-mix(in srgb, var(--signal-sand) 40%, transparent);
+}
+
+.git-graph__subject {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-xs);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-graph__meta {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+/* ---------- click-to-expand commit detail card ---------- */
+
+.git-graph__detail {
+  margin-top: var(--space-2);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+  border: 1px solid var(--surface-border);
+  animation: git-graph-detail-in var(--duration-base) var(--ease-standard);
+}
+
+@keyframes git-graph-detail-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.git-graph__detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-2);
+}
+
+.git-graph__detail-hash {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--sapphire-300);
+}
+
+.git-graph__detail-close {
+  all: unset;
+  cursor: pointer;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: var(--radius-sm);
+}
+
+.git-graph__detail-close:hover {
+  color: var(--text-primary);
+  background: var(--surface-hover);
+}
+
+.git-graph__detail-loading,
+.git-graph__detail-error {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+.git-graph__detail-message {
+  font-size: var(--text-xs);
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.git-graph__detail-meta {
+  margin-top: var(--space-2);
+  font-size: var(--text-2xs);
+  color: var(--text-secondary);
+}
+
+.git-graph__detail-stats {
+  margin-top: var(--space-1);
+  font-size: var(--text-2xs);
+  color: var(--text-tertiary);
+}
+
+.git-graph__stat-add {
+  color: var(--signal-green);
+}
+
+.git-graph__stat-del {
+  color: var(--ember-400);
+}
+
+.git-graph__detail-files {
+  list-style: none;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.git-graph__detail-files li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  font-size: 10px;
+}
+
+.git-graph__file-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+
+.git-graph__file-stats {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.git-graph__file-binary {
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+}
+
+.git-graph__detail-more {
+  color: var(--text-tertiary);
+  font-style: italic;
+}

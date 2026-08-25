@@ -1,0 +1,307 @@
+.control-center {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--surface-app);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--surface-border);
+  overflow: hidden;
+}
+
+.control-center__search {
+  width: 100%;
+  max-width: 420px;
+  height: 26px;
+  background: var(--surface-raised);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-pill);
+  color: var(--text-primary);
+  padding: 0 var(--space-3);
+  font-size: var(--text-xs);
+  transition: border-color var(--duration-fast) var(--ease-standard), box-shadow var(--duration-fast) var(--ease-standard);
+}
+
+.control-center__search:focus-visible {
+  outline: none;
+  border-color: var(--surface-border-strong);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.control-center__body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.control-center__nav {
+  width: 220px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--surface-border);
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+}
+
+.control-center__nav-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  overflow: hidden;
+  transition: color var(--duration-fast) var(--ease-standard);
+}
+
+.control-center__nav-item:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.control-center__nav-item--active {
+  color: var(--sapphire-300);
+  font-weight: 600;
+}
+
+.control-center__nav-item--active:hover {
+  background: transparent;
+}
+
+.control-center__nav-active-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: var(--accent-soft);
+  border-radius: var(--radius-md);
+}
+
+.control-center__nav-icon {
+  position: relative;
+  z-index: 1;
+  flex-shrink: 0;
+  width: 1.2em;
+  font-size: var(--text-sm);
+  line-height: 1;
+  text-align: center;
+}
+
+.control-center__nav-label {
+  position: relative;
+  z-index: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.control-center__main {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-5);
+}
+
+/* ---------- empty / loading / error states ---------- */
+
+.control-center__state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--space-2);
+  padding: var(--space-8) var(--space-5);
+  margin: var(--space-4) auto;
+  max-width: 420px;
+}
+
+.control-center__state-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-raised);
+  border: 1px solid var(--surface-border);
+  font-size: 24px;
+  margin-bottom: var(--space-2);
+}
+
+.control-center__state--danger .control-center__state-icon {
+  background: var(--danger-soft);
+  border-color: color-mix(in srgb, var(--ember-500) 40%, transparent);
+}
+
+.control-center__state-title {
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.control-center__state--danger .control-center__state-title {
+  color: var(--ember-400);
+}
+
+.control-center__state-desc {
+  font-size: var(--text-sm);
+  color: var(--text-tertiary);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.control-center__state-action {
+  margin-top: var(--space-2);
+}
+
+.control-center__spinner {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid var(--surface-border-strong);
+  border-top-color: var(--sapphire-400);
+  animation: control-center-spin 800ms linear infinite;
+}
+
+@keyframes control-center-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes control-center-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .control-center__spinner {
+    animation-name: control-center-pulse;
+    animation-duration: 1400ms;
+    border-top-color: var(--surface-border-strong);
+  }
+}
+
+/* App-level twin of the media query above - see tokens.css's data-animations block. */
+:root[data-animations="off"] .control-center__spinner {
+  animation-name: control-center-pulse;
+  animation-duration: 1400ms;
+  border-top-color: var(--surface-border-strong);
+}
+
+.control-center__section {
+  margin-bottom: var(--space-8);
+}
+
+.control-center__section-title {
+  font-size: var(--text-xl);
+  margin: 0 0 var(--space-1);
+}
+
+.control-center__section-desc {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  margin: 0 0 var(--space-4);
+  max-width: 720px;
+}
+
+.control-center__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--space-3);
+}
+
+/*
+ * The hover lift/shadow live on this wrapper, not on `.control-center__card`
+ * itself - that element needs `overflow: hidden` (to clip the button's hover
+ * fill and the caution accent bar to the rounded corners), and an element's
+ * own non-inset box-shadow gets silently clipped by its own overflow:hidden.
+ * Giving the wrapper a matching border-radius keeps the shadow's curvature
+ * lined up with the card beneath it.
+ */
+.control-center__card-wrap {
+  border-radius: var(--radius-lg);
+  transition: transform var(--duration-base) var(--ease-standard), box-shadow var(--duration-base) var(--ease-standard);
+}
+
+.control-center__card-wrap:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-lg);
+}
+
+.control-center__card-wrap:active {
+  transform: translateY(-1px) scale(0.99);
+  transition-duration: var(--duration-fast);
+}
+
+.control-center__card {
+  position: relative;
+  padding: 0 !important;
+  overflow: hidden;
+  transition: border-color var(--duration-base) var(--ease-standard);
+}
+
+.control-center__card-wrap:hover .control-center__card {
+  border-color: var(--surface-border-strong);
+}
+
+.control-center__card--caution::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--ember-500);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--ember-500) 60%, transparent);
+}
+
+.control-center__card-btn {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  padding: var(--space-4);
+  color: inherit;
+}
+
+.control-center__card-btn:hover {
+  background: var(--surface-hover);
+}
+
+.control-center__card-btn:focus-visible {
+  outline: none;
+  background: var(--surface-hover);
+  box-shadow: inset 0 0 0 1px var(--surface-border-strong);
+}
+
+.control-center__card-title {
+  font-size: var(--text-md);
+  font-weight: 600;
+  margin-bottom: var(--space-2);
+}
+
+.control-center__card-chips {
+  display: flex;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.control-center__card-help {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  margin: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}

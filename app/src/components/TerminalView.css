@@ -1,0 +1,36 @@
+.terminal-view {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.terminal-view__host {
+  flex: 1;
+  min-height: 0;
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+  padding: var(--space-2);
+  overflow: hidden;
+}
+
+.terminal-view__host .xterm {
+  height: 100%;
+}
+
+.terminal-view__status {
+  position: absolute;
+  top: var(--space-2);
+  left: var(--space-4);
+  font-size: var(--text-2xs);
+  color: var(--text-tertiary);
+  background: color-mix(in srgb, var(--surface-sunken) 70%, transparent);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  pointer-events: none;
+}
+
+.terminal-view__status--error {
+  color: var(--ember-400);
+}

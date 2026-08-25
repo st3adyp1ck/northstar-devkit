@@ -1,0 +1,67 @@
+.devkit-titlebar {
+  display: flex;
+  align-items: center;
+  height: 38px;
+  padding: 0 var(--space-2) 0 var(--space-4);
+  gap: var(--space-3);
+  border-bottom: 1px solid var(--surface-border);
+  background: var(--surface-glass-strong);
+  flex-shrink: 0;
+}
+
+.devkit-titlebar__brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.devkit-titlebar__title {
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.devkit-titlebar__middle {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+}
+
+.devkit-titlebar__actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.devkit-titlebar__btn {
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 13px;
+  transition: background var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard);
+}
+
+.devkit-titlebar__btn:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.devkit-titlebar__btn:active {
+  transform: scale(0.92);
+}
+
+.devkit-titlebar__btn--close:hover {
+  background: var(--danger);
+  color: #fff;
+}

@@ -1,0 +1,52 @@
+[package]
+name = "devkit"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Northstar DevKit - companion widget + control center"
+
+[lib]
+# The `_lib` suffix avoids a name clash with this crate's own bin target on
+# Windows. See https://github.com/rust-lang/cargo/issues/8519
+name = "devkit_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+# Named `devkit-app`, not `devkit`: the `devkit` name is reserved for the
+# CLI's bin target (cli/Cargo.toml) - the bare `devkit` command a user
+# types in a terminal should launch the CLI menu, not this GUI app.
+# Without this override, both crates default to a `devkit` bin target and
+# silently clobber each other's output at target/debug/devkit.exe since
+# workspace crates share one target/ directory (surfaced as a confusing
+# "Access is denied" when one is running and the other tries to rebuild).
+# NOTE: confirmed working end-to-end via a real `tauri build` - the
+# bundler correctly infers this binary from Cargo metadata with no
+# `mainBinaryName` override needed; NSIS packaged
+# DevKit_<version>_x64-setup.exe successfully.
+name = "devkit-app"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-opener = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-autostart = "2"
+tauri-plugin-window-state = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-process = "2"
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+portable-pty = "0.9"
+which = "7"
+uuid = { version = "1", features = ["v4"] }
+devkit-host = { path = "../../crates/devkit-host" }

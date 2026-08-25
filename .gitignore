@@ -30,3 +30,10 @@ devinfo-*.json
 # Generated portable distribution (Build-UsbPortable.ps1) - rebuild on demand,
 # never hand-edit or commit its contents.
 /USB/
+
+# Tauri v2 rebuild (app/, cli/, crates/) - Rust and Node build artifacts
+target/
+node_modules/
+dist/
+app/src-tauri/gen/
+app/.vite/

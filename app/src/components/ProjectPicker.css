@@ -1,0 +1,75 @@
+.devkit-project-picker {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  max-width: 260px;
+}
+
+.devkit-project-picker__select-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+/* Custom chevron, drawn as a mask so it can be colored with a token
+   instead of baking a fixed hex into the SVG (the "black" path fill below
+   only defines the mask's shape/alpha, not a rendered color). Same glyph
+   as Expander's chevron, for a consistent "this opens/expands" language. */
+.devkit-project-picker__select-wrap::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: var(--space-2);
+  width: 8px;
+  height: 8px;
+  transform: translateY(-55%);
+  background: var(--text-tertiary);
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M1 3 L5 7 L9 3' stroke='black' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    no-repeat center / contain;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M1 3 L5 7 L9 3' stroke='black' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    no-repeat center / contain;
+  pointer-events: none;
+}
+
+.devkit-project-picker__select {
+  width: 100%;
+  height: 26px;
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  padding: 0 var(--space-5) 0 var(--space-2);
+  appearance: none;
+  -webkit-appearance: none;
+  box-shadow: var(--shadow-inset);
+  cursor: pointer;
+  transition: border-color var(--duration-fast) var(--ease-standard);
+}
+
+.devkit-project-picker__select:hover {
+  border-color: var(--surface-border-strong);
+}
+
+.devkit-project-picker__browse {
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  border: 1px solid var(--surface-border);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  transition: background var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard), transform var(--duration-fast) var(--ease-standard);
+}
+
+.devkit-project-picker__browse:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+  border-color: var(--surface-border-strong);
+}
+
+.devkit-project-picker__browse:active {
+  transform: scale(0.92);
+}

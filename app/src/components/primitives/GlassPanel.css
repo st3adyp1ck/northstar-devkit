@@ -1,0 +1,19 @@
+.devkit-glass {
+  background: var(--surface-glass);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-lg);
+  /* Inner top highlight sells the glass material - a hairline of "light
+     catching the top edge," layered under the ambient drop shadow. */
+  box-shadow: var(--shadow-md), var(--shadow-glass-highlight);
+  transition: border-color var(--duration-base) var(--ease-standard), box-shadow var(--duration-base) var(--ease-standard);
+}
+
+.devkit-glass--strong {
+  background: var(--surface-glass-strong);
+}
+
+.devkit-glass--padded {
+  padding: var(--space-4);
+}

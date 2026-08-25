@@ -1,0 +1,53 @@
+.devkit-gauge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  background: none;
+  border: none;
+  padding: var(--space-2);
+  border-radius: var(--radius-lg);
+  transition: background var(--duration-fast) var(--ease-standard);
+  position: relative;
+}
+
+.devkit-gauge--clickable:hover {
+  background: var(--surface-hover);
+}
+
+.devkit-gauge svg {
+  display: block;
+}
+
+.devkit-gauge__center {
+  position: absolute;
+  top: var(--space-2);
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: calc(100% - 40px);
+  pointer-events: none;
+}
+
+.devkit-gauge__value {
+  font-size: var(--text-lg);
+  font-weight: 700;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.devkit-gauge__label {
+  font-size: var(--text-2xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.devkit-gauge__sub {
+  font-size: var(--text-2xs);
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}

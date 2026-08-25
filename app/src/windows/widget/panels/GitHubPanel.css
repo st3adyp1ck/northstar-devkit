@@ -1,0 +1,63 @@
+.github-panel__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.github-panel__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.github-panel__row:hover {
+  background: var(--surface-hover);
+}
+
+.github-panel__number {
+  flex-shrink: 0;
+  min-width: 30px;
+  font-size: var(--text-2xs);
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.github-panel__title {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-xs);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.github-panel__author {
+  flex-shrink: 0;
+  max-width: 92px;
+  font-size: var(--text-2xs);
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.github-panel__flag {
+  flex-shrink: 0;
+}
+
+.github-panel__truncated {
+  margin-top: var(--space-2);
+  font-size: var(--text-2xs);
+  color: var(--text-tertiary);
+}

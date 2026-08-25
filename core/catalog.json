@@ -1,0 +1,951 @@
+{
+  "modules": [
+    {
+      "group": "Development",
+      "folder": "ports",
+      "name": "Port Tools",
+      "description": "Detect what's listening on common local dev ports (3000, 5173, 8080, etc.) via Get-NetTCPConnection, and kill a process by port or PID - either a single target or every running Node.js process at once.",
+      "items": [
+        {
+          "key": "1",
+          "label": "Scan Common Dev Ports",
+          "script": "Scan-Ports.ps1",
+          "help": "Scans the fixed list of common dev ports (3000, 3001, 3002, 3003, 5173, 5174, 8000, 8080, 8081, 9000, 4200, 5000, 5500, 1337, 5432, 3306, 6379, 27017) via Get-NetTCPConnection and reports the PID and process name listening on each. Read-only from this menu entry - the script's own -Kill switch (interactive kill-while-scanning) is not passed by this menu item. Use this first to see what's currently running before deciding whether to kill anything.",
+          "caution": false,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        },
+        {
+          "key": "2",
+          "label": "Scan Specific Port (Read-Only)",
+          "script": "Kill-Port.ps1",
+          "help": "Looks up the process currently listening on one port you enter and displays its PID, name, path, and start time. Read-only - runs Kill-Port.ps1 with -InfoOnly, which never calls Stop-Process. Use this to identify a process before deciding whether to kill it with one of the Kill Process options below.",
+          "caution": false,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": [
+            {
+              "Max": 65535,
+              "InvalidMessage": "Invalid port number.",
+              "Name": "Port",
+              "Min": 1,
+              "Prompt": "Enter port number",
+              "Type": "Int"
+            }
+          ],
+          "staticArgs": {
+            "InfoOnly": true
+          }
+        },
+        {
+          "key": "3",
+          "label": "Kill Process by PID",
+          "script": "Kill-Port.ps1",
+          "help": "Kills a specific process by PID that you enter directly, with no port lookup. Refuses PID 0 and 4 (reserved system processes) and the current DevKit process's own PID. Safety note: mutates real system state - prompts 'Kill process NAME (PID: X)? (y/n)' before stopping it (a plain y/n prompt, not the shared Confirm-DevKitDestructiveAction gate), and re-verifies the process's identity immediately before killing to guard against the PID being reused while you were confirming.",
+          "caution": true,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": [
+            {
+              "Max": 2147483647,
+              "InvalidMessage": "Invalid PID.",
+              "Name": "ProcessId",
+              "Min": 1,
+              "Prompt": "Enter PID to kill",
+              "Type": "Int"
+            }
+          ],
+          "staticArgs": null
+        },
+        {
+          "key": "4",
+          "label": "Kill All Node Processes",
+          "script": "Kill-AllNode.ps1",
+          "help": "Finds every running process named 'node' and kills them all. Lists each one (PID, CPU, start time) before acting. Safety note: mutates real system state - prompts 'Kill all N process(es)? (y/n)' before stopping any of them (a plain y/n prompt, not the shared Confirm-DevKitDestructiveAction gate), and re-verifies each process's identity immediately before killing it to guard against a PID being reused while you were confirming. This menu item does not pass -Force, so you'll always see the prompt; the script supports -Force directly for automation.",
+          "caution": true,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        },
+        {
+          "key": "5",
+          "label": "Kill Process by Port Number (Force, No Confirm)",
+          "script": "Kill-Port.ps1",
+          "help": "Finds the process listening on a port you enter and kills it immediately with no confirmation prompt (Kill-Port.ps1 -Port X -Force). Still refuses PID 0/4 and the current DevKit process's own PID, and still re-verifies the process's identity immediately before killing it. Safety note: mutates real system state with no y/n gate - use only when you're sure, e.g. clearing a stuck dev server.",
+          "caution": true,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": [
+            {
+              "Max": 65535,
+              "InvalidMessage": "Invalid port number.",
+              "Name": "Port",
+              "Min": 1,
+              "Prompt": "Enter port number",
+              "Type": "Int"
+            }
+          ],
+          "staticArgs": {
+            "Force": true
+          }
+        },
+        {
+          "key": "6",
+          "label": "Kill Process by Port Number (With Confirmation)",
+          "script": "Kill-Port.ps1",
+          "help": "Finds the process listening on a port you enter, shows its PID/name/path, and asks for confirmation before killing it (Kill-Port.ps1 -Port X, no -Force). Safety note: mutates real system state - prompts 'Kill process NAME (PID: X)? (y/n)' before stopping it (a plain y/n prompt, not the shared Confirm-DevKitDestructiveAction gate), and re-verifies the process's identity immediately before killing to guard against the PID being reused while you were confirming.",
+          "caution": true,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": [
+            {
+              "Max": 65535,
+              "InvalidMessage": "Invalid port number.",
+              "Name": "Port",
+              "Min": 1,
+              "Prompt": "Enter port number",
+              "Type": "Int"
+            }
+          ],
+          "staticArgs": null
+        },
+        {
+          "key": "7",
+          "label": "Show Reserved Port Ranges (Hyper-V/winnat)",
+          "script": "Show-ExcludedPortRanges.ps1",
+          "help": "Lists the TCP port ranges Windows has reserved for Hyper-V/winnat ('netsh interface ipv4 show excludedportrange protocol=tcp') and flags which common dev ports fall inside one. Check this first when a dev server fails to bind with EACCES / WinError 10013 even though nothing is listening on the port. Fully read-only - a netsh 'show' command needs no admin and changes nothing. The script also supports '-Port N' directly to test a single port (exit 0 = free, 1 = reserved) for use in other scripts.",
+          "caution": false,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        },
+        {
+          "key": "8",
+          "label": "Test Dev Endpoint (HTTP Health)",
+          "script": "Test-DevEndpoint.ps1",
+          "help": "HTTP health check. Enter a URL to send it a HEAD request (falls back to GET when the server answers 405/501) and see the status code, latency, final URL after redirects, and - for https URLs - the TLS certificate's days-until-expiry (yellow under 30 days, red under 7). Leave the URL blank to instead probe http://localhost:<port> for every common dev port currently listening. Read-only - only network calls to localhost or the URL you enter; every request failure is reported as a clean 'not responding', never a crash.",
+          "caution": false,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": [
+            {
+              "Optional": true,
+              "Prompt": "Enter URL to test (blank = scan listening dev ports)",
+              "Type": "String",
+              "Name": "Url"
+            }
+          ],
+          "staticArgs": null
+        }
+      ]
+    },
+    {
+      "group": "Development",
+      "folder": "node",
+      "name": "Node.js Tools",
+      "description": "Node.js dependency and package-manager cache tools: auto-detects npm/yarn/pnpm/bun from the project's lock file (or package.json's packageManager field) and dispatches to the matching command to check cache size, clear that cache, delete node_modules, or do a full nuke-and-reinstall.",
+      "items": [
+        {
+          "key": "1",
+          "label": "Clear NPM Cache",
+          "script": "Clear-NpmCache.ps1",
+          "help": "Clears the local package-manager cache for the project at -Path (defaults to the current directory). Auto-detects npm/yarn/pnpm/bun from lock files and runs the matching cache-clean command (npm cache clean --force / pnpm store prune / yarn cache clean --all / bun pm cache rm). -Verify additionally runs 'npm cache verify' afterward (npm only - other package managers have no equivalent). Use this when installs are behaving oddly and you want a clean package-manager cache without touching node_modules or any project files. Safety note: mutates the package manager's own (global, per-user) cache - runs immediately with no confirmation prompt and no -Force/-DryRun switch, unlike the other mutating tools in this category.",
+          "caution": true,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        },
+        {
+          "key": "2",
+          "label": "Delete node_modules",
+          "script": "Remove-NodeModules.ps1",
+          "help": "Deletes node_modules from the selected project (RequiresProject - the menu prompts you to pick a linked project first; from the command line, use -Path). Reports the folder's approximate size (flagged as an estimate if some long paths couldn't be measured), then asks 'Delete node_modules? (y/n)' unless -Force is passed. Deletion uses the long-path-safe robocopy-mirror method. -Reinstall additionally reinstalls dependencies afterward via the auto-detected package manager. Use this for a plain clean reinstall without touching lock files or the package-manager cache. Safety note: mutates real project files (deletes node_modules) - gated by a y/n confirmation unless -Force.",
+          "caution": true,
+          "requiresProject": true,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        },
+        {
+          "key": "3",
+          "label": "Delete node_modules + Lock + Reinstall",
+          "script": "Nuke-And-Reinstall.ps1",
+          "help": "The nuclear option for a broken project (RequiresProject - the menu prompts you to pick a linked project first; from the command line, use -Path): stops local node/bun processes running under the project path, clears .next/node_modules\\.cache/node_modules\\.vite/.turbo caches, deletes node_modules, deletes all known lock files (package-lock.json, yarn.lock, pnpm-lock.yaml, bun.lock/bun.lockb), clears the package manager's cache (skip with -SkipCacheClear), then reinstalls with the same package manager detected at the start. Use this when a project's dependencies are corrupted beyond what a plain node_modules delete fixes. Safety note: mutates real project files extensively (node_modules, all lock files, framework caches) - requires typing 'nuke' to confirm unless -Force is passed.",
+          "caution": true,
+          "requiresProject": true,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        },
+        {
+          "key": "4",
+          "label": "Check NPM Cache Size",
+          "script": "Check-NpmCacheSize.ps1",
+          "help": "Read-only report of the package-manager cache location for the project at -Path (defaults to current directory), and its size where the package manager exposes one: npm via 'npm cache verify', pnpm/yarn/bun by measuring the reported cache/store folder directly (bun's cache path is a documented fixed per-user location, not queried from bun itself). Use this before deciding whether a cache clear is worth running. Makes no changes.",
+          "caution": false,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        },
+        {
+          "key": "5",
+          "label": "Run Package Script (npm run picker)",
+          "script": "Start-PackageScript.ps1",
+          "help": "The daily-driver 'npm run' picker (RequiresProject - the menu prompts you to pick a linked project first; from the command line, use -Path): lists the scripts defined in the project's package.json in an arrow-key menu and runs the chosen one with the project's detected package manager via '<pm> run <name>' (works for npm/pnpm/yarn/bun). Pass -Name to skip the picker and run a script directly. Use this instead of typing npm run dev / npm test / npm run build by hand. Safety note: this runs the project's OWN package.json script verbatim - whatever command the project author put there - with no confirmation, since running scripts is the entire point of the tool; DevKit itself never installs, deletes, or modifies anything.",
+          "caution": true,
+          "requiresProject": true,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        },
+        {
+          "key": "6",
+          "label": "Find Stale node_modules",
+          "script": "Find-StaleNodeModules.ps1",
+          "help": "Reclaims disk space across projects (RequiresProject - the menu prompts you to pick a linked folder first; from the command line, use -Path with e.g. your dev root): recursively finds node_modules folders up to -Depth levels deep (default 3, nested node_modules inside an already-found one are pruned), measures each (flagged as an estimate when long paths can't be read), and reports size plus last-write age, largest first, with a total-reclaimable line. Report-only by default - from this menu it ends by asking whether to delete the listed folders (the prompt is skipped on redirected input, keeping piped runs report-only; -Apply skips the prompt). Safety note: deletion is gated by the shared confirmation prompt listing every affected folder unless -Force is passed, and uses the same long-path-safe robocopy-mirror method as Delete node_modules.",
+          "caution": true,
+          "requiresProject": true,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        }
+      ]
+    },
+    {
+      "group": "Development",
+      "folder": "nextjs",
+      "name": "Next.js Tools",
+      "description": "Cache-clearing and reset tools for Next.js projects: clear the .next build cache or Turbopack-related caches, start the dev server fresh, or do a full clean (node_modules + lock file + cache wipe, then reinstall). All four scripts auto-detect the project's package manager (npm/yarn/pnpm/bun) from its lock file.",
+      "items": [
+        {
+          "key": "1",
+          "label": "Clear .next Build Cache",
+          "script": "Clear-NextCache.ps1",
+          "help": "Deletes the project's .next build cache folder. If .next doesn't exist, reports that and exits without doing anything. Use this for a quick, narrow cache clear when something looks stale but you don't want to touch Turbopack or node_modules caches. Safety note: mutates the project directory (deletes .next) - prompts for y/n confirmation unless -Force is passed.",
+          "caution": true,
+          "requiresProject": true,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        },
+        {
+          "key": "2",
+          "label": "Clear Turbopack Cache",
+          "script": "Clear-TurboCache.ps1",
+          "help": "Deletes Turbopack-related caches: .next, node_modules/.cache, node_modules/.vite, and .turbo (note this also removes the entire .next folder, not just an isolated Turbopack subfolder - it's effectively a superset of 'Clear .next Build Cache'). Reports 'no caches found' and exits if none of those paths exist. Use this when Turbopack itself seems to be serving stale output. Safety note: mutates the project directory - prompts for y/n confirmation unless -Force is passed.",
+          "caution": true,
+          "requiresProject": true,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        },
+        {
+          "key": "3",
+          "label": "Full Clean (.next + node_modules + reinstall)",
+          "script": "Next-FullClean.ps1",
+          "help": "The most destructive option in this category: stops locally running node/bun processes for the project, clears all Next.js/Turbopack caches and build output (.next, .turbo, node_modules/.cache, node_modules/.vite, dist, .vite), deletes node_modules and all lock files (package-lock.json, yarn.lock, pnpm-lock.yaml, bun.lock/bun.lockb), clears the package manager's own cache, and reinstalls. Use this when a project is genuinely broken and a narrower cache clear hasn't fixed it. Safety note: mutates the project directory extensively - shows a summary of what will be deleted and requires y/n confirmation unless -Force is passed; pass -StartDev to also launch the dev server once cleaning finishes.",
+          "caution": true,
+          "requiresProject": true,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        },
+        {
+          "key": "4",
+          "label": "Dev Server (Fresh Start)",
+          "script": "Next-DevFresh.ps1",
+          "help": "Clears the .next cache (and, if you answer yes to the Turbopack prompt, the Turbopack-related caches too), then starts the dev server via the auto-detected package manager with Next.js telemetry disabled. Optionally set a port to run on. Use this when you want a guaranteed-clean dev server start in one step. Safety note: deletes cache folders with no confirmation prompt (unlike the standalone cache-clear tools above), then starts a long-running dev server process that keeps running until you stop it (Ctrl+C) - it will not return to the menu on its own.",
+          "caution": true,
+          "requiresProject": true,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": [
+            {
+              "Optional": true,
+              "Prompt": "Clear Turbopack cache too?",
+              "Type": "YesNo",
+              "Name": "Turbo"
+            },
+            {
+              "Max": 65535,
+              "Name": "Port",
+              "Min": 1,
+              "Prompt": "Port (press Enter for default)",
+              "Optional": true,
+              "Type": "Int"
+            }
+          ],
+          "staticArgs": null
+        }
+      ]
+    },
+    {
+      "group": "Development",
+      "folder": "vite",
+      "name": "Vite Tools",
+      "description": "Cache-clearing and dev-server tooling for Vite projects: start a fresh Vite dev server with stale caches cleared, or build for production and serve the result locally with Vite's preview server.",
+      "items": [
+        {
+          "key": "1",
+          "label": "Vite Dev Server (Fresh Start)",
+          "script": "Vite-DevFresh.ps1",
+          "help": "Clears dev caches (node_modules/.cache, node_modules/.vite) and, if -ClearNodeModules is passed, node_modules itself, then runs the detected package manager's install (skip with -SkipInstall) before starting the dev server via 'run dev'. Never touches dist or the project-root .vite cache - a dev fresh start intentionally leaves any existing production build alone. Passes -Port and -ExposeHost (--host) through to Vite; warns but does not block if the target port is already in use, since Vite falls back to the next free port on its own. Use this when the dev server is misbehaving and a cache-cleared restart might fix it. Safety note: deletes cache folders (and node_modules with -ClearNodeModules) with no confirmation prompt - low risk, both are safely regenerated - then starts a long-running dev server that runs until Ctrl+C.",
+          "caution": true,
+          "requiresProject": true,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        },
+        {
+          "key": "2",
+          "label": "Build and Preview",
+          "script": "Vite-PreviewBuild.ps1",
+          "help": "Runs a real production build (default output dist, override with -OutDir) via the detected package manager, then starts a Vite preview server (-Port, default 4173) serving it. Backs up the previous build before rebuilding and automatically restores it if the build fails, so a failed build never leaves the project without a working build; the backup is deleted only after a successful build. Prompts 'Replace previous build?' (y/n) before overwriting an existing build unless -Force is passed. Supports -SkipBuild to preview an existing build as-is, and -Analyze to open a bundle-visualizer stats file if one exists. OutDir is validated to resolve inside the project directory (rejects '..' or an absolute path elsewhere) before anything is touched. Safety note: mutates real build output on disk, gated by a plain y/n prompt / -Force (not the shared Confirm-DevKitDestructiveAction helper), then starts a long-running preview server until Ctrl+C.",
+          "caution": true,
+          "requiresProject": true,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        }
+      ]
+    },
+    {
+      "group": "Version Control & Containers",
+      "folder": "git",
+      "name": "Git Tools",
+      "description": "Repository housekeeping and multi-repo visibility: prune merged branches and reclaim disk space in a single repo, scan git status across every repo under a directory tree, and sync a forked repo with its upstream remote via merge or rebase.",
+      "items": [
+        {
+          "key": "1",
+          "label": "Git Cleanup (prune, gc, etc.)",
+          "script": "Git-Cleanup.ps1",
+          "help": "Fetches the remote, deletes local branches already merged into the repo's default branch, prunes stale remote-tracking refs, and can run 'git gc --aggressive --prune=now' and clear the reflog (-ClearReflog) to shrink repo size. Shows pack size before/after. Use this periodically on a repo with a lot of merged/stale branch history. Safety note: mutates real repository state - fetching and remote-tracking prune run automatically (skipped under -DryRun); deleting merged branches, running gc, and clearing the reflog each require a 'y/n' confirmation unless -Force is passed. -DryRun previews every step with zero changes made.",
+          "caution": true,
+          "requiresProject": true,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        },
+        {
+          "key": "2",
+          "label": "Git Status All (scan repos)",
+          "script": "Git-StatusAll.ps1",
+          "help": "Recursively scans a directory tree (default depth 2, -Depth to override) for git repositories and prints a compact, color-coded status line per repo: branch, modified/untracked file counts, and ahead/behind vs. its upstream. A repo with no configured upstream is always shown, never treated as clean, since unpushed commits can't be counted without one. Use this for a bird's-eye view of every project under a folder. Read-only - makes no changes; -Fetch additionally runs 'git fetch' per repo first to refresh remote data. Clean repos are hidden by default (-ShowClean to include them).",
+          "caution": false,
+          "requiresProject": true,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        },
+        {
+          "key": "3",
+          "label": "Sync Fork with Upstream",
+          "script": "Git-SyncFork.ps1",
+          "help": "Fetches a named upstream remote (default 'upstream'), checks out the target branch (defaults to the current branch, falling back to 'main' or 'master'), merges or rebases (-Rebase) in the upstream changes, and pushes the result to origin - using --force-with-lease after a rebase. Refuses to run if there are uncommitted changes or a merge/rebase already in progress. Use this to keep a personal fork current with its upstream repository. Safety note: mutates real repository state and pushes to a real remote - prompts 'Sync <branch> with <upstream>/<branch>? (y/n)' before starting unless -Force is passed, but has no -DryRun/preview mode, so answering 'y' runs checkout, merge-or-rebase, and push immediately.",
+          "caution": true,
+          "requiresProject": true,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        },
+        {
+          "key": "4",
+          "label": "Git Standup (Your Recent Commits)",
+          "script": "Get-GitStandup.ps1",
+          "help": "Collects YOUR recent commits (matched via 'git config user.email', falling back to user.name) across git repos - a quick 'what did I do recently?' for standups. Run from this menu it scans the selected project (the repo itself plus any nested repos, depth 2); run directly with the default -Path '.' it scans every linked project in the DevKit registry instead. Groups commits by repo as 'hash subject (relative time)' lines, newest first. Fully read-only - never fetches, never mutates; repos with no commits in the window are omitted, and an empty overall result says so honestly.",
+          "caution": false,
+          "requiresProject": true,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": [
+            {
+              "Max": 720,
+              "InvalidMessage": "Invalid hours.",
+              "Name": "Hours",
+              "Min": 1,
+              "Prompt": "How many hours back? (blank = 24)",
+              "Optional": true,
+              "Type": "Int"
+            }
+          ],
+          "staticArgs": null
+        }
+      ]
+    },
+    {
+      "group": "Version Control & Containers",
+      "folder": "docker",
+      "name": "Docker Tools",
+      "description": "Clean up Docker resources (containers, images, volumes, networks, build cache) - either a full teardown or a selective/unused-only pass - and tail logs from one or more running containers at once. All three tools require Docker Desktop or the Docker Engine CLI installed with the daemon running.",
+      "items": [
+        {
+          "key": "1",
+          "label": "Docker Nuke (remove all)",
+          "script": "Docker-Nuke.ps1",
+          "help": "Stops and force-removes ALL containers, then removes all images (unless -KeepImages) and all volumes (unless -KeepVolumes), prunes custom networks and the build cache, and finishes with a final 'docker system prune' (adding --volumes unless -KeepVolumes). Use this when you want a completely clean Docker state and don't need anything currently on the machine. Safety note: mutates real Docker state - shows a per-resource-type count before acting, requires typing 'NUKE' (case-sensitive) via the shared Confirm-DevKitDestructiveAction gate unless -Force is passed, and supports -DryRun to list what would be removed with no changes made.",
+          "caution": true,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        },
+        {
+          "key": "2",
+          "label": "Docker Cleanup (selective)",
+          "script": "Docker-Cleanup.ps1",
+          "help": "Selective, less destructive than Docker Nuke - removes stopped containers and dangling images by default; -AllUnused widens image removal to every unused (not just untagged) image and also prunes unused custom networks; -Volumes additionally prunes unused volumes. Also cleans the build cache and reports estimated reclaimable disk space. Use this for routine disk-space cleanup that leaves in-use resources alone. Safety note: mutates real Docker state - prompts with a plain y/n confirmation unless -Force is passed (this script predates the shared Confirm-DevKitDestructiveAction gate that Docker Nuke uses, so it does not honor the confirmDestructive setting); supports -DryRun to preview affected containers/images with no changes made.",
+          "caution": true,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        },
+        {
+          "key": "3",
+          "label": "Quick Logs (multi-container)",
+          "script": "Docker-QuickLogs.ps1",
+          "help": "Tails 'docker logs' for one or more containers at once (all running containers by default, or specific names via -Container), with a distinct color prefix per container, an initial line count (-Lines, default 50), optional -Timestamps, and optional -Follow to keep streaming instead of printing the last N lines and exiting. Use this to watch several services' logs together during local development. Safety note: read-only against Docker (no containers/images/volumes are touched), but with -Follow it blocks the terminal indefinitely - press Ctrl+C to stop, and never invoke -Follow from an unattended/non-interactive context.",
+          "caution": true,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        }
+      ]
+    },
+    {
+      "group": "System & Workflow",
+      "folder": "system",
+      "name": "System Tools",
+      "description": "Edit the PATH environment variable, back up and restore User/Machine environment variables to/from a JSON file, and reload the current shell's environment without restarting the terminal. Most operations here read or write real environment state directly via [Environment]::GetEnvironmentVariable/SetEnvironmentVariable.",
+      "items": [
+        {
+          "key": "1",
+          "label": "Edit PATH Variable",
+          "script": "Edit-Path.ps1",
+          "help": "Interactive and flag-driven editor for the User or Machine PATH environment variable, with duplicate- and missing-path detection. Use -Show for a read-only report of the current PATH; -Add/-Remove/-Clean (or the [A]/[R]/[C] options in the interactive menu you get by running it with no flags) write PATH for real via [Environment]::SetEnvironmentVariable. Editing Machine PATH requires Administrator privileges - the script offers to relaunch itself elevated if it isn't. Safety note: -Remove and -Clean (and their interactive equivalents) each prompt with a y/n confirmation showing exactly what will change before writing, unless -Force is passed; -Add writes immediately (additive, low-risk); -Show never mutates anything.",
+          "caution": true,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        },
+        {
+          "key": "2",
+          "label": "Backup Environment Variables",
+          "script": "Env-Backup.ps1",
+          "help": "Writes a timestamped JSON snapshot of current User environment variables (and Machine variables too, if run elevated) to disk - additive only, it never changes the live environment. Variable names that look like secrets (TOKEN/KEY/SECRET/PASSWORD/CREDENTIAL/CONNECTIONSTRING/API_KEY) are redacted by default; pass -IncludeSecrets or -Redact:$false to store raw values instead. From this menu it asks you to pick a linked project first and saves the backup file there. Safety note: shows a warning that the file may contain secrets and asks to continue before writing, unless -Force is passed - low risk overall since it only ever creates a new file, never overwrites or deletes anything.",
+          "caution": true,
+          "requiresProject": true,
+          "projectArgName": "OutputPath",
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        },
+        {
+          "key": "3",
+          "label": "Restore Environment Variables",
+          "script": "Env-Restore.ps1",
+          "help": "Restores User (and, if run elevated, Machine) environment variables from a JSON file produced by 'Backup Environment Variables'. Use -WhatIf to preview what would be restored with no changes made at all. For PATH specifically, without -Force it shows an Added/Removed diff against the CURRENT live PATH and lets you choose Overwrite/Merge/Skip per scope rather than blindly replacing it. Safety note: mutates real User/Machine environment variables via [Environment]::SetEnvironmentVariable - always confirms first unless -Force is passed, and -Force also switches PATH restoration to a straight overwrite instead of the diff/merge prompt. Machine variables in the backup are skipped with a message if not run as Administrator.",
+          "caution": true,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": {
+            "Filter": "DevKit backups (*.json)|*.json|All files (*.*)|*.*",
+            "Description": "Select an environment backup to restore",
+            "TypePrompt": "Enter backup file path to restore",
+            "ParamName": "BackupFile"
+          },
+          "prompts": null,
+          "staticArgs": null
+        },
+        {
+          "key": "4",
+          "label": "Shell Reload (refresh env)",
+          "script": "Shell-Reload.ps1",
+          "help": "Refreshes this PowerShell session's environment variables from the registry and re-dot-sources your PowerShell profile scripts, without closing the terminal. -Full also merges every current User and Machine variable into the session, not just PATH and a short common list (TEMP/TMP/HOME/USERPROFILE/JAVA_HOME/NODE_PATH/PYTHONPATH/GOPATH); -ProfileOnly skips the environment refresh and only reloads profiles; -ShowDiff prints which variables changed as a result. Only affects this running session's in-memory environment - it never calls SetEnvironmentVariable, so there's nothing to confirm.",
+          "caution": false,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        },
+        {
+          "key": "5",
+          "label": "Edit Hosts File",
+          "script": "Edit-HostsFile.ps1",
+          "help": "View, add, remove, and comment-toggle entries in the Windows hosts file (%windir%\\System32\\drivers\\etc\\hosts). Use -Show (or the menu's default listing) for a read-only numbered report showing each entry's IP, hostnames, and commented state; run with no flags for an interactive [A]dd/[R]emove/[T]oggle/[Q]uit menu, or -Add \"ip hostname...\" / -Remove / -Toggle (by listing index or hostname pattern) for scripted changes. Use this to map local dev domains (e.g. 127.0.0.1 mysite.local) without opening Notepad as admin. Safety note: every mutation requires Administrator privileges (the script offers to relaunch itself elevated), is gated by the shared confirmation prompt unless -Force is passed, creates a timestamped backup under %LOCALAPPDATA%\\NorthstarDevKit\\hosts-backups\\ before the first write of a session, writes the file back as plain ASCII preserving all comments and ordering, and clears the DNS client cache afterward. -Show never mutates anything. This menu item runs with -Show, so opening it from the DevKit menu gives the read-only listing without requiring admin elevation.",
+          "caution": true,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": {
+            "Show": true
+          }
+        }
+      ]
+    },
+    {
+      "group": "System & Workflow",
+      "folder": "workflow",
+      "name": "Workflow Tools",
+      "description": "Everyday shortcuts scoped to a linked project: open it in VS Code or Cursor, open its Git remote (GitHub, GitLab, Bitbucket, Azure DevOps) in a browser, or copy a detected .env template into it. Each tool prompts you to pick a project first and runs with its default (non-interactive, non-dry-run) flags from this menu; less common options - recent-projects picker, Cursor preference, a specific remote/branch/PR/issues/actions page, interactive value prompts, dry run - are only available via direct command-line invocation.",
+      "items": [
+        {
+          "key": "1",
+          "label": "Code Here (open VS Code/Cursor)",
+          "script": "Code-Here.ps1",
+          "help": "Opens the selected project folder in VS Code (preferred) or Cursor, whichever is detected - checks PATH, then (for Cursor, which doesn't always add itself to PATH) common per-user install folders and the Windows App Paths registry key. Use this to jump straight into an editor for a linked project instead of opening it by hand. Supports -Recent (browse a picker of recently-opened folders instead of the project path), -Cursor (prefer Cursor, falling back to VS Code with a warning if Cursor isn't found), and -Wait (block until the editor window closes) when run directly from the command line - this menu item always opens the project path with none of those switches set. Not destructive: launches a real external application, never modifies files.",
+          "caution": false,
+          "requiresProject": true,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        },
+        {
+          "key": "2",
+          "label": "Open Repo in Browser",
+          "script": "Open-Repo.ps1",
+          "help": "Opens the selected project's Git remote in your default browser. Resolves the 'origin' remote, converts SSH/ssh:// remote URLs to a browsable https:// URL (GitHub, GitLab, Bitbucket, Azure DevOps, and self-hosted equivalents), and links to the current branch when the platform is recognized; refuses to open anything that isn't a well-formed http(s) URL rather than risk launching a malformed or malicious remote. Use this to jump to a repo's web page without hand-converting the remote URL. Supports -Remote, -Branch, -PullRequest, -Issues, and -Actions when run directly from the command line to open a different remote/branch or jump straight to the PR/issues/actions page - this menu item always opens the repo root at the current branch on 'origin'. Not destructive: launches a browser tab, never modifies files.",
+          "caution": false,
+          "requiresProject": true,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        },
+        {
+          "key": "3",
+          "label": "Copy .env Template",
+          "script": "Copy-EnvTemplate.ps1",
+          "help": "Copies a detected .env template (.env.example, .env.template, .env.sample, .env.local.example, .env.development.example, .env.production.example, or env.example, checked in that order, or a specific file via -Template) to .env in the selected project, using each variable's template default value as-is. Use this to bootstrap local environment config for a project you just cloned or linked. Safety note: writes a real file into the project - if .env already exists it asks a plain y/n before overwriting (skipped, i.e. always overwrites, when -Force is passed; this is a script-local y/n prompt, not the shared Confirm-DevKitDestructiveAction gate, so it is not affected by the confirmDestructive setting). Supports -Interactive (prompt for each variable's value instead of taking the template default) and -DryRun (preview the .env content with no file written) when run directly from the command line - this menu item always writes non-interactively. Reminds you to keep .env out of Git when the source template was .env.example or .env.template.",
+          "caution": true,
+          "requiresProject": true,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        },
+        {
+          "key": "4",
+          "label": "Compare .env vs Template",
+          "script": "Compare-EnvFiles.ps1",
+          "help": "Checks the selected project's .env against its env template (same auto-detect order as Copy .env Template, or a specific file via -Template; the env file defaults to .env, override with -EnvFile) and reports drift by KEY NAME ONLY: template keys missing from .env, keys present but with an empty value, and keys that exist only in .env (informational - usually local overrides), with a green all-clear line when there's nothing to report. Use this after pulling changes to spot new required variables before the app fails at runtime. Fully read-only, and values are never printed - safe to run in a shared terminal or on a screen share.",
+          "caution": false,
+          "requiresProject": true,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        },
+        {
+          "key": "5",
+          "label": "Dev Text Converter (base64/url/jwt/guid/hash)",
+          "script": "Convert-DevText.ps1",
+          "help": "The 'google-this' converter box, with nothing leaving your machine: Base64 encode/decode, URL encode/decode, Unix timestamp (seconds or milliseconds, auto-detected) to local time, current time to Unix timestamp, new GUID, SHA-256 hash of a string, and JWT header/payload decoding (base64url only - the signature is NEVER verified and the tool says so, so never trust decoded content for authentication). Run with no -Mode for an interactive picker, or pass -Mode and -Input for scripted use; -Clipboard copies the result (the tool's only side effect). Pure .NET, no external dependencies, never touches files or the network.",
+          "caution": false,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        }
+      ]
+    },
+    {
+      "group": "System & Workflow",
+      "folder": "diagnostics",
+      "name": "Diagnostics",
+      "description": "Read-only checks and reports on your local development environment - tool/version health checks, a system info snapshot, and a DevKit release-update check. Nothing in this category mutates real system state (System Dev Info can optionally write a JSON export file to the current directory if you pass -Export).",
+      "items": [
+        {
+          "key": "1",
+          "label": "DevKit Doctor (health check)",
+          "script": "DevKit-Doctor.ps1",
+          "help": "Checks installed dev-tool versions (Node, NPM, Yarn/PNPM/Bun, Git, Docker, VS Code, Cursor, GitHub CLI, Python, WSL), Git user.name/user.email config, Windows version, administrator rights, execution policy, disk space, and RAM, and flags anything missing, outdated, or misconfigured. Supports -Quiet to only show failed/warning checks (passing checks are hidden). Use this first when your setup 'feels broken' or before onboarding a new machine. Read-only - makes no changes, though it exits with code 1 when real issues (not just warnings) are found, which is useful when scripted.",
+          "caution": false,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        },
+        {
+          "key": "2",
+          "label": "System Dev Info",
+          "script": "System-DevInfo.ps1",
+          "help": "Prints a snapshot of installed tool versions (PowerShell, Node, NPM, Git, Docker, Python, VS Code), local IP/gateway, common dev ports currently in use, per-drive disk space, RAM, PATH entry count, execution policy, and admin status. -Export writes it to a timestamped JSON file in the current directory - the export includes username, computer name, and local IP/gateway, so review it before sharing, or pass -Redact alongside -Export to replace those fields with a non-reversible hash. -Clipboard copies a short text summary instead. Use this to grab a quick environment snapshot to share or compare across machines. Read-only aside from the optional -Export file write.",
+          "caution": false,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        },
+        {
+          "key": "3",
+          "label": "Check for Updates",
+          "script": "Test-DevKitUpdate.ps1",
+          "help": "Compares your installed DevKit version (the repo's VERSION file) against the latest GitHub Release tag via a single read-only HTTPS GET to the GitHub Releases API. Rate-limited to once per 24 hours (and gated by settings.json's preferences.updateCheckEnabled) unless -Force is passed. Use this to check whether a newer DevKit release is available. Read-only network call - by design the only one in DevKit that isn't about networking itself; the only local write is updating its own last-checked timestamp in settings.json.",
+          "caution": false,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        }
+      ]
+    },
+    {
+      "group": "Maintenance & Agents",
+      "folder": "maintenance",
+      "name": "Maintenance",
+      "description": "Real Windows maintenance and tuning: disk/storage cleanup, startup and service management, system file repair (SFC/DISM), Windows Update cache reset, scheduled tasks and event log review, power and visual-effects tuning, and hardware health reporting - distinct from diagnostics/, which checks dev-tool health rather than the OS itself. Most mutating tools default to a safe, non-mutating report, then offer to apply their changes right there (interactive runs only; explicit flags do the same for automation) - always behind a confirmation prompt. A few (system file repair, Windows Update reset, memory diagnostic) attempt their real action by default behind just a confirmation prompt, so check an item's Help below before running it unattended.",
+      "items": [
+        {
+          "key": "1",
+          "label": "Clear Disk Junk (temp/WU cache/Recycle Bin)",
+          "script": "Clear-DiskJunk.ps1",
+          "help": "Scans user/system temp folders, the Windows Update download cache, and the Recycle Bin, and reports how much space each is holding. Use this to see how much junk is reclaimable before deciding whether to clean it. Safety note: bare invocation reports, then (interactive runs only) asks whether to clean up right away; -Apply skips that first prompt. Either way, deleting requires typing 'CLEAN' to confirm (or -Force to skip). Cleaning also stops/restarts the Windows Update services around clearing its cache. -IncludeWinSxS additionally runs 'Dism.exe /Online /Cleanup-Image /StartComponentCleanup' and requires an elevated session.",
+          "caution": true,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        },
+        {
+          "key": "2",
+          "label": "Disk Usage Report (top folders by size)",
+          "script": "Show-DiskUsageReport.ps1",
+          "help": "Measures the immediate subfolders under a path (defaults to the system drive root) and lists the largest ones by size, descending. Use this to find what's eating disk space before deciding what to clean up manually or with Clear Disk Junk. Fully read-only - never prompts, deletes, or modifies anything, even with custom -Path/-Top values.",
+          "caution": false,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        },
+        {
+          "key": "3",
+          "label": "Manage Startup Programs",
+          "script": "Manage-StartupPrograms.ps1",
+          "help": "Reports startup entries from the current-user and all-users Run registry keys plus both Startup folders (shortcuts), and can disable or re-enable one by its visible name. Use this to see what launches at sign-in and trim entries you don't want. Safety note: bare invocation reports, then (interactive runs only) offers to disable/re-enable an entry by name; -Disable/-Enable do the same for automation. Toggling mutates (a Run value is renamed to 'DevKitDisabled_<original>'; a Startup-folder shortcut is moved to a sibling 'Disabled' folder - both fully reversible, never a delete) and requires confirmation unless -Force is passed. Disabling/enabling an all-users (HKLM) entry additionally requires an elevated (Administrator) session.",
+          "caution": true,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        },
+        {
+          "key": "4",
+          "label": "Manage Services",
+          "script": "Manage-Services.ps1",
+          "help": "Reports the current startup type and status for a curated list of commonly-tuned, non-critical Windows services (e.g. SysMain, Windows Search, Remote Registry), and can change one service's startup type by name (not limited to the curated list). Use this to see what's currently set before deciding whether to change anything - the report itself makes no recommendation. Safety note: bare invocation reports, then (interactive runs only) offers to change a service's startup type right away; -SetStartType plus -StartTypeValue does the same for automation. Changing a startup type mutates, requires an elevated (Administrator) session, and requires confirmation unless -Force is passed.",
+          "caution": true,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        },
+        {
+          "key": "5",
+          "label": "Repair System Files (SFC + DISM)",
+          "script": "Repair-SystemFiles.ps1",
+          "help": "Runs System File Checker (sfc /scannow) followed by DISM's component-store repair (DISM /Online /Cleanup-Image /RestoreHealth) to find and fix corrupted system files, streaming both tools' output live. Can take 10-30+ minutes. Use this when Windows itself seems unstable or corrupted. Safety note: unlike most tools in this category, bare invocation is NOT a report - it requires an elevated (Administrator) session and a y/N confirmation (skippable with -Force), then runs the real repair. Use -DryRun to only see the command plan with no execution and no admin check.",
+          "caution": true,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        },
+        {
+          "key": "6",
+          "label": "Reset Windows Update Cache",
+          "script": "Reset-WindowsUpdate.ps1",
+          "help": "Classic fix for a stuck Windows Update: stops the Windows Update-related services, renames the SoftwareDistribution and catroot2 cache folders (Windows rebuilds both automatically), then restarts the services. Use this when Windows Update is failing or hanging. Safety note: unlike most tools in this category, bare invocation is NOT a report - it requires an elevated (Administrator) session and typing 'RESET' to confirm (skippable with -Force), then performs the real reset. Use -DryRun to only see the step plan with no execution and no admin check.",
+          "caution": true,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        },
+        {
+          "key": "7",
+          "label": "Scheduled Tasks Report",
+          "script": "Get-ScheduledTasksReport.ps1",
+          "help": "Lists Windows scheduled tasks with their state, last run time, and last result, flagging any nonzero result code, and can disable a single named task. Use -NonMicrosoftOnly to filter out the \\Microsoft\\ task-folder tree and focus on third-party tasks. Safety note: listing is read-only (no admin rights needed); after the list, an interactive run offers to disable a task by name, and -Disable does the same for automation. Disabling mutates - it requires confirmation unless -Force is passed, and may itself require an elevated session depending on the task's owning scope.",
+          "caution": true,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        },
+        {
+          "key": "8",
+          "label": "Recent Event Errors",
+          "script": "Get-RecentEventErrors.ps1",
+          "help": "Reports Critical and Error level events from the System and Application Windows event logs within a recent time window (-Hours, default 24; -MaxEvents, default 50). Use this to spot what's been going wrong on the machine recently before digging further. Fully read-only - never modifies anything, and has no mutating parameters at all.",
+          "caution": false,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        },
+        {
+          "key": "9",
+          "label": "Power Plan Manager",
+          "script": "Set-PowerPlan.ps1",
+          "help": "Lists Windows power plans (via powercfg /list) with the active one marked - this is also the bare/default behavior - switches the active plan by name via -SetPlan, and can unlock the hidden 'Ultimate Performance' plan via -UnlockUltimate. Use this to see or change which power plan is active, or to make Ultimate Performance available to switch to. Safety note: bare invocation and -List show the table, then (interactive runs only) offer to switch plans by number or name. Switching requires confirmation unless -Force is passed. -UnlockUltimate requires an elevated (Administrator) session plus confirmation unless -Force is passed.",
+          "caution": true,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        },
+        {
+          "key": "10",
+          "label": "Visual Effects Manager",
+          "script": "Set-VisualEffects.ps1",
+          "help": "Reports or sets the Windows 'adjust for best performance/appearance' visual effects mode (Performance, Appearance, Auto, or Custom) - the setting behind Advanced System Settings -> Performance. Use this to quickly trade visual polish for responsiveness or vice versa. Safety note: bare invocation and -Show report the current mode, then (interactive runs only) offer to change it right away; -SetMode does the same for automation. Setting mutates the current user's own HKCU registry hive (no admin rights needed) and requires confirmation unless -Force is passed; a sign-out or Explorer restart may be needed for all effects to visibly update.",
+          "caution": true,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        },
+        {
+          "key": "11",
+          "label": "Page File Configuration Report",
+          "script": "Test-PageFileConfig.ps1",
+          "help": "Reports current page file usage, whether Windows is managing the page file automatically, and total physical RAM, then gives a plain-language read of whether the current setup looks reasonable. Use this if you suspect memory-pressure issues or just want a sanity check on page file config. Intentionally read-only with no parameters at all - resizing a page file programmatically is finicky and reboot-dependent, so this tool only reports and recommends, never changes anything.",
+          "caution": false,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        },
+        {
+          "key": "12",
+          "label": "Disk Health Report",
+          "script": "Get-DiskHealthReport.ps1",
+          "help": "Reads per-physical-disk wear, temperature, and read/write error counters via Storage Reliability Counters, and separately reports classic SMART failure-prediction data where the driver stack exposes it (each section is skipped gracefully, not treated as an error, when unsupported on a given disk/system). Use this periodically to catch a failing drive before it takes data with it. Fully read-only - never modifies anything, and has no parameters at all.",
+          "caution": false,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        },
+        {
+          "key": "13",
+          "label": "Battery Report",
+          "script": "Get-BatteryReport.ps1",
+          "help": "Generates a Windows battery health report (powercfg /batteryreport) for laptop/tablet systems; a desktop with no battery is reported as a benign no-op, not an error. Use this to check battery wear/capacity over time. Non-destructive - it only ever writes the HTML report file, defaulting to a devkit-battery-report.html file under the Temp folder unless -OutputPath is given; -Open launches it with its default handler when done. No confirmation prompt - it never touches system configuration.",
+          "caution": false,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        },
+        {
+          "key": "14",
+          "label": "Memory Diagnostic",
+          "script": "Invoke-MemoryDiagnostic.ps1",
+          "help": "Launches the built-in Windows Memory Diagnostic tool (mdsched.exe), which then prompts to restart the PC now or at the next boot to run a memory test. Use this if you suspect faulty RAM and are ready to accept a restart prompt. Safety note: bare invocation actually launches mdsched.exe (the ONE tool in this category whose default is not a report) - it is gated by typing 'RESTART' to confirm, skippable with -Force. Use -DryRun to only see what would happen with nothing launched.",
+          "caution": true,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        }
+      ]
+    },
+    {
+      "group": "Maintenance & Agents",
+      "folder": "agents",
+      "name": "Agents & MCP",
+      "description": "Track and update installed AI/dev CLI tools (claude, gh, codex, gemini, cursor-agent, aider, supabase, vercel, railway, kimi, auggie), and manage Claude Code's MCP (Model Context Protocol) server configuration - list, add (by hand or from a built-in catalog), remove, and scan servers across both user/global and per-project scope.",
+      "items": [
+        {
+          "key": "1",
+          "label": "List Installed AI CLIs",
+          "script": "Get-InstalledAiClis.ps1",
+          "help": "Detects which AI coding-agent CLIs (claude, gh, codex, gemini, cursor-agent, aider, supabase, vercel, railway, kimi, auggie) are installed and on PATH, and reports their versions. Read-only - makes no changes. Use this first to see what's available on this machine before updating or configuring anything.",
+          "caution": false,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        },
+        {
+          "key": "2",
+          "label": "Update AI CLIs",
+          "script": "Update-AiClis.ps1",
+          "help": "Updates installed AI/dev CLIs (of the 11 tracked - claude, gh, codex, gemini, cursor-agent, aider, supabase, vercel, railway, kimi, auggie) that are on an automatable update channel: npm ('npm install -g PACKAGE@latest'), npm+builtin (tries the tool's own upgrade subcommand first, e.g. 'vercel upgrade', falling back to npm), or scoop ('scoop update NAME', only when installed via Scoop). Tools on a manual channel (gh, cursor-agent, aider, and kimi -- two unrelated CLIs share the 'kimi' command name, so it's report-only until there's a safe way to tell them apart) are reported only, never touched. Supports -Only <name(s)> to restrict which tools are considered, -DryRun to show current/latest versions and what would update with no changes made, and -Force to skip the confirmation prompt. Safety note: without -DryRun, confirming runs real update commands (npm install/scoop update/builtin upgrade) against globally installed packages - review the detected list before confirming.",
+          "caution": true,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        },
+        {
+          "key": "3",
+          "label": "List MCP Servers",
+          "script": "Get-McpServers.ps1",
+          "help": "Lists Claude Code's configured MCP servers via 'claude mcp list'. Read-only. With an active project set, splits the list into user/global scope versus project/local scope by diffing the list run from a neutral directory against the list run from the project. Use this to see what's currently configured before adding or removing anything.",
+          "caution": false,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": {
+            "UseActiveProject": true
+          }
+        },
+        {
+          "key": "4",
+          "label": "Add MCP Server",
+          "script": "Add-McpServer.ps1",
+          "help": "Registers one MCP server by hand - you supply the name and either a local (stdio) command or a remote http URL/headers, plus the scope to register it at. Use this when you already know the exact server details. Safety note: mutates real Claude Code MCP configuration (runs 'claude mcp add') - always confirms first unless -Force is passed.",
+          "caution": true,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        },
+        {
+          "key": "5",
+          "label": "Remove MCP Server",
+          "script": "Remove-McpServer.ps1",
+          "help": "Removes one MCP server by name via 'claude mcp remove'. Use this to clean up a server you no longer need. Safety note: mutates real Claude Code MCP configuration - always confirms first unless -Force is passed.",
+          "caution": true,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        },
+        {
+          "key": "6",
+          "label": "Add MCP Server (From Catalog)",
+          "script": "Add-McpServerFromCatalog.ps1",
+          "help": "Browsable picker over a curated catalog of popular MCP servers (Supabase, GitHub, Notion, Linear, Stripe, and more) - pick one, choose a variant if it offers more than one, and answer a few prompts (name, scope, API keys/headers, directories) instead of typing the full 'claude mcp add' command yourself. Use this when you want to add a well-known server without looking up its exact invocation. Safety note: mutates real Claude Code MCP configuration - always confirms first unless -Force is passed.",
+          "caution": true,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        },
+        {
+          "key": "7",
+          "label": "Scan MCP Setup (Global + Project)",
+          "script": "Scan-McpServers.ps1",
+          "help": "Checks which catalog servers are already configured, both globally/user-scope and (if an active project is set) at project scope, and reports what's missing. For each missing entry with an automatable registration, asks whether to add it now, reusing the same catalog add flow as 'Add MCP Server (From Catalog)'. Use this periodically to make sure a project (or this machine) has the MCP servers you expect. Safety note: the scan itself is read-only, but accepting a prompt to add a missing server mutates real Claude Code MCP configuration - always confirms first unless -Force is passed.",
+          "caution": true,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        }
+      ]
+    },
+    {
+      "group": "Network",
+      "folder": "wifi",
+      "name": "WiFi Tools",
+      "description": "Scan nearby WiFi networks and optimize a WiFi connection (DNS, Winsock, TCP/IP) using netsh and Windows networking cmdlets. Scanning is read-only; optimization requires administrator privileges and recommends a reboot to fully complete.",
+      "items": [
+        {
+          "key": "1",
+          "label": "WiFi Optimizer (Full)",
+          "script": "WiFi-Optimize.ps1",
+          "help": "Full network optimization: flushes/re-registers DNS, resets Winsock and TCP/IP, releases and renews the IP, pings Cloudflare (1.1.1.1) and Google (8.8.8.8) to pick the faster public DNS and applies it (IPv4 and IPv6) to the active WiFi adapter, tunes TCP autotuning/RSS, then tests latency and (unless -Fast) runs an ~8-second Cloudflare download speed test. Use this when a WiFi connection feels slow and you want a full diagnose-and-fix pass. Safety note: mutates real network configuration - requires administrator privileges (exits with an error if not elevated), shows a Yellow warning and asks for y/n confirmation before proceeding unless -Force is passed, backs up the adapter's previous DNS settings to a JSON file before changing them (undo with -RestoreDns, which touches nothing else), and recommends a restart afterward to fully complete the TCP/IP reset. -KeepDNS leaves DNS untouched.",
+          "caution": true,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        },
+        {
+          "key": "2",
+          "label": "WiFi Optimizer (Fast Mode)",
+          "script": "WiFi-FastMode.ps1",
+          "help": "Same optimization as WiFi Optimizer (Full), but always skips the download speed test for a quicker pass - internally it just calls WiFi-Optimize.ps1 -Fast. Use this when you want the DNS/TCP-IP optimization without waiting on the speed test. Safety note: identical mutations to WiFi Optimizer (Full) - DNS/Winsock/TCP-IP changes, requires administrator privileges, shows the same Yellow warning and y/n confirmation unless -Force is passed, and recommends a restart afterward. Supports -KeepDNS; DNS changes can be undone with WiFi-Optimize.ps1 -RestoreDns.",
+          "caution": true,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": {
+            "Fast": true
+          }
+        },
+        {
+          "key": "3",
+          "label": "WiFi Scanner",
+          "script": "WiFi-Scan.ps1",
+          "help": "Scans nearby WiFi networks (netsh wlan show networks) and lists them sorted by best signal strength, with security type and channel, plus recommendations - best open network, best secured network, and a congested-channel note. Read-only - makes no changes. Requires a supported wireless adapter; reports cleanly (no crash) if no adapter is present or no networks can be parsed. Use this to see what's nearby, judge signal quality, or spot channel congestion before troubleshooting a connection.",
+          "caution": false,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        }
+      ]
+    }
+  ]
+}

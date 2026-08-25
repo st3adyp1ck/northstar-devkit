@@ -1,0 +1,17 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capabilities shared by the widget and control-center windows",
+  "windows": ["widget", "control-center"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-close",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "opener:default",
+    "dialog:allow-open",
+    "dialog:allow-confirm",
+    "updater:default",
+    "process:allow-restart"
+  ]
+}

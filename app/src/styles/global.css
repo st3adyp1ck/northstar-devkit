@@ -1,0 +1,138 @@
+@import "./tokens.css";
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: transparent;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--text-md);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+  user-select: none;
+}
+
+input,
+textarea,
+button {
+  user-select: auto;
+}
+
+::selection {
+  background: var(--accent-soft);
+  color: var(--text-primary);
+}
+
+/* thin themed scrollbars everywhere, matching the WPF app's scrollbar pass */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--surface-border-strong) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--surface-border-strong);
+  border-radius: var(--radius-pill);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--gm-500);
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+a {
+  color: var(--text-link);
+}
+
+/*
+ * Doubled pseudo-class is a deliberate specificity bump (0,2,0), not a
+ * typo: components across both windows set their own resting/hover
+ * box-shadow (Button variants, GlassPanel, form controls), each at (0,1,0)
+ * or (0,1,0)+import-order. A plain `:focus-visible` box-shadow would lose
+ * that tie-break to whichever loads later in the bundle and silently never
+ * render on the exact controls this is meant to cover. This wins without
+ * `!important` and without having to hunt down every component's own
+ * box-shadow rule.
+ */
+:focus-visible:focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+  /* Glass surfaces are blurred and often mid-tone, so the outline alone can
+     get lost at a glance - a soft accent halo backs it up without relying
+     on outline-color contrast alone. */
+  box-shadow: var(--shadow-focus-ring);
+}
+
+/**
+ * Loading-state shimmer, shared across both windows so a panel that needs a
+ * skeleton row (a metric still loading, a list not yet fetched) doesn't
+ * reinvent it. Usage: `<div class="devkit-skeleton" style="width:120px;
+ * height:14px" />` - a plain block that shows the shimmer in place of text.
+ */
+.devkit-skeleton {
+  position: relative;
+  overflow: hidden;
+  background: var(--surface-skeleton);
+  border-radius: var(--radius-sm);
+}
+
+.devkit-skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--text-primary) 10%, transparent),
+    transparent
+  );
+  animation: devkit-shimmer 1.6s var(--ease-standard) infinite;
+}
+
+@keyframes devkit-shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .devkit-skeleton::after {
+    animation: none;
+  }
+}
+
+/* App-level twin of the media query above - see tokens.css's data-animations block. */
+:root[data-animations="off"] .devkit-skeleton::after {
+  animation: none;
+}
+
+.devkit-drag-region {
+  -webkit-app-region: drag;
+}
+
+.devkit-no-drag {
+  -webkit-app-region: no-drag;
+}

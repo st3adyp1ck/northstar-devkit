@@ -1,0 +1,19 @@
+.terminal-panel {
+  display: flex;
+  flex-direction: column;
+  /* Placeholder sizing for standalone use - the pass that wires this into
+     WidgetApp.tsx should decide real widget layout sizing. */
+  height: 280px;
+}
+
+.terminal-panel__header {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--surface-border);
+  margin-bottom: 0;
+}
+
+.terminal-panel__body {
+  flex: 1;
+  min-height: 0;
+  padding: var(--space-2);
+}

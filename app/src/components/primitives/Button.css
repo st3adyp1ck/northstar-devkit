@@ -1,0 +1,136 @@
+.devkit-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  transition: background var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard);
+}
+
+.devkit-btn:active {
+  transform: scale(0.97);
+  /* A pressed-in cue that reads consistently across all four variants,
+     including ghost/subtle which otherwise have no box-shadow at rest. */
+  box-shadow: var(--shadow-inset);
+}
+
+.devkit-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.devkit-btn--loading {
+  /* Distinct from the plain :disabled dimming - a run in progress is not
+     an inert control, so it stays closer to full strength. */
+  opacity: 0.85;
+  cursor: default;
+}
+
+.devkit-btn__spinner {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, currentColor 25%, transparent);
+  border-top-color: currentColor;
+  animation: devkit-btn-spin var(--duration-spin) linear infinite;
+}
+
+@keyframes devkit-btn-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes devkit-btn-spin-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* A slowed spin still reads as "spinning," which some reduced-motion
+     users specifically want to avoid - a gentle opacity pulse keeps the
+     "still working" signal without the rotation. */
+  .devkit-btn__spinner {
+    animation-name: devkit-btn-spin-pulse;
+    border-top-color: color-mix(in srgb, currentColor 30%, transparent);
+  }
+}
+
+/*
+ * App-level twin of the media query above - see tokens.css's data-animations
+ * block. Note the base rule's `animation-duration` already comes from
+ * `var(--duration-spin)`, so that half is covered by tokens.css alone; this
+ * only needs to carry over the pulse-instead-of-spin swap for visual parity.
+ */
+:root[data-animations="off"] .devkit-btn__spinner {
+  animation-name: devkit-btn-spin-pulse;
+  border-top-color: color-mix(in srgb, currentColor 30%, transparent);
+}
+
+.devkit-btn--sm {
+  height: 28px;
+  padding: 0 var(--space-3);
+  font-size: var(--text-xs);
+}
+
+.devkit-btn--md {
+  height: 34px;
+  padding: 0 var(--space-4);
+  font-size: var(--text-sm);
+}
+
+.devkit-btn--primary {
+  background: linear-gradient(180deg, var(--sapphire-500), var(--sapphire-700));
+  color: var(--text-on-accent);
+  box-shadow: var(--shadow-sm);
+}
+
+.devkit-btn--primary:hover:not(:disabled) {
+  box-shadow: var(--shadow-glow-accent);
+}
+
+.devkit-btn--ghost {
+  background: transparent;
+  color: var(--text-secondary);
+  border-color: var(--surface-border);
+}
+
+.devkit-btn--ghost:hover:not(:disabled) {
+  color: var(--text-primary);
+  border-color: var(--surface-border-strong);
+  background: var(--surface-hover);
+}
+
+.devkit-btn--subtle {
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  border-color: var(--surface-border);
+}
+
+.devkit-btn--subtle:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: var(--surface-border-strong);
+}
+
+.devkit-btn--danger {
+  background: linear-gradient(180deg, var(--ember-500), var(--ember-700));
+  color: #fff;
+  box-shadow: var(--shadow-sm);
+}
+
+.devkit-btn--danger:hover:not(:disabled) {
+  box-shadow: var(--shadow-glow-danger);
+}
