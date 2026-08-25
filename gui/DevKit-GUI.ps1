@@ -66,7 +66,7 @@ $ErrorActionPreference = 'Stop'
 $GuiDir = $PSScriptRoot
 $ScriptDir = Split-Path -Parent $PSScriptRoot   # repo root (gui/ sits one level down)
 
-. (Join-Path $ScriptDir "lib\DevKit-Common.ps1")
+. (Join-Path $ScriptDir "tools\lib\DevKit-Common.ps1")
 . (Join-Path $GuiDir "DevKit-GuiCore.ps1")
 
 Add-Type -AssemblyName PresentationFramework

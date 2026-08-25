@@ -9,7 +9,7 @@
 #>
 
 BeforeAll {
-    $script:CommonModule = Join-Path (Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) "lib") "DevKit-Common.ps1"
+    $script:CommonModule = Join-Path (Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) "tools\lib") "DevKit-Common.ps1"
     # lib/DevKit-Common.ps1 guards itself with a $global:DevKitCommonLoaded
     # "load once per process" flag. That's correct for the real app, but
     # when Pester runs multiple test files in one process, an earlier file

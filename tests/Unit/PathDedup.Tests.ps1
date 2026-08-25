@@ -21,8 +21,8 @@
 
 BeforeAll {
     $script:RepoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-    $script:EditPathScript = Join-Path (Join-Path $script:RepoRoot "system") "Edit-Path.ps1"
-    $script:ShellReloadScript = Join-Path (Join-Path $script:RepoRoot "system") "Shell-Reload.ps1"
+    $script:EditPathScript = Join-Path (Join-Path $script:RepoRoot "tools\system") "Edit-Path.ps1"
+    $script:ShellReloadScript = Join-Path (Join-Path $script:RepoRoot "tools\system") "Shell-Reload.ps1"
 
     function Get-DevKitFunctionSource {
         <#

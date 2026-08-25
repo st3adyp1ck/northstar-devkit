@@ -23,7 +23,7 @@
 Describe "Convert-DevText pure converters" {
 
     BeforeAll {
-        $script:ScriptPath = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) "workflow\Convert-DevText.ps1"
+        $script:ScriptPath = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) "tools\workflow\Convert-DevText.ps1"
         . $script:ScriptPath
 
         # base64url-encode helper for handcrafting JWT segments in tests.

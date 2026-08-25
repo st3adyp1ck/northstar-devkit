@@ -22,7 +22,7 @@
 Describe "Get-DevKitEnvKeyNames" {
 
     BeforeAll {
-        $script:ScriptPath = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) "workflow\Compare-EnvFiles.ps1"
+        $script:ScriptPath = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) "tools\workflow\Compare-EnvFiles.ps1"
         . $script:ScriptPath
     }
 

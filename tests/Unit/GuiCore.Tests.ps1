@@ -11,7 +11,7 @@
 
 BeforeAll {
     $script:RepoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-    $script:CommonModule = Join-Path (Join-Path $script:RepoRoot "lib") "DevKit-Common.ps1"
+    $script:CommonModule = Join-Path (Join-Path $script:RepoRoot "tools\lib") "DevKit-Common.ps1"
     # See Get-DevKitPackageManager.Tests.ps1 for why this flag reset matters
     # when several test files run in one Pester process.
     $global:DevKitCommonLoaded = $false
@@ -126,7 +126,7 @@ Describe "Shell argument rendering" {
 Describe "Get-DevKitTerminalCommand" {
 
     BeforeEach {
-        $script:scriptPath = Join-Path $script:RepoRoot 'ports\Scan-Ports.ps1'
+        $script:scriptPath = Join-Path $script:RepoRoot 'tools\ports\Scan-Ports.ps1'
     }
 
     It "uses Windows Terminal with pwsh when both exist" {

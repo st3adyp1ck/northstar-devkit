@@ -24,7 +24,7 @@
 Describe "ConvertTo-DevKitBrowsableUrl" {
 
     BeforeAll {
-        $script:ScriptPath = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) "workflow\Open-Repo.ps1"
+        $script:ScriptPath = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) "tools\workflow\Open-Repo.ps1"
         . $script:ScriptPath
     }
 

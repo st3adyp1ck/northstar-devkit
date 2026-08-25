@@ -34,7 +34,7 @@
 #>
 
 BeforeAll {
-    $script:CatalogScript = (Resolve-Path (Join-Path $PSScriptRoot "..\..\lib\DevKit-McpCatalog.ps1")).Path
+    $script:CatalogScript = (Resolve-Path (Join-Path $PSScriptRoot "..\..\tools\lib\DevKit-McpCatalog.ps1")).Path
 
     # See McpEntryMap-Parser.Tests.ps1 for why this reset is required: an
     # earlier test file in the same Pester process may have already set this

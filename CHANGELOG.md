@@ -4,6 +4,269 @@ All notable changes to Northstar DevKit are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- **GitHub Actions release pipeline** (`.github/workflows/release.yml`):
+  pushing a `vX.Y.Z` tag builds the Tauri app on `windows-latest`,
+  minisign-signs the updater artifacts, and publishes a draft GitHub
+  Release with the NSIS installer, its `.sig`, and `latest.json` (the
+  in-app updater's endpoint) - a human still reviews and publishes the
+  draft. To cut a release: `git tag vX.Y.Z && git push origin vX.Y.Z`.
+
+## [4.0.0] - 2026-08-04
+
+The widget becomes the app: DevKit is now a properly installed Windows
+application whose main face is the companion widget, with the full toolkit
+GUI (DevKit Control Center) one click away - plus a repo-wide restructure
+and a performance pass that makes a tray-hidden widget cost essentially
+nothing. USB/ portable builds remain supported via
+`dev/Build-UsbPortable.ps1`.
+
+### Added
+
+- **Real installer** (`Install.ps1` / `Install.bat`): a stepped wizard -
+  a welcome/permissions screen explaining the fully per-user install (no
+  admin needed; the tools that require elevation self-elevate at runtime),
+  an install location defaulting to
+  `%LOCALAPPDATA%\Programs\NorthstarDevKit`, and options for
+  Start-with-Windows (default on), shortcuts, PATH, and the two opt-in
+  integrations (Explorer shell entry, Windows Terminal profile). Registers
+  DevKit in Windows Settings > Apps (HKCU Uninstall key); the main Start
+  Menu/Desktop "Northstar DevKit" icon opens the widget directly,
+  alongside "Northstar DevKit Control Center" and "Northstar DevKit
+  (Terminal)" shortcuts. Automation flags: `-Silent`, `-Destination`,
+  `-NoStartWithWindows`, `-SkipPath`, `-SkipShortcuts`,
+  `-NoDesktopShortcut`, `-AddShellIntegration`, `-AddTerminalProfile`.
+- **Real uninstaller** (`Uninstall.ps1`): removes the running widget, the
+  Explorer/Terminal integrations, the Run-key entry, the PATH entry, all
+  shortcuts, the Apps & Features entry, and the install directory -
+  guarded by a `.northstar-installed` marker file so a source checkout can
+  never be deleted by accident - and offers to keep or remove the app data
+  (`%LOCALAPPDATA%\NorthstarDevKit`) when asked. Flags: `-Silent`,
+  `-KeepUserData`.
+- **New root `Widget.bat`** launches the companion widget windowlessly
+  (via `gui/Start-Widget-Startup.vbs`) - the widget is now the main face
+  of the app. It gained a title-bar **DEVKIT** button that opens the full
+  toolkit GUI (DevKit Control Center); the Quick Actions button was
+  relabeled "Open DevKit Control Center", and the tray menu item likewise.
+  `DevKit.bat` (terminal menu) and `DevKit-GUI.bat` (Control Center)
+  remain as secondary surfaces.
+- **Clickable CPU/MEM/GPU gauges with management dialogs** (widget): each
+  gauge opens a themed dialog that refreshes every 3s while open (never
+  in the tray, timers created/stopped with the dialog). CPU lists the top
+  processes by usage; MEM lists top consumers with a one-click **Free
+  Memory** action (psapi `EmptyWorkingSet` across non-system processes,
+  reporting freed MB); GPU shows the adapter summary (nvidia-smi
+  name/util/temp/VRAM when present) plus per-process GPU usage parsed from
+  the `\GPU Engine(*)` counters. Every row carries a SAFE TO CLOSE /
+  CAUTION / LEAVE ALONE badge (system-critical processes have no kill
+  button, and `Stop-DevKitProcessById` refuses them server-side too).
+  New Pester-covered pure logic in `gui/DevKit-WidgetCore.ps1`:
+  `Get-DevKitProcessClassification`, `Get-DevKitTopCpuProcesses`,
+  `Get-DevKitTopMemoryProcesses`, `Get-DevKitGpuProcessUsage` (+
+  `ConvertFrom-DevKitGpuEngineInstance`), `Stop-DevKitProcessById`,
+  `Invoke-DevKitFreeMemory`.
+- **Junk cleanup is now 100% GUI-side** (widget): the old "Cleanup
+  Tool..." button (which dumped the user into a terminal to type CLEAN)
+  is gone. "Clean Now" runs the whole clean in the widget behind one
+  styled Yes/No - user temp + Recycle Bin always, Windows\Temp and the
+  Windows Update download cache when elevated - and reports a per-category
+  freed breakdown, with an ember hint naming any admin-only areas it had
+  to skip. A new "Details..." dialog shows the per-category scan
+  breakdown. No cleanup path opens a terminal or asks for typed input.
+- **Hosted real terminal panel** (widget): the TERMINAL side tab slides out
+  a REAL terminal hosted in the panel - Windows Terminal (`wt.exe -w new`,
+  with the registered "Northstar DevKit" fragment profile when present,
+  else the default profile; pwsh/powershell conhost fallback), chrome-
+  stripped and owned by the widget, with a sync loop gluing it to the
+  panel's live rect through slides/dock flips/resizes. It starts in the
+  active project's folder, so interactive CLIs (kimi, claude) genuinely
+  work - it IS a normal terminal. Its topmost state mirrors the widget's
+  pin (a non-topmost owned window sinks below a topmost owner - the
+  reported "terminal invisible while pinned" bug). The session closes with
+  the panel (WT processes are killed only after re-verifying ownership, so
+  the user's own WT windows are never touched), restarts on project
+  switch, survives widget hide, and is independent of the flyout carousel
+  (stays open next to GIT/FILES/NOTES/ON DECK, always outermost).
+- **Gauge management windows are slide-out panels now** (widget): the
+  CPU/MEM/GPU dialogs became carousel flyout panels (same slide machinery
+  as the other tabs) instead of floating popup windows.
+- **Click-to-expand commit details** (widget GIT flyout): every commit row
+  on the graph toggles an inline details card under it - full hash, author
+  + date, the FULL multi-line message, and per-file `+/-` stats - fetched
+  lazily via a new `CommitDetails` work-runspace job and parsed by the
+  Pester-covered `ConvertFrom-DevKitGitShow`. Selection survives graph
+  refreshes and resets on project switch. Also fixes the earlier
+  misunderstanding: UNCOMMITTED CHANGES and COMMIT GRAPH are expanded by
+  default again (applied in code, not markup - the theme's Expander
+  template only reveals content via the Expanded event's storyboard).
+- **Built-in icon set** (widget): `gui/DevKit-WidgetIcons.ps1` ships 40+
+  Material-style vector glyphs (per-language file pages, folder
+  open/closed, image/archive/sql/config/env/docker/git/lock/bat/exe
+  specials, git-branch/tag/head), built once and frozen
+  (`Get-DevKitIconDrawing`) so tree rows and pills reuse shared geometry.
+  The pure name -> icon/color mapping (`Get-DevKitFileIconInfo`) lives in
+  WidgetCore with Pester coverage; the Files flyout and the git graph's
+  ref pills use it.
+- **Section-anchored side tabs + divider** (widget): FILES+GIT sit across
+  from the CPU/MEM/GPU card, NOTES+ON DECK across from the junk/drives
+  card, TERMINAL across from QUICK ACTIONS - positions computed from the
+  un-scrolled layout (scroll never moves the tabs), clamped to never
+  overlap or leave the strip, flipping sides with the dock. A 2px
+  sapphire-to-ember vertical divider now separates the tab strip from the
+  widget body.
+- **Node-process table resize/expand affordances** (`gui/DevKit-Widget.ps1`):
+  the header's column splitters (previously invisible until hover) now show
+  an always-visible 2px grip bar between the column titles that brightens
+  sapphire on hover, so the drag-to-resize affordance is discoverable; and
+  the "+N more" overflow line is now clickable - it expands the list to all
+  processes in place and toggles to "Show less", re-rendering immediately
+  from the last collected snapshot instead of waiting for the next metrics
+  cycle.
+- **Files flyout in the companion widget** (`gui/DevKit-Widget.ps1`,
+  `gui/DevKit-Widget.xaml`, `gui/Theme.xaml`, `gui/DevKit-WidgetCore.ps1`):
+  a new FILES side tab (beside GIT/NOTES) slides out a mini VS Code-style
+  explorer of the active project's root folder. The dark TreeView
+  lazy-loads one directory level per expansion (folders first, then files,
+  case-insensitive alpha; enumeration errors degrade to a greyed "access
+  denied" node), restores expanded folders across Refresh, and offers a
+  toolbar (New File / New Folder / Refresh / Collapse All) plus per-item
+  right-click menus (Open, Open in Explorer, Open in Editor, Copy/Cut/
+  Paste, Rename..., Delete, New File/Folder Here, Copy Full/Relative Path)
+  and a project-level background menu. Cut/Copy/Paste are an internal
+  clipboard with Explorer-style " - Copy" collision renaming and a dimmed
+  cut marker (Esc cancels); every mutating op re-validates containment in
+  the project root, names are validated in-dialog, and Delete goes to the
+  Recycle Bin behind the styled Yes/No confirm - failures land in the
+  flyout's status line, never a crash. The panel reuses the Git/Notes
+  flyout machinery (slide animation, dock-side flips, grip resize) with
+  its own persisted width (`preferences.filesFlyoutWidth`). New pure
+  helpers in the Pester-covered widget core: `Get-DevKitDirChildren`,
+  `Test-DevKitPathWithinRoot`, `Get-DevKitSafeChildName`,
+  `Get-DevKitCopyName`, `Get-DevKitRelativePath`.
+- **On-Deck flyout in the companion widget** (`gui/DevKit-Widget.ps1`,
+  `gui/DevKit-Widget.xaml`, `gui/Theme.xaml`, `gui/DevKit-WidgetCore.ps1`):
+  a fourth ON DECK side tab (violet-accented `OnDeckTabButtonWest/East`)
+  slides out a per-project to-do list persisted to
+  `%LOCALAPPDATA%\NorthstarDevKit\ondeck.json` - same canonical project
+  keying and forgiving corrupt/missing-file posture as the notes store,
+  saved on every mutation. An add-row (Add button or Enter) lands items at
+  the top of NOT STARTED; three fixed sections (NOT STARTED / IN PROGRESS /
+  DONE) show live counts and a subtle "No items" hint when empty. Each row
+  has a status cycle button and a right-click status menu (FilesContextMenu
+  styling, current status disabled); the stored list is always
+  section-grouped, so a status change moves the item to its new section
+  immediately. Done rows render dimmed with strikethrough, the DONE header
+  has a "Clear Done" button, and delete is a deliberate single click on the
+  row's small x. The panel reuses the flyout machinery wholesale (slide
+  animation, dock-side flips, grip resize as Kind 'OnDeck', width persisted
+  as `preferences.onDeckFlyoutWidth`, greyed out with no active project,
+  reloads on project switch). New Pester-covered core helpers:
+  `Get/Save-DevKitProjectOnDeck`, `Add-DevKitOnDeckItem`,
+  `Remove-DevKitOnDeckItem`, `Set-DevKitOnDeckItemStatus`,
+  `Clear-DevKitOnDeckDone`, `Group-DevKitOnDeckItems`.
+- **Collapsible note cards in the widget's Notes flyout**: notes now render
+  as compact title cards by default - single line with ellipsis, the title
+  derived from the body's first line (`Get-DevKitNoteTitle`). Clicking a
+  card expands the full editor (existing debounced autosave + two-step
+  delete, now with a Done button); saving or clicking/focusing away
+  collapses it back and flushes pending edits. The notes.json schema is
+  unchanged (no title field on disk), so existing notes load untouched and
+  older widget builds read the same file.
+- **Collapsible sections in the widget's Git flyout**: the Commits tab's
+  commit graph is now a collapsed-by-default expander with a live
+  commit-count badge (matching the Uncommitted Changes expander; the whole
+  tab scrolls, the graph scrolls horizontally), and each open pull request
+  renders as a collapsed-by-default accordion exactly like the issue
+  accordions - header with #number/title + draft/review badges, body with
+  the author/branches/updated meta line and an Open-on-GitHub button.
+- **Files flyout rescans on every open**: reopening the widget's Files
+  panel for the same project now re-enumerates the tree from disk (the
+  Refresh button's exact rebuild path, with expanded folders restored)
+  instead of keeping the tree cached from before the panel was closed.
+
+### Changed
+
+- **Repo restructure**: all twelve tool-category folders (agents,
+  diagnostics, docker, git, maintenance, nextjs, node, ports, system,
+  vite, wifi, workflow) and `lib/` moved under a new `tools/` folder, and
+  maintainer-only tooling (`Build-UsbPortable.ps1`/`.bat`, `RELEASING.md`)
+  moved to a new `dev/` folder. Leaf scripts and .bat wrappers are
+  unchanged (they resolve `lib` relative to their own folder); direct
+  script invocations are now `.\tools\ports\Kill-Port.ps1`-style. The repo
+  root now holds only the launchers, the installer/uninstaller, docs,
+  `VERSION`, and the `gui/`, `tools/`, `tests/`, `dev/` folders.
+- **Widget performance pass ("lightweight")** (`gui/DevKit-Widget.ps1`,
+  `gui/DevKit-WidgetCore.ps1`):
+  - Hovering the gauges card no longer spikes CPU/GPU: the ToolCard hover
+    lift/scale storyboard was removed (hover is now an instant brush
+    swap), the gauge-arc DropShadowEffects were removed, the 30fps gauge
+    easing timer was deleted (arcs now snap to a frozen cached 0-100%
+    geometry table, never allocating geometry per frame), and the root
+    window shadow blur was reduced.
+  - The background runspaces now dot-source the shared libraries once at
+    creation instead of re-parsing ~150KB of script every ~4s cycle -
+    which also stops the sensor caches being wiped every cycle: nvidia-smi
+    was spawning every 4s instead of every 10s, the ~1s thermal-counter
+    stall ran every cycle instead of every 45s, and the winnat port-range
+    netsh call ran every cycle instead of every 30 minutes.
+  - The node-process table only rebuilds when the process set or a
+    bucketed value changes (memory in 25MB buckets, age in 5-minute
+    buckets) instead of nearly every cycle; the junk scan cadence went
+    from 5 to 30 minutes.
+  - All refresh timers now stop when the widget is hidden to the tray and
+    resume (with an immediate refresh) when shown - a hidden widget costs
+    ~nothing.
+- Version bumped to 4.0.0 (`VERSION`, README badge, menu banner).
+
+### Fixed
+
+- **desktop.ini folder icon** now points at the bundled
+  `gui/Assets/logo.ico` instead of a dead hardcoded path.
+- **Widget "Start with Windows" failing at logon** (`gui/Start-Widget-Startup.vbs`):
+  the old retry loop waited on the launched process (`sh.Run cmd, 0, True`),
+  so a powershell.exe stuck behind the loader-error 0xC0000142 dialog kept
+  the launcher blocked until the retry window was always considered expired
+  and the widget never started. The launcher now launches non-blocking and
+  confirms success via a pid-file handshake - the widget writes
+  `%LOCALAPPDATA%\NorthstarDevKit\widget.pid` once its window is up;
+  the .vbs polls for it (30s), terminates only the widget processes its own
+  attempt started on timeout, backs off 30s, and retries (max 3 attempts).
+- **Stale "Start with Windows" Run entry after moving/reinstalling DevKit**:
+  the registered command bakes in the .vbs absolute path and nothing
+  re-registered it, so logon popped "Can not find script file" forever. The
+  widget now self-heals the value at startup (rewrites it when it differs
+  from the expected command or its .vbs target is gone, via a shared
+  `Get-DevKitStartupCommand` helper), Install.ps1 repairs it after the copy
+  step, and registration failures now surface as a tray balloon tip instead
+  of being swallowed by `catch { }`.
+- **Cross-elevation single-instance trap on pwsh 7** (`gui/DevKit-Widget.ps1`):
+  the Authenticated-Users ACL on the instance mutex/summon event was only
+  applied on Windows PowerShell 5.1; under pwsh 7 the kernel objects got
+  default ACLs, which - combined with an already-running elevated tray
+  instance - made normal launches silently no-op, so only "Run as
+  administrator" appeared to work. The ACL now applies on both editions
+  (`System.Threading.AccessControl` is Add-Type'd on Core first, with
+  fallback to default-ACL creation). The widget still needs no admin rights.
+- **Invisible widget startup deaths**: `Get-DevKitSettingsFile` /
+  `Get-DevKitProjectsFile` (`lib/DevKit-Common.ps1`) created the
+  `%LOCALAPPDATA%\NorthstarDevKit` directory unguarded, and one throwing
+  startup initializer (e.g. `Update-DevKitWidgetProjects`) terminated the
+  whole headless widget through the trap with no visible sign. Directory
+  creation is now best-effort, each startup step is individually guarded
+  (failures log to `widget-startup.log` and startup continues), and the
+  trap itself now shows a MessageBox with the error and log path after
+  writing the log.
+- **SmartScreen blocking manually-copied installs** (Install.ps1): the
+  installed tree is now `Unblock-File`'d after copying, dropping any
+  Mark-of-the-Web zone tag from the .bat wrappers.
+
+### Removed
+
+- **`Setup-Path.bat`** - superseded by the installer, which manages PATH
+  (reversibly) alongside shortcuts and startup; the old portable-installer
+  behavior is replaced by `Install.ps1`.
+
 ## [3.8.0] - 2026-08-02
 
 The companion widget becomes the main surface: a hand-drawn commit graph,

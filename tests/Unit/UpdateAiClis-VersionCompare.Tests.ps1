@@ -25,7 +25,7 @@
 #>
 
 BeforeAll {
-    $script:UpdateAiClisScript = (Resolve-Path (Join-Path $PSScriptRoot "..\..\agents\Update-AiClis.ps1")).Path
+    $script:UpdateAiClisScript = (Resolve-Path (Join-Path $PSScriptRoot "..\..\tools\agents\Update-AiClis.ps1")).Path
 
     # lib/DevKit-Common.ps1 guards itself with a $global:DevKitCommonLoaded
     # "load once per process" flag; Update-AiClis.ps1 dot-sources it near

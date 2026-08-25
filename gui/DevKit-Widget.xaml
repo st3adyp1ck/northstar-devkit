@@ -20,27 +20,37 @@
         built in code against these x:Name handles. Lives alongside a WinForms
         NotifyIcon so it survives DevKit itself closing.
 
-        Layout: a five-column root grid, left to right: TabWest(Auto) |
-        FlyoutWest(Auto) | Main(FIXED px) | FlyoutEast(Auto) | TabEast(Auto).
-        Column 2 (center) holds the widget itself (title / scrollable body /
-        bottom Settings expander / footer) and is a FIXED pixel width, never
-        "*": a star column is by definition "absorb whatever is left over",
-        so every rounding difference between the window's width and the
-        flyout's width landed on the main widget - which is what made the
-        flyout's INNER edge (its boundary against the widget) creep while the
-        user dragged its OUTER grip. With Main pinned and the docked edge
-        pinned, the outer grip can only ever move the outer edge. The GIT
-        pull-tab (BtnGitTab) each get their OWN column, toggled in code
-        (DevKit-Widget.ps1, Set-DevKitWidgetDock) so they always open on
-        whichever edge faces INTO the screen - west (columns 1/0) when
-        docked right, east (columns 3/4) when docked left - and so neither
-        one ever shares a column with Main or with each other; the unused
-        side's two Auto columns measure to 0 width since they hold no
-        children. The flyout is 0 wide until the pull-tab opens it; its own
-        grip sits on the flyout's OUTER edge (the far side from Main, facing
-        the pull-tab) and resizes its width. The main window itself is not
-        interactively resizable - only the persisted widgetWidth/
-        gitFlyoutWidth preferences size it, applied once at startup.
+        Layout: a SEVEN-column root grid, left to right: TermWest(Auto) |
+        TabWest(Auto) | FlyoutWest(Auto) | Main(FIXED px) | FlyoutEast(Auto)
+        | TabEast(Auto) | TermEast(Auto). Column 3 (center) holds the widget
+        itself (title / scrollable body / bottom Settings expander / footer)
+        and is a FIXED pixel width, never "*": a star column is by definition
+        "absorb whatever is left over", so every rounding difference between
+        the window's width and a flyout's width landed on the main widget -
+        which is what made a flyout's INNER edge (its boundary against the
+        widget) creep while the user dragged its OUTER grip. With Main pinned
+        and the docked edge pinned, the outer grip can only ever move the
+        outer edge. Two kinds of side panels live here:
+          - the CAROUSEL flyouts (Git / Notes / Files / On-Deck / the
+            CPU-MEM-GPU gauge management panel) share ONE column slot (2
+            west / 4 east) because only one of them is ever open at a time;
+          - the TERMINAL panel is independent of that carousel (both can be
+            open together), so it gets its OWN column FARTHER OUT than the
+            tab strip (0 west / 6 east) - docked right, the west-to-east
+            order is [terminal][tabs][carousel flyout][widget].
+        The side-tab strip (SideTabStack: FILES / GIT / NOTES / ON DECK in two
+        section-anchored groups on a full-height Canvas, TERMINAL anchored to
+        its own section below them - see Update-DevKitSideTabLayout) and both
+        panel slots are toggled in code (DevKit-Widget.ps1,
+        Set-DevKitWidgetDock) so they always sit on whichever edge faces INTO
+        the screen - west slots when docked right, east slots when docked
+        left - and no panel ever shares a column with Main; the unused side's
+        Auto columns measure to 0 width since they hold no children. Each
+        panel is 0 wide until opened; its grip sits on the panel's OUTER edge
+        (the far side from Main) and resizes its width. The main window
+        itself is not interactively resizable - only the persisted
+        widgetWidth/*FlyoutWidth preferences size it, applied once at
+        startup.
     -->
 
     <Window.Resources>
@@ -51,14 +61,16 @@
     <Border x:Name="RootBorder" Style="{StaticResource RootWindow}" Margin="8">
         <Grid>
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto"/> <!-- 0: TabWest -->
-                <ColumnDefinition Width="Auto"/> <!-- 1: FlyoutWest -->
-                <ColumnDefinition x:Name="MainColumn" Width="475"/> <!-- 2: Main (FIXED, never "*") -->
-                <ColumnDefinition Width="Auto"/> <!-- 3: FlyoutEast -->
-                <ColumnDefinition Width="Auto"/> <!-- 4: TabEast -->
+                <ColumnDefinition Width="Auto"/> <!-- 0: TermWest (independent terminal panel) -->
+                <ColumnDefinition Width="Auto"/> <!-- 1: TabWest (side-tab strip) -->
+                <ColumnDefinition Width="Auto"/> <!-- 2: FlyoutWest (carousel: Git/Notes/Files/OnDeck/Proc) -->
+                <ColumnDefinition x:Name="MainColumn" Width="475"/> <!-- 3: Main (FIXED, never "*") -->
+                <ColumnDefinition Width="Auto"/> <!-- 4: FlyoutEast (carousel) -->
+                <ColumnDefinition Width="Auto"/> <!-- 5: TabEast (side-tab strip) -->
+                <ColumnDefinition Width="Auto"/> <!-- 6: TermEast (independent terminal panel) -->
             </Grid.ColumnDefinitions>
 
-            <Grid Grid.Column="2">
+            <Grid Grid.Column="3">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="36"/>
                     <RowDefinition Height="Auto"/>
@@ -76,15 +88,19 @@
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
                         <Image x:Name="WidgetLogoImage" Width="18" Height="18" VerticalAlignment="Center"/>
                         <TextBlock Grid.Column="1" VerticalAlignment="Center" Margin="8,0,0,0" FontSize="11">
                             <Run Text="NORTHSTAR" FontWeight="SemiBold" Foreground="{StaticResource BrushMetalGradient}"/>
                             <Run Text=" COMPANION" FontWeight="SemiBold" Foreground="{StaticResource BrushAccentBlue}"/>
                         </TextBlock>
-                        <Button Grid.Column="3" x:Name="BtnPin" Style="{StaticResource ChromeButton}" Width="30" Height="24"
+                        <Button Grid.Column="3" x:Name="BtnDevKitHub" Style="{StaticResource GhostButton}" Height="22"
+                                FontSize="9" FontWeight="SemiBold" Padding="8,0" Margin="0,0,6,0" VerticalAlignment="Center"
+                                Content="DEVKIT" ToolTip="Open the DevKit Control Center (the full toolkit GUI)"/>
+                        <Button Grid.Column="4" x:Name="BtnPin" Style="{StaticResource ChromeButton}" Width="30" Height="24"
                                 Content="&#xE718;" ToolTip="Unpin (allow other windows to cover me)"/>
-                        <Button Grid.Column="4" x:Name="BtnHide" Style="{StaticResource ChromeButton}" Width="30" Height="24"
+                        <Button Grid.Column="5" x:Name="BtnHide" Style="{StaticResource ChromeButton}" Width="30" Height="24"
                                 Content="&#xE921;" ToolTip="Hide to system tray"/>
                     </Grid>
                 </Border>
@@ -95,7 +111,7 @@
 
                 <!-- Body -->
                 <ScrollViewer Grid.Row="2" x:Name="ContentScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                    <StackPanel Margin="12,2,12,8">
+                    <StackPanel x:Name="BodyContent" Margin="12,2,12,8">
 
                         <!-- Project selector -->
                         <TextBlock Style="{StaticResource WidgetSectionHeader}" Text="ACTIVE PROJECT" Margin="2,0,0,4"/>
@@ -119,50 +135,43 @@
                         </Grid>
 
                         <!-- System gauges: three 270-degree radial dials (CPU / MEM / GPU).
-                             The arc geometry is computed and animated by DevKit-Widget.ps1. -->
-                        <Border Style="{StaticResource ToolCard}" Padding="10,12,10,10" Margin="0,0,0,10">
+                             Arc geometry comes from DevKit-Widget.ps1's frozen 0-100
+                             geometry cache - assigned, never animated (see
+                             Get-DevKitGaugeGeometry / Set-DevKitGauge). Each gauge stack is
+                             clickable (hand cursor + tooltip): the click toggles that metric's
+                             process management PANEL - a slide-out carousel flyout, not a
+                             floating window (Set-DevKitProcPanel in DevKit-Widget.ps1). -->
+                        <Border x:Name="GaugesCard" Style="{StaticResource ToolCard}" Padding="10,12,10,10" Margin="0,0,0,10">
                             <StackPanel>
                                 <UniformGrid Columns="3">
-                                    <StackPanel HorizontalAlignment="Center">
+                                    <StackPanel x:Name="CpuGaugeStack" HorizontalAlignment="Center" Cursor="Hand" ToolTip="Click to manage">
                                         <Grid Width="88" Height="88">
                                             <Path x:Name="CpuGaugeTrack" Stroke="{StaticResource BrushGaugeTrack}" StrokeThickness="7"
                                                   StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
                                             <Path x:Name="CpuGaugeArc" Stroke="{StaticResource BrushGaugeArc}" StrokeThickness="7"
-                                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round">
-                                                <Path.Effect>
-                                                    <DropShadowEffect Color="#4FA3FF" Opacity="0.55" BlurRadius="9" ShadowDepth="0"/>
-                                                </Path.Effect>
-                                            </Path>
+                                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
                                             <TextBlock x:Name="CpuGaugeValue" Style="{StaticResource WidgetGaugeValue}" Text="..." VerticalAlignment="Center"/>
                                         </Grid>
                                         <TextBlock x:Name="CpuGaugeSub" Style="{StaticResource WidgetGaugeSub}" Text="" Visibility="Hidden"/>
                                         <TextBlock Style="{StaticResource WidgetGaugeLabel}" Text="CPU" Margin="0,2,0,0"/>
                                     </StackPanel>
-                                    <StackPanel HorizontalAlignment="Center">
+                                    <StackPanel x:Name="MemGaugeStack" HorizontalAlignment="Center" Cursor="Hand" ToolTip="Click to manage">
                                         <Grid Width="88" Height="88">
                                             <Path x:Name="MemGaugeTrack" Stroke="{StaticResource BrushGaugeTrack}" StrokeThickness="7"
                                                   StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
                                             <Path x:Name="MemGaugeArc" Stroke="{StaticResource BrushGaugeArc}" StrokeThickness="7"
-                                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round">
-                                                <Path.Effect>
-                                                    <DropShadowEffect Color="#4FA3FF" Opacity="0.55" BlurRadius="9" ShadowDepth="0"/>
-                                                </Path.Effect>
-                                            </Path>
+                                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
                                             <TextBlock x:Name="MemGaugeValue" Style="{StaticResource WidgetGaugeValue}" Text="..." VerticalAlignment="Center"/>
                                         </Grid>
                                         <TextBlock x:Name="MemGaugeSub" Style="{StaticResource WidgetGaugeSub}" Text="" Visibility="Hidden"/>
                                         <TextBlock Style="{StaticResource WidgetGaugeLabel}" Text="MEM" Margin="0,2,0,0"/>
                                     </StackPanel>
-                                    <StackPanel HorizontalAlignment="Center">
+                                    <StackPanel x:Name="GpuGaugeStack" HorizontalAlignment="Center" Cursor="Hand" ToolTip="Click to manage">
                                         <Grid Width="88" Height="88">
                                             <Path x:Name="GpuGaugeTrack" Stroke="{StaticResource BrushGaugeTrack}" StrokeThickness="7"
                                                   StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
                                             <Path x:Name="GpuGaugeArc" Stroke="{StaticResource BrushGaugeArc}" StrokeThickness="7"
-                                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round">
-                                                <Path.Effect>
-                                                    <DropShadowEffect Color="#4FA3FF" Opacity="0.55" BlurRadius="9" ShadowDepth="0"/>
-                                                </Path.Effect>
-                                            </Path>
+                                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
                                             <TextBlock x:Name="GpuGaugeValue" Style="{StaticResource WidgetGaugeValue}" Text="..." VerticalAlignment="Center"/>
                                         </Grid>
                                         <TextBlock x:Name="GpuGaugeSub" Style="{StaticResource WidgetGaugeSub}" Text="" Visibility="Hidden"/>
@@ -180,7 +189,7 @@
                              etc.) without a restart. A WrapPanel (not UniformGrid) holds them
                              since the count varies - each gauge keeps its own fixed width and
                              they wrap naturally as more drives show up. -->
-                        <Border Style="{StaticResource ToolCard}" Padding="10,12,10,10" Margin="0,0,0,10">
+                        <Border x:Name="JunkCard" Style="{StaticResource ToolCard}" Padding="10,12,10,10" Margin="0,0,0,10">
                             <StackPanel>
                                 <WrapPanel x:Name="DiskGaugesPanel" Orientation="Horizontal" HorizontalAlignment="Center">
                                     <StackPanel HorizontalAlignment="Center" Width="100" Margin="0,0,0,8">
@@ -189,11 +198,7 @@
                                             <Path x:Name="JunkGaugeTrack" Stroke="{StaticResource BrushGaugeTrack}" StrokeThickness="7"
                                                   StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
                                             <Path x:Name="JunkGaugeArc" Stroke="{StaticResource BrushGaugeArc}" StrokeThickness="7"
-                                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round">
-                                                <Path.Effect>
-                                                    <DropShadowEffect Color="#4FA3FF" Opacity="0.55" BlurRadius="9" ShadowDepth="0"/>
-                                                </Path.Effect>
-                                            </Path>
+                                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
                                             <TextBlock x:Name="JunkGaugeValue" Style="{StaticResource WidgetGaugeValue}" Text="..." VerticalAlignment="Center"/>
                                         </Grid>
                                         <TextBlock x:Name="JunkGaugeSub" Style="{StaticResource WidgetGaugeSub}" Text="" Visibility="Hidden"/>
@@ -205,9 +210,9 @@
                                 </WrapPanel>
                                 <UniformGrid Columns="2">
                                     <Button x:Name="BtnJunkClean" Style="{StaticResource AccentButton}" FontSize="10.5" Margin="0,0,3,0"
-                                            ToolTip="Delete temp files and empty the Recycle Bin (asks first)">Clean Now</Button>
-                                    <Button x:Name="BtnJunkTool" Style="{StaticResource GhostButton}" FontSize="10.5" Margin="3,0,0,0"
-                                            ToolTip="Open the full Clear Disk Junk tool in a terminal window">Cleanup Tool...</Button>
+                                            ToolTip="Delete temp files and empty the Recycle Bin (Windows temp and the update cache too when running as administrator) - asks first, no terminal">Clean Now</Button>
+                                    <Button x:Name="BtnJunkDetails" Style="{StaticResource GhostButton}" FontSize="10.5" Margin="3,0,0,0"
+                                            ToolTip="Show what the last scan found, per category (temp / update cache / Recycle Bin)">Details...</Button>
                                 </UniformGrid>
                                 <TextBlock x:Name="JunkStatusText" Style="{StaticResource StatusText}" FontSize="9.5" Margin="0,6,0,0"
                                            TextWrapping="Wrap" HorizontalAlignment="Center" Visibility="Collapsed"/>
@@ -251,7 +256,8 @@
                                     <Button x:Name="BtnOpenTerminal" Style="{StaticResource GhostButton}" FontSize="11" Margin="0,4,4,0" ToolTip="Open a terminal in the active project folder">Terminal</Button>
                                     <Button x:Name="BtnRunScript" Style="{StaticResource GhostButton}" FontSize="11" Margin="4,4,0,0" ToolTip="Pick and run a package.json script from the active project">Run Script...</Button>
                                 </UniformGrid>
-                                <Button x:Name="BtnOpenDevKit" Style="{StaticResource AccentButton}" FontSize="11.5" Margin="0,8,0,0" Content="Open DevKit"/>
+                                <Button x:Name="BtnOpenDevKit" Style="{StaticResource AccentButton}" FontSize="11.5" Margin="0,8,0,0" Content="Open DevKit Control Center"
+                                        ToolTip="Open the full DevKit toolkit GUI"/>
                             </StackPanel>
                         </Expander>
 
@@ -362,8 +368,10 @@
             </Grid>
 
             <!-- GitHub flyout: 0 wide until the GIT pull-tab opens it. Lives in
-                 column 1 (west) or column 3 (east) - its own dedicated
-                 column, never shared with Main or the pull-tab - toggled in
+                 column 2 (west) or column 4 (east) - the shared CAROUSEL slot,
+                 never shared with Main or the pull-tabs (the terminal panel
+                 has its own dedicated outer column and never overlaps this
+                 one) - toggled in
                  code (Set-DevKitWidgetDock) to whichever side faces INTO the
                  screen, mirroring the dock side. GitFlyoutGrip sits on the
                  flyout's OUTER edge (the far side from the main widget,
@@ -371,7 +379,7 @@
                  GitFlyoutInner's own alignment (Right, below) still anchors
                  its content against the boundary with Main regardless of
                  which side the grip is on. -->
-            <Border x:Name="GitFlyout" Grid.Column="1" Width="0" ClipToBounds="True"
+            <Border x:Name="GitFlyout" Grid.Column="2" Width="0" ClipToBounds="True"
                     Background="{StaticResource BrushPanelBg}" BorderBrush="{StaticResource BrushSeparator}" BorderThickness="1,0,0,0">
               <Grid>
                 <Grid x:Name="GitFlyoutInner" Width="300" HorizontalAlignment="Right">
@@ -432,20 +440,35 @@
                          Visibility toggled by Set-DevKitGitActiveTab, never more than
                          one Visible at once. -->
                     <Grid Grid.Row="2">
-                        <!-- Commits tab: the ORIGINAL UncommittedExpander + commit-graph
-                             Border, unchanged internally, just re-parented into their own
-                             Auto/* rows so the graph still fills remaining height exactly
-                             as it did when these were GitFlyoutInner's own rows 1 and 2. -->
-                        <Grid x:Name="GitTabCommitsView">
+                        <!-- Commits tab: two sections (Uncommitted changes / Commit graph)
+                             in expanders with the same header-click + chevron treatment the
+                             Issues tab's accordions use - the shared Expander ControlTemplate
+                             in Theme.xaml supplies the chevron and the fade/unfold animation.
+                             BOTH sections are VISIBLE BY DEFAULT when the flyout opens - but
+                             the expansion is applied IN CODE (Set-DevKitGitFlyout's open path),
+                             not via markup: the theme's Expander template reveals its content
+                             through the Expanded EVENT's storyboard (ExpandSite starts
+                             Collapsed/ScaleY 0), so a markup-initial IsExpanded="True" sets the
+                             property before the template exists, the event never fires, and the
+                             content stays hidden forever. An Expander's content sizes to itself
+                             (its template's content row is Auto), so the whole tab is a
+                             vertical ScrollViewer over two Auto rows instead of the old
+                             Auto/* split: each section takes its natural height when
+                             expanded and the tab scrolls, exactly like the Issues list. -->
+                        <ScrollViewer x:Name="GitTabCommitsView"
+                                      VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                          <Grid>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="*"/>
+                                <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
 
-                            <!-- Uncommitted changes: collapsed-by-default expander, header shows a
-                                 live count badge; body (UncommittedFilesPanel) is rebuilt in code from
-                                 Get-DevKitRepoOverview's DirtyFiles - see Update-DevKitGitUncommittedList
-                                 in DevKit-Widget.ps1. Hidden entirely when DirtyFiles is empty. -->
+                            <!-- Uncommitted changes: expander, expanded by default via code on
+                                 every flyout open (see the Commits-tab comment above for why not
+                                 markup); header shows a live count badge; body (UncommittedFilesPanel)
+                                 is rebuilt in code from Get-DevKitRepoOverview's DirtyFiles - see
+                                 Update-DevKitGitUncommittedList in DevKit-Widget.ps1. Hidden entirely
+                                 when DirtyFiles is empty. -->
                             <Expander Grid.Row="0" x:Name="UncommittedExpander" Margin="12,0,12,8" ToolTip="Click to expand or collapse">
                                 <Expander.Header>
                                     <StackPanel Orientation="Horizontal">
@@ -458,35 +481,53 @@
                                 <StackPanel x:Name="UncommittedFilesPanel"/>
                             </Expander>
 
-                            <Border Grid.Row="1" Background="{StaticResource BrushInputBg}" BorderBrush="{StaticResource BrushCardBorder}"
-                                    BorderThickness="1" CornerRadius="6" Margin="12,0,12,8">
-                                <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
-                                    <Grid>
-                                        <!-- Fallback/messages (loading, not-a-repo, errors) -->
-                                        <TextBlock x:Name="GitGraphText" FontSize="10.5"
-                                                   Foreground="{StaticResource BrushTextDim}" Margin="8,6" TextWrapping="Wrap"
-                                                   Text="Loading commit graph..."/>
-                                        <!-- The drawn graph: lanes + S-curve links + nodes + ref pills,
-                                             built in code from Get-DevKitRepoOverview's Graph layout. -->
-                                        <Canvas x:Name="GitGraphCanvas" VerticalAlignment="Top" HorizontalAlignment="Left"/>
-                                    </Grid>
-                                </ScrollViewer>
-                            </Border>
-                        </Grid>
+                            <!-- Commit graph: expander, expanded by default via code on every
+                                 flyout open (see the Commits-tab comment above); header shows a
+                                 live commit-count badge set by Update-DevKitWidgetGitFlyout. The
+                                 graph's own ScrollViewer only scrolls HORIZONTALLY (wide lane
+                                 layouts); vertical scrolling is the outer tab ScrollViewer's job,
+                                 since the expander content sizes to the canvas's natural height.
+                                 Clicking a commit row on the canvas toggles an inline details card
+                                 under that row (Show-DevKitCommitDetails in DevKit-Widget.ps1). -->
+                            <Expander Grid.Row="1" x:Name="CommitGraphExpander" Margin="12,0,12,8" ToolTip="Click to expand or collapse">
+                                <Expander.Header>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Style="{StaticResource WidgetExpanderTitle}" Text="COMMIT GRAPH"/>
+                                        <Border Style="{StaticResource BadgeNeutral}" Margin="8,0,0,0" VerticalAlignment="Center">
+                                            <TextBlock x:Name="CommitGraphCountBadgeText" Style="{StaticResource BadgeNeutralText}" Text="0"/>
+                                        </Border>
+                                    </StackPanel>
+                                </Expander.Header>
+                                <Border Background="{StaticResource BrushInputBg}" BorderBrush="{StaticResource BrushCardBorder}"
+                                        BorderThickness="1" CornerRadius="6">
+                                    <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+                                        <Grid>
+                                            <!-- Fallback/messages (loading, not-a-repo, errors) -->
+                                            <TextBlock x:Name="GitGraphText" FontSize="10.5"
+                                                       Foreground="{StaticResource BrushTextDim}" Margin="8,6" TextWrapping="Wrap"
+                                                       Text="Loading commit graph..."/>
+                                            <!-- The drawn graph: lanes + S-curve links + nodes + ref pills,
+                                                 built in code from Get-DevKitRepoOverview's Graph layout. -->
+                                            <Canvas x:Name="GitGraphCanvas" VerticalAlignment="Top" HorizontalAlignment="Left"/>
+                                        </Grid>
+                                    </ScrollViewer>
+                                </Border>
+                            </Expander>
+                          </Grid>
+                        </ScrollViewer>
 
                         <!-- Pull Requests tab: empty until Set-DevKitGitActiveTab fetches -
-                             stage 3 renders real PR rows into PullRequestsPanel; Update-
-                             DevKitWidgetPullRequests (DevKit-Widget.ps1) currently only
-                             places a placeholder count line here. -->
+                             Update-DevKitWidgetPullRequests (DevKit-Widget.ps1) then renders
+                             one collapsed-by-default Add-DevKitPrRow accordion per open PR
+                             (same Expander treatment as the issue accordions). -->
                         <ScrollViewer x:Name="GitTabPullRequestsView" Visibility="Collapsed"
                                       VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                             <StackPanel x:Name="PullRequestsPanel" Margin="12,0,12,8"/>
                         </ScrollViewer>
 
-                        <!-- Issues tab: empty until Set-DevKitGitActiveTab fetches - stage 3
-                             renders real issue accordions into IssuesPanel; Update-DevKit
-                             WidgetIssues (DevKit-Widget.ps1) currently only places a
-                             placeholder count line here. -->
+                        <!-- Issues tab: empty until Set-DevKitGitActiveTab fetches -
+                             Update-DevKitWidgetIssues (DevKit-Widget.ps1) then renders one
+                             collapsed-by-default Add-DevKitIssueAccordion per open issue. -->
                         <ScrollViewer x:Name="GitTabIssuesView" Visibility="Collapsed"
                                       VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                             <StackPanel x:Name="IssuesPanel" Margin="12,0,12,8"/>
@@ -513,13 +554,15 @@
             </Border>
 
             <!-- Notes flyout: the Git flyout's sibling - same dedicated
-                 column (1 west / 3 east), same 0-width-until-opened slide,
-                 same OUTER-edge resize grip; only one of the two flyouts is
-                 ever open at a time (Set-DevKitGitFlyout / Set-DevKit-
-                 NotesFlyout each instant-close the other before opening).
+                 carousel column (2 west / 4 east), same 0-width-until-opened
+                 slide, same OUTER-edge resize grip; only one CAROUSEL flyout
+                 is ever open at a time (Set-DevKitGitFlyout / Set-DevKit-
+                 NotesFlyout / Set-DevKitFilesFlyout / Set-DevKitOnDeckFlyout /
+                 Set-DevKitProcPanel each instant-close the others before
+                 opening), while the terminal panel coexists with all of them.
                  Content is per-project sticky notes, rendered in code
                  (Update-DevKitWidgetNotesPanel) into NotesPanel. -->
-            <Border x:Name="NotesFlyout" Grid.Column="1" Width="0" ClipToBounds="True"
+            <Border x:Name="NotesFlyout" Grid.Column="2" Width="0" ClipToBounds="True"
                     Background="{StaticResource BrushPanelBg}" BorderBrush="{StaticResource BrushSeparator}" BorderThickness="1,0,0,0">
               <Grid>
                 <Grid x:Name="NotesFlyoutInner" Width="300" HorizontalAlignment="Right">
@@ -552,37 +595,362 @@
               </Grid>
             </Border>
 
+            <!-- Files flyout: the third carousel sibling - same shared column
+                 (2 west / 4 east), same slide/geometry/grip machinery,
+                 mutually exclusive with Git, Notes, On-Deck and the gauge
+                 panel (the terminal panel, in its own outer column, is the
+                 only panel it coexists with). Content is a VS
+                 Code-style explorer tree of the active project's root folder,
+                 re-enumerated from disk on EVERY open (expanded folders are
+                 restored across the rescan, exactly like the Refresh button)
+                 and lazy-loaded one level per expansion in code
+                 (DevKit-Widget.ps1's FILES FLYOUT section): a toolbar (New
+                 File / New Folder / Refresh / Collapse All), the dark
+                 TreeView (FilesTreeView style in Theme.xaml) with per-item
+                 right-click menus, and a status line mirroring the Git
+                 flyout's. -->
+            <Border x:Name="FilesFlyout" Grid.Column="2" Width="0" ClipToBounds="True"
+                    Background="{StaticResource BrushPanelBg}" BorderBrush="{StaticResource BrushSeparator}" BorderThickness="1,0,0,0">
+              <Grid>
+                <Grid x:Name="FilesFlyoutInner" Width="300" HorizontalAlignment="Right">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <Grid Margin="12,12,12,8">
+                        <StackPanel>
+                            <TextBlock x:Name="FilesFlyoutTitle" Style="{StaticResource WidgetExpanderTitle}" Text="FILES" TextTrimming="CharacterEllipsis"/>
+                            <TextBlock x:Name="FilesFlyoutSub" Style="{StaticResource WidgetExpanderSub}" Text="" TextTrimming="CharacterEllipsis"/>
+                        </StackPanel>
+                        <Button x:Name="BtnFilesClose" Style="{StaticResource ChromeButton}" Width="24" Height="22"
+                                HorizontalAlignment="Right" VerticalAlignment="Top" Content="&#xE106;"
+                                ToolTip="Close the Files panel"/>
+                    </Grid>
+
+                    <UniformGrid Grid.Row="1" Columns="4" Margin="12,0,12,8">
+                        <Button x:Name="BtnFileNew" Style="{StaticResource GhostButton}" FontSize="10" Padding="2,2" Margin="0,0,3,0"
+                                Content="+ File" ToolTip="Create an empty file in the selected folder (or the project root)"/>
+                        <Button x:Name="BtnFolderNew" Style="{StaticResource GhostButton}" FontSize="10" Padding="2,2" Margin="3,0,3,0"
+                                Content="+ Folder" ToolTip="Create a folder in the selected folder (or the project root)"/>
+                        <Button x:Name="BtnFilesRefresh" Style="{StaticResource GhostButton}" FontSize="10" Padding="2,2" Margin="3,0,3,0"
+                                Content="Refresh" ToolTip="Re-read the folder tree from disk (keeps expanded folders)"/>
+                        <Button x:Name="BtnFilesCollapse" Style="{StaticResource GhostButton}" FontSize="10" Padding="2,2" Margin="3,0,0,0"
+                                Content="Collapse" ToolTip="Collapse every expanded folder"/>
+                    </UniformGrid>
+
+                    <Border Grid.Row="2" Background="{StaticResource BrushInputBg}" BorderBrush="{StaticResource BrushCardBorder}"
+                            BorderThickness="1" CornerRadius="6" Margin="12,0,12,8">
+                        <Grid>
+                            <TreeView x:Name="FilesTree" Style="{StaticResource FilesTreeView}"
+                                      VirtualizingStackPanel.IsVirtualizing="False"
+                                      ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                      ScrollViewer.VerticalScrollBarVisibility="Auto"/>
+                            <!-- Greyed empty state (no linked project / missing folder),
+                                 toggled in code by Update-DevKitFilesTree. -->
+                            <TextBlock x:Name="FilesEmptyText" Style="{StaticResource StatusText}" FontSize="10.5" Margin="10"
+                                       TextWrapping="Wrap" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                       Text="Link a project to browse files" Visibility="Collapsed"/>
+                        </Grid>
+                    </Border>
+
+                    <TextBlock x:Name="FilesFlyoutStatus" Grid.Row="3" Style="{StaticResource StatusText}" FontSize="9.5"
+                               TextWrapping="Wrap" Margin="12,0,12,12" Text=""/>
+                </Grid>
+                <Border x:Name="FilesFlyoutGrip" Width="6" HorizontalAlignment="Right"
+                        Background="Transparent" Cursor="SizeWE" ToolTip="Drag to resize the Files panel width"/>
+              </Grid>
+            </Border>
+
+            <!-- On-Deck flyout: the fourth carousel sibling - same shared
+                 column (2 west / 4 east), same slide/geometry/grip machinery,
+                 mutually exclusive with Git, Notes, Files and the gauge panel
+                 (coexists only with the terminal panel). Content is a per-project
+                 to-do list rendered in code (DevKit-Widget.ps1's ON-DECK
+                 FLYOUT section) into OnDeckPanel: an add-row (Enter or the
+                 Add button), then NOT STARTED / IN PROGRESS / DONE sections
+                 with live counts in their headers. -->
+            <Border x:Name="OnDeckFlyout" Grid.Column="2" Width="0" ClipToBounds="True"
+                    Background="{StaticResource BrushPanelBg}" BorderBrush="{StaticResource BrushSeparator}" BorderThickness="1,0,0,0">
+              <Grid>
+                <Grid x:Name="OnDeckFlyoutInner" Width="300" HorizontalAlignment="Right">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <Grid Margin="12,12,12,8">
+                        <StackPanel>
+                            <TextBlock x:Name="OnDeckFlyoutTitle" Style="{StaticResource WidgetExpanderTitle}" Text="ON DECK" TextTrimming="CharacterEllipsis"/>
+                            <TextBlock x:Name="OnDeckFlyoutSub" Style="{StaticResource WidgetExpanderSub}" Text="" TextTrimming="CharacterEllipsis"/>
+                        </StackPanel>
+                        <Button x:Name="BtnOnDeckClose" Style="{StaticResource ChromeButton}" Width="24" Height="22"
+                                HorizontalAlignment="Right" VerticalAlignment="Top" Content="&#xE106;"
+                                ToolTip="Close the On-Deck panel"/>
+                    </Grid>
+
+                    <Grid Grid.Row="1" Margin="12,0,12,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBox x:Name="OnDeckNewText" FontSize="11" Padding="6,4" Margin="0,0,6,0"
+                                 Background="{StaticResource BrushInputBg}" BorderBrush="{StaticResource BrushInputBorder}"
+                                 BorderThickness="1" Foreground="{StaticResource BrushTextBright}"
+                                 ToolTip="New to-do (lands in NOT STARTED) - Enter adds it"/>
+                        <Button Grid.Column="1" x:Name="BtnOnDeckAdd" Style="{StaticResource GhostButton}" FontSize="10.5" Padding="8,2"
+                                Content="Add" ToolTip="Add the to-do to NOT STARTED"/>
+                    </Grid>
+
+                    <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel x:Name="OnDeckPanel" Margin="12,0,12,12"/>
+                    </ScrollViewer>
+                </Grid>
+                <Border x:Name="OnDeckFlyoutGrip" Width="6" HorizontalAlignment="Right"
+                        Background="Transparent" Cursor="SizeWE" ToolTip="Drag to resize the On-Deck panel width"/>
+              </Grid>
+            </Border>
+
+            <!-- Gauge management panel: the fifth CAROUSEL member - same
+                 shared column (2 west / 4 east), same slide/grip machinery.
+                 It hosts what used to be three separate floating windows:
+                 clicking the CPU/MEM/GPU gauge toggles this panel with that
+                 metric's top-process list inside (SAFE TO CLOSE / CAUTION /
+                 LEAVE ALONE badges, confirmed per-row kills, the MEM summary
+                 + Free Memory button, the GPU adapter block - all rendered in
+                 code by Update-DevKitProcDialog into ProcRowsPanel/
+                 ProcSummaryText/ProcAdapterPanel). The kind-specific blocks
+                 are Visibility-toggled by Set-DevKitProcPanel; the 3s refresh
+                 timer lives exactly as long as the panel is open. -->
+            <Border x:Name="ProcFlyout" Grid.Column="2" Width="0" ClipToBounds="True"
+                    Background="{StaticResource BrushPanelBg}" BorderBrush="{StaticResource BrushSeparator}" BorderThickness="1,0,0,0">
+              <Grid>
+                <Grid x:Name="ProcFlyoutInner" Width="340" HorizontalAlignment="Right">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <Grid Margin="12,12,12,8">
+                        <StackPanel>
+                            <TextBlock x:Name="ProcFlyoutTitle" Style="{StaticResource WidgetExpanderTitle}" Text="CPU - TOP PROCESSES" TextTrimming="CharacterEllipsis"/>
+                            <TextBlock x:Name="ProcFlyoutSub" Style="{StaticResource WidgetExpanderSub}" Text="refreshes every 3s while open" TextTrimming="CharacterEllipsis"/>
+                        </StackPanel>
+                        <Button x:Name="BtnProcClose" Style="{StaticResource ChromeButton}" Width="24" Height="22"
+                                HorizontalAlignment="Right" VerticalAlignment="Top" Content="&#xE106;"
+                                ToolTip="Close the panel"/>
+                    </Grid>
+
+                    <!-- Kind-specific header blocks (Set-DevKitProcPanel shows
+                         exactly the ones the current metric needs): the MEM
+                         used/total summary + Free Memory button, or the GPU
+                         adapter summary (filled per render). -->
+                    <StackPanel Grid.Row="1" Margin="12,0,12,4">
+                        <TextBlock x:Name="ProcSummaryText" Style="{StaticResource WidgetRowText}"
+                                   Foreground="{StaticResource BrushTextBright}" TextWrapping="Wrap"
+                                   Text="..." Visibility="Collapsed"/>
+                        <Button x:Name="BtnProcFreeMem" Style="{StaticResource AccentButton}" FontSize="11"
+                                Margin="0,6,0,0" HorizontalAlignment="Left" Content="Free Memory" Visibility="Collapsed"
+                                ToolTip="Trim the working sets of running apps - safe, no processes are closed"/>
+                        <StackPanel x:Name="ProcAdapterPanel" Visibility="Collapsed"/>
+                    </StackPanel>
+
+                    <Border Grid.Row="2" Background="{StaticResource BrushInputBg}" BorderBrush="{StaticResource BrushCardBorder}"
+                            BorderThickness="1" CornerRadius="6" Margin="12,0,12,8">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                            <StackPanel x:Name="ProcRowsPanel" Margin="8,6"/>
+                        </ScrollViewer>
+                    </Border>
+
+                    <TextBlock x:Name="ProcFlyoutStatus" Grid.Row="3" Style="{StaticResource StatusText}" FontSize="9.5"
+                               TextWrapping="Wrap" Margin="12,0,12,12" Text=""/>
+                </Grid>
+                <Border x:Name="ProcFlyoutGrip" Width="6" HorizontalAlignment="Right"
+                        Background="Transparent" Cursor="SizeWE" ToolTip="Drag to resize the panel width"/>
+              </Grid>
+            </Border>
+
+            <!-- Terminal panel: a REAL terminal session (Windows Terminal when
+                 available, a classic pwsh/powershell console window otherwise)
+                 hosted over the dark TermHostSurface below - the launched
+                 window's chrome is stripped, the widget becomes its OWNER
+                 (GWL_HWNDPARENT; NOT a SetParent child: a child HWND can never
+                 render inside this AllowsTransparency layered window), and a
+                 40ms sync keeps it glued to the surface's live screen rect.
+                 The one panel that is NOT part of the flyout carousel - it
+                 lives in its own dedicated column FARTHER OUT than the tab
+                 strip (0 west / 6 east), so it coexists with any open
+                 carousel flyout and always sits on the outside (docked right,
+                 west-to-east: [terminal][tabs][flyout][widget]). See the
+                 TERMINAL PANEL section in DevKit-Widget.ps1. -->
+            <Border x:Name="TermFlyout" Grid.Column="0" Width="0" ClipToBounds="True"
+                    Background="{StaticResource BrushPanelBg}" BorderBrush="{StaticResource BrushSeparator}" BorderThickness="1,0,0,0">
+              <Grid>
+                <Grid x:Name="TermFlyoutInner" Width="420" HorizontalAlignment="Right">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <Grid Margin="12,12,12,6">
+                        <StackPanel>
+                            <TextBlock x:Name="TermFlyoutTitle" Style="{StaticResource WidgetExpanderTitle}" Text="TERMINAL" TextTrimming="CharacterEllipsis"/>
+                            <TextBlock x:Name="TermFlyoutSub" Style="{StaticResource WidgetExpanderSub}" Text="" TextTrimming="CharacterEllipsis"
+                                       ToolTip="The directory the hosted terminal is running in"/>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top">
+                            <Button x:Name="BtnTermRestart" Style="{StaticResource GhostButton}" FontSize="9.5" Padding="6,1"
+                                    Margin="0,0,4,0" VerticalAlignment="Top" Content="Restart"
+                                    ToolTip="Restart the terminal session in the active project folder"/>
+                            <Button x:Name="BtnTermClose" Style="{StaticResource ChromeButton}" Width="24" Height="22"
+                                    VerticalAlignment="Top" Content="&#xE106;" ToolTip="Close the terminal panel (ends the session)"/>
+                        </StackPanel>
+                    </Grid>
+
+                    <TextBlock x:Name="TermNoProjectNote" Grid.Row="1" Style="{StaticResource StatusText}" FontSize="9.5"
+                               TextWrapping="Wrap" Margin="12,0,12,6" Visibility="Collapsed"
+                               Text="No active project - the terminal opens in the DevKit root."/>
+
+                    <!-- The hosted terminal window is parked exactly over
+                         TermHostSurface (the inner grid, so the 1px rounded
+                         frame stays visible around it). #FF0C0C0C matches the
+                         default console background so seams don't show;
+                         TermHostStatus is the launch/failure overlay the
+                         hosted window covers once attached. -->
+                    <Border Grid.Row="2" Background="#FF0C0C0C" BorderBrush="{StaticResource BrushCardBorder}"
+                            BorderThickness="1" CornerRadius="6" Margin="12,0,12,8">
+                        <Grid x:Name="TermHostSurface">
+                            <TextBlock x:Name="TermHostStatus" Style="{StaticResource StatusText}" FontSize="10"
+                                       TextWrapping="Wrap" Margin="12,10" VerticalAlignment="Center"
+                                       Visibility="Collapsed" Text=""/>
+                        </Grid>
+                    </Border>
+
+                    <TextBlock x:Name="TermFlyoutStatus" Grid.Row="3" Style="{StaticResource StatusText}" FontSize="9.5"
+                               TextWrapping="Wrap" Margin="12,0,12,12" Text=""/>
+                </Grid>
+                <Border x:Name="TermFlyoutGrip" Width="6" HorizontalAlignment="Right"
+                        Background="Transparent" Cursor="SizeWE" ToolTip="Drag to resize the terminal panel width"/>
+              </Grid>
+            </Border>
+
             <!-- Side pull-tabs: always visible/clickable regardless of the
-                 flyouts' open/closed state - each both opens its panel and
-                 marks where it will appear. The stack owns its OWN column
-                 (0 west / 4 east, never shared with Main or the flyouts) at
-                 the TRUE outer edge of the window; Grid.Column and
-                 HorizontalAlignment move on the STACK, while each button's
-                 Style ((Git|Notes)TabButtonWest/East - see Theme.xaml) is
-                 swapped per-button - all toggled together in code
-                 (Set-DevKitWidgetDock). -->
-            <StackPanel x:Name="SideTabStack" Grid.Column="0" VerticalAlignment="Center" HorizontalAlignment="Left">
-                <Button x:Name="BtnGitTab" Width="24" Height="76"
-                        Style="{StaticResource GitTabButtonWest}" Padding="0"
-                        FontFamily="Segoe UI" FontSize="10" FontWeight="SemiBold"
-                        ToolTip="Git panel for the active project (select a project first)">
-                    <TextBlock Text="GIT">
-                        <TextBlock.LayoutTransform>
-                            <RotateTransform Angle="90"/>
-                        </TextBlock.LayoutTransform>
-                    </TextBlock>
-                </Button>
-                <Button x:Name="BtnNotesTab" Width="24" Height="76" Margin="0,10,0,0"
-                        Style="{StaticResource NotesTabButtonWest}" Padding="0"
-                        FontFamily="Segoe UI" FontSize="10" FontWeight="SemiBold"
-                        ToolTip="Sticky notes for the active project (select a project first)">
-                    <TextBlock Text="NOTES">
-                        <TextBlock.LayoutTransform>
-                            <RotateTransform Angle="90"/>
-                        </TextBlock.LayoutTransform>
-                    </TextBlock>
-                </Button>
-            </StackPanel>
+                 panels' open/closed state. The stack owns its OWN column (1
+                 west / 5 east, never shared with Main or any panel) at the
+                 TRUE outer edge of the window's tab side; Grid.Column moves
+                 on the STACK, the canvas/divider alignments move with it, and
+                 each button's Style ((Git|Notes|Files|OnDeck|Terminal)
+                 TabButtonWest/East - see Theme.xaml) is swapped per-button -
+                 all toggled together in code (Set-DevKitWidgetDock).
+                 The strip is SECTION-ANCHORED, not a centered stack: the tabs
+                 sit in two groups on a full-height Canvas (SideTabCanvas) -
+                 FILES+GIT (with their thin separator) and NOTES+ON DECK (the
+                 old tall separator rides at this group's top, keeping the
+                 visual break when the strip compresses) - plus the TERMINAL
+                 button, and Update-DevKitSideTabLayout (DevKit-Widget.ps1)
+                 positions each group so it sits ACROSS FROM its related body
+                 section in the UN-SCROLLED layout (FILES/GIT on the gauges
+                 card, NOTES/ON DECK on the SYSTEM JUNK card, TERMINAL on
+                 QUICK ACTIONS). Positions are FIXED: anchors are read with
+                 the scroll offset compensated out, there is no ScrollChanged
+                 hook, and tops are recomputed only on structural changes
+                 (window SizeChanged, BodyContent LayoutUpdated, startup) -
+                 scrolling the body never moves a tab. The clamp keeps the
+                 stack order, never overlaps groups, and never pushes a tab
+                 off the strip. SideTabDivider is the full-height
+                 brand-gradient hairline on the strip's widget-facing edge;
+                 its alignment flips with the dock side. -->
+            <Grid x:Name="SideTabStack" Grid.Column="1" HorizontalAlignment="Left" Width="26">
+                <Canvas x:Name="SideTabCanvas" Width="24" HorizontalAlignment="Left" ClipToBounds="True">
+                    <StackPanel x:Name="TabGroupFilesGit" Canvas.Top="0">
+                        <Button x:Name="BtnFilesTab" Width="24" Height="76"
+                                Style="{StaticResource FilesTabButtonWest}" Padding="0"
+                                FontFamily="Segoe UI" FontSize="10" FontWeight="SemiBold"
+                                ToolTip="File explorer for the active project (select a project first)">
+                            <TextBlock Text="FILES">
+                                <TextBlock.LayoutTransform>
+                                    <RotateTransform Angle="90"/>
+                                </TextBlock.LayoutTransform>
+                            </TextBlock>
+                        </Button>
+                        <!-- Small separator: subtle ~8px break with a hairline. -->
+                        <Border Height="8" Margin="2,0">
+                            <Border Height="1" VerticalAlignment="Center" Background="{StaticResource BrushSeparator}"/>
+                        </Border>
+                        <Button x:Name="BtnGitTab" Width="24" Height="76"
+                                Style="{StaticResource GitTabButtonWest}" Padding="0"
+                                FontFamily="Segoe UI" FontSize="10" FontWeight="SemiBold"
+                                ToolTip="Git panel for the active project (select a project first)">
+                            <TextBlock Text="GIT">
+                                <TextBlock.LayoutTransform>
+                                    <RotateTransform Angle="90"/>
+                                </TextBlock.LayoutTransform>
+                            </TextBlock>
+                        </Button>
+                    </StackPanel>
+                    <StackPanel x:Name="TabGroupNotesOnDeck" Canvas.Top="0">
+                        <!-- Big separator: a clearly larger ~24px visual break. Rides
+                             at the TOP of this group so a compressed strip keeps the
+                             same group break the old centered stack had; the layout
+                             code centers only the buttons below it on the anchor. -->
+                        <Border x:Name="TabGroupSepBig" Height="24" Margin="2,0">
+                            <Border Height="1" VerticalAlignment="Center" Background="{StaticResource BrushSeparator}"/>
+                        </Border>
+                        <Button x:Name="BtnNotesTab" Width="24" Height="76"
+                                Style="{StaticResource NotesTabButtonWest}" Padding="0"
+                                FontFamily="Segoe UI" FontSize="10" FontWeight="SemiBold"
+                                ToolTip="Sticky notes for the active project (select a project first)">
+                            <TextBlock Text="NOTES">
+                                <TextBlock.LayoutTransform>
+                                    <RotateTransform Angle="90"/>
+                                </TextBlock.LayoutTransform>
+                            </TextBlock>
+                        </Button>
+                        <Border Height="8" Margin="2,0">
+                            <Border Height="1" VerticalAlignment="Center" Background="{StaticResource BrushSeparator}"/>
+                        </Border>
+                        <Button x:Name="BtnOnDeckTab" Width="24" Height="92"
+                                Style="{StaticResource OnDeckTabButtonWest}" Padding="0"
+                                FontFamily="Segoe UI" FontSize="10" FontWeight="SemiBold"
+                                ToolTip="On-deck to-do list for the active project (select a project first)">
+                            <TextBlock Text="ON DECK">
+                                <TextBlock.LayoutTransform>
+                                    <RotateTransform Angle="90"/>
+                                </TextBlock.LayoutTransform>
+                            </TextBlock>
+                        </Button>
+                    </StackPanel>
+                    <!-- TERMINAL sits below the carousel groups, anchored to the
+                         QUICK ACTIONS section: its panel is independent of the
+                         flyout carousel (coexists with any open flyout), and it
+                         stays enabled with no project selected (falls back to the
+                         DevKit root). -->
+                    <Button x:Name="BtnTerminalTab" Canvas.Top="0" Width="24" Height="100"
+                            Style="{StaticResource TerminalTabButtonWest}" Padding="0"
+                            FontFamily="Segoe UI" FontSize="10" FontWeight="SemiBold"
+                            ToolTip="Host a real terminal inside the widget (opens in the active project folder, or the DevKit root when no project is selected)">
+                        <TextBlock Text="TERMINAL">
+                            <TextBlock.LayoutTransform>
+                                <RotateTransform Angle="90"/>
+                            </TextBlock.LayoutTransform>
+                        </TextBlock>
+                    </Button>
+                </Canvas>
+                <!-- Full-height brand-gradient hairline on the strip's
+                     widget-facing edge (semi-transparent so it reads as a
+                     divider, not a bar); HorizontalAlignment flips with the
+                     dock side in Set-DevKitWidgetDock. -->
+                <Border x:Name="SideTabDivider" Width="2" Margin="0,10,0,10" CornerRadius="1"
+                        HorizontalAlignment="Right" Opacity="0.5"
+                        Background="{StaticResource BrushAccentGradientVertical}"/>
+            </Grid>
         </Grid>
     </Border>
 </Window>

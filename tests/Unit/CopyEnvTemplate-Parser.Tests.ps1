@@ -23,7 +23,7 @@
 Describe "Get-DevKitEnvValueInfo" {
 
     BeforeAll {
-        $script:ScriptPath = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) "workflow\Copy-EnvTemplate.ps1"
+        $script:ScriptPath = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) "tools\workflow\Copy-EnvTemplate.ps1"
         . $script:ScriptPath
     }
 
@@ -63,7 +63,7 @@ Describe "Get-DevKitEnvValueInfo" {
 Describe "Get-DevKitEnvVariables" {
 
     BeforeAll {
-        $script:ScriptPath = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) "workflow\Copy-EnvTemplate.ps1"
+        $script:ScriptPath = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) "tools\workflow\Copy-EnvTemplate.ps1"
         . $script:ScriptPath
 
         # Sample .env.example fixture covering:

@@ -8,8 +8,12 @@
     free space, reboot-pending + uptime), a Node-process + listening-port
     snapshot (with process ages and winnat reserved-port detection), Claude
     Code / Kimi Code MCP server status for the user scope and a selected
-    project, a system-junk size scan (plus the safe temp/Recycle-Bin-only
-    clean), a git repo overview (branch, ahead/behind, dirty/stash counts,
+    project, a system-junk size scan (plus the GUI-driven clean: user temp,
+    Recycle Bin, and - when elevated - Windows\Temp and the Windows Update
+    download cache), the process-management backend for the clickable CPU/
+    MEM/GPU gauges (process classification, top-CPU/top-memory/top-GPU
+    collectors, a guarded kill, and a working-set trim), a git repo overview
+    (branch, ahead/behind, dirty/stash counts,
     parsed log + graph lane layout) for the GitHub flyout, and a key-name-
     only .env drift diff. Sensors that wait out sampling windows (thermal
     zone, nvidia-smi) and slow-changing values (reboot sentinel, winnat
@@ -349,6 +353,389 @@ function Get-DevKitNodeSnapshot {
     }
 }
 
+# ==================== PROCESS MANAGEMENT (CLICKABLE GAUGES) ====================
+# Pure-logic backend for the clickable CPU/MEM/GPU gauge windows: process
+# classification (what is safe to kill), top-CPU / top-memory / top-GPU
+# collectors, a defense-in-depth kill wrapper, and a working-set trim.
+# Everything here is safe to run in the background MTA runspace: nothing
+# throws, and every collector degrades to an honest empty result.
+
+# Process-name sets for Get-DevKitProcessClassification, kept at script scope
+# so the per-process classification loop in the top-N collectors doesn't
+# reallocate them hundreds of times a cycle. All entries lowercase, no .exe.
+$script:DevKitSystemProcessNames = @(
+    # Windows dies or misbehaves without these - never kill.
+    'system', 'idle', 'registry', 'secure system', 'memory compression',
+    'smss', 'csrss', 'wininit', 'winlogon', 'services', 'svchost', 'lsass',
+    'lsaiso', 'fontdrvhost', 'dwm', 'winwer', 'werfault', 'sihost',
+    'taskhostw', 'runtimebroker', 'msmpeng', 'nissrv', 'searchindexer',
+    'spoolsv'
+)
+$script:DevKitSafeProcessNames = @(
+    # Well-known user/dev apps that close cleanly when killed.
+    'node', 'npm', 'npx', 'esbuild', 'vite', 'next', 'deno', 'bun',
+    'code', 'cursor', 'chrome', 'msedge', 'firefox', 'brave', 'opera',
+    'slack', 'discord', 'teams', 'spotify', 'notepad', 'notepad++',
+    'obsidian'
+)
+
+function Get-DevKitProcessClassification {
+    <#
+    .SYNOPSIS
+        Classifies a process name for the gauge windows' kill affordances:
+        'System' (never kill - Windows dies/misbehaves without it), 'Safe'
+        (well-known user/dev app that closes cleanly), or 'Caution'
+        (everything else - killable, but the user should think first).
+        Matching is case-insensitive and a trailing '.exe' is stripped.
+    #>
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Name)
+
+    $normalized = $Name.Trim().ToLowerInvariant()
+    if ($normalized.EndsWith('.exe')) { $normalized = $normalized.Substring(0, $normalized.Length - 4) }
+    if ($script:DevKitSystemProcessNames -contains $normalized) { return 'System' }
+    if ($script:DevKitSafeProcessNames -contains $normalized) { return 'Safe' }
+    return 'Caution'
+}
+
+function Get-DevKitTopCpuProcesses {
+    <#
+    .SYNOPSIS
+        The $Count busiest processes by current CPU usage: two Get-Process
+        snapshots $SampleSeconds apart, percent = delta CPU seconds /
+        (sample window * logical core count) * 100, capped at 100. Processes
+        that exited between the snapshots (or whose PID got recycled, seen
+        as a negative delta) are skipped. Never throws - a failed snapshot
+        just yields fewer/zero rows.
+    #>
+    param([int]$Count = 15, [double]$SampleSeconds = 1)
+
+    if ($SampleSeconds -lt 0.2) { $SampleSeconds = 0.2 }
+    $cores = [Environment]::ProcessorCount
+    if ($cores -lt 1) { $cores = 1 }
+
+    $first = @{}
+    try {
+        foreach ($p in @(Get-Process -ErrorAction SilentlyContinue)) {
+            $cpu = $null
+            try { $cpu = $p.CPU } catch { }   # .CPU throws for a few protected processes
+            if ($null -ne $cpu) { $first[$p.Id] = [double]$cpu }
+        }
+    } catch { }
+
+    Start-Sleep -Seconds $SampleSeconds
+
+    $rows = @()
+    try {
+        foreach ($p in @(Get-Process -ErrorAction SilentlyContinue)) {
+            if (-not $first.ContainsKey($p.Id)) { continue }   # started after the first snapshot
+            $cpuNow = $null
+            try { $cpuNow = $p.CPU } catch { continue }        # exited between snapshots
+            if ($null -eq $cpuNow) { continue }
+            $delta = [double]$cpuNow - $first[$p.Id]
+            if ($delta -lt 0) { continue }                     # PID recycled mid-sample
+            $pct = ($delta / ($SampleSeconds * $cores)) * 100
+            if ($pct -gt 100) { $pct = 100 }
+            $memMB = 0
+            try { $memMB = [math]::Round($p.WorkingSet64 / 1MB, 0) } catch { }
+            $rows += [PSCustomObject]@{
+                Name           = $p.ProcessName
+                Pid            = $p.Id
+                CpuPercent     = [math]::Round($pct, 1)
+                MemoryMB       = $memMB
+                Classification = (Get-DevKitProcessClassification -Name $p.ProcessName)
+            }
+        }
+    } catch { }
+    return @($rows | Sort-Object CpuPercent -Descending | Select-Object -First $Count)
+}
+
+function Get-DevKitTopMemoryProcesses {
+    <#
+    .SYNOPSIS
+        The $Count largest processes by working set, plus the machine-wide
+        memory totals (from Win32_OperatingSystem - the same source
+        Get-DevKitSystemMetrics uses) for the memory gauge window's header.
+        Never throws.
+    #>
+    param([int]$Count = 15)
+
+    $result = [PSCustomObject]@{ Processes = @(); TotalGB = $null; UsedGB = $null; FreeGB = $null }
+    try {
+        $os = Get-CimInstance Win32_OperatingSystem -ErrorAction Stop
+        $result.TotalGB = [math]::Round($os.TotalVisibleMemorySize / 1MB, 1)
+        $result.FreeGB = [math]::Round($os.FreePhysicalMemory / 1MB, 1)
+        $result.UsedGB = [math]::Round($result.TotalGB - $result.FreeGB, 1)
+    } catch { }
+
+    $rows = @()
+    try {
+        foreach ($p in @(Get-Process -ErrorAction SilentlyContinue | Sort-Object WorkingSet64 -Descending | Select-Object -First $Count)) {
+            $rows += [PSCustomObject]@{
+                Name           = $p.ProcessName
+                Pid            = $p.Id
+                MemoryMB       = [math]::Round($p.WorkingSet64 / 1MB, 0)
+                Classification = (Get-DevKitProcessClassification -Name $p.ProcessName)
+            }
+        }
+    } catch { }
+    $result.Processes = $rows
+    return $result
+}
+
+function Stop-DevKitProcessById {
+    <#
+    .SYNOPSIS
+        Defense-in-depth kill for the gauge windows' per-row kill buttons:
+        re-classifies the process at click time and REFUSES when it is a
+        Windows system process or the PID no longer exists - the UI showing
+        a kill button is never enough on its own, since the row's snapshot
+        may be stale. Never throws; the Note tells the UI what happened.
+    #>
+    # NOTE: the parameter cannot literally be named $Pid - $PID is a
+    # read-only automatic variable, so binding would throw "Cannot overwrite
+    # variable Pid". The 'Pid' ALIAS keeps the documented -Pid call syntax
+    # the widget codes against.
+    param([Parameter(Mandatory = $true)][Alias('Pid')][int]$ProcessId)
+
+    $result = [PSCustomObject]@{ Stopped = $false; Note = '' }
+    $proc = $null
+    try { $proc = Get-Process -Id $ProcessId -ErrorAction Stop } catch { }
+    if (-not $proc) {
+        $result.Note = "Process $ProcessId no longer exists."
+        return $result
+    }
+    if ((Get-DevKitProcessClassification -Name $proc.ProcessName) -eq 'System') {
+        $result.Note = "Refusing to kill $($proc.ProcessName) (pid $ProcessId): it is a Windows system process."
+        return $result
+    }
+    $name = $proc.ProcessName
+    try {
+        Stop-Process -Id $ProcessId -Force -ErrorAction Stop
+        $result.Stopped = $true
+        $result.Note = "Stopped $name (pid $ProcessId)."
+    } catch {
+        $result.Note = "Could not stop $name (pid $ProcessId): $($_.Exception.Message)"
+    }
+    return $result
+}
+
+function Invoke-DevKitFreeMemory {
+    <#
+    .SYNOPSIS
+        Safe memory reclaim for the memory gauge window's "Free memory"
+        button: calls psapi.dll's EmptyWorkingSet on every accessible
+        process, which trims pageable working-set pages back to the OS
+        WITHOUT killing anything (Windows does this itself under pressure;
+        doing it on demand just front-runs it). System-classified processes
+        are skipped, and processes that refuse (access denied, exited) are
+        skipped silently. Returns how much was trimmed. Never throws.
+    #>
+    $result = [PSCustomObject]@{ FreedMB = 0; TrimmedProcesses = 0; Note = '' }
+
+    # The P/Invoke type is defined once per runspace (the -as [type] probe
+    # survives repeat calls and repeat dot-sources; a bare Add-Type would
+    # throw "type already exists" on the second call).
+    if (-not ('DevKitWidgetPsApi' -as [type])) {
+        try {
+            Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class DevKitWidgetPsApi {
+    [DllImport("psapi.dll", SetLastError = true)]
+    public static extern bool EmptyWorkingSet(IntPtr hProcess);
+}
+'@ -ErrorAction Stop
+        } catch { }
+    }
+    if (-not ('DevKitWidgetPsApi' -as [type])) {
+        $result.Note = 'Working-set trim unavailable (psapi interop failed to load).'
+        return $result
+    }
+
+    $freedBytes = 0L
+    $trimmed = 0
+    foreach ($p in @(Get-Process -ErrorAction SilentlyContinue)) {
+        if ((Get-DevKitProcessClassification -Name $p.ProcessName) -eq 'System') { continue }
+        $wsBefore = 0L; $handle = [IntPtr]::Zero
+        try { $wsBefore = $p.WorkingSet64; $handle = $p.Handle } catch { continue }
+        if ($handle -eq [IntPtr]::Zero) { continue }
+        $ok = $false
+        try { $ok = [DevKitWidgetPsApi]::EmptyWorkingSet($handle) } catch { continue }
+        if ($ok) {
+            $trimmed++
+            try {
+                $p.Refresh()
+                $delta = $wsBefore - $p.WorkingSet64
+                if ($delta -gt 0) { $freedBytes += $delta }
+            } catch { }
+        }
+    }
+    $result.FreedMB = [math]::Round($freedBytes / 1MB, 1)
+    $result.TrimmedProcesses = $trimmed
+    $result.Note = "Trimmed working sets on $trimmed processes."
+    return $result
+}
+
+# ==================== GPU PROCESS USAGE (CLICKABLE GPU GAUGE) ====================
+
+function ConvertFrom-DevKitGpuEngineInstance {
+    <#
+    .SYNOPSIS
+        Parses a '\GPU Engine(*)' performance-counter instance name into its
+        owning PID and engine type. Names look like 'pid_4056_engtype_3D' or
+        'pid_1234_engtype_Compute_0'; some builds prefix an adapter identity
+        ('luid_0x00000000_0x0000974E_phys_0_eng_2_pid_4056_engtype_3D').
+        Engine types can themselves contain underscores ('Compute_0'), so the
+        engine is everything after 'engtype_' to the end. Anything without a
+        usable pid_/engtype_ pair (including luid-only instances with no pid)
+        returns $null. Pure - unit-testable.
+    .OUTPUTS
+        @{ Pid [int]; EngineType [string] } or $null.
+    #>
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$InstanceName)
+
+    $s = $InstanceName.Trim()
+    # Anchor pid_ on a token boundary so a stray 'pid_' inside a luid hex
+    # chunk can't produce a bogus match, and require digits after it.
+    if ($s -notmatch '(?:^|_)pid_(\d+)(?=_|$)') { return $null }
+    $procId = [int]$Matches[1]
+    if ($s -notmatch 'engtype_(\S+)\s*$') { return $null }
+    $engine = $Matches[1]
+    if ([string]::IsNullOrWhiteSpace($engine)) { return $null }
+    return @{ Pid = $procId; EngineType = $engine }
+}
+
+function ConvertFrom-DevKitNvidiaSmiAdapterOutput {
+    <#
+    .SYNOPSIS
+        Parses 'nvidia-smi --query-gpu=name,temperature.gpu,utilization.gpu,
+        memory.used,memory.total --format=csv,noheader,nounits' output into a
+        typed object. The name field is free text (it comes first so the
+        numeric tail stays anchored); 'N/A' fields make the line unparsable.
+    .OUTPUTS
+        @{ Name; TempC [double]; Percent [double]; MemUsedMB [double];
+           MemTotalMB [double] } or $null when unparsable.
+    #>
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Output)
+
+    $line = ($Output -split "`n" | Select-Object -First 1)
+    if ($null -eq $line) { return $null }
+    if ($line.Trim() -match '^\s*(?<name>.+?)\s*,\s*(?<temp>\d+(?:\.\d+)?)\s*,\s*(?<util>\d+(?:\.\d+)?)\s*,\s*(?<used>\d+(?:\.\d+)?)\s*,\s*(?<total>\d+(?:\.\d+)?)\s*$') {
+        return @{
+            Name       = $Matches.name.Trim()
+            TempC      = [double]$Matches.temp
+            Percent    = [double]$Matches.util
+            MemUsedMB  = [double]$Matches.used
+            MemTotalMB = [double]$Matches.total
+        }
+    }
+    return $null
+}
+
+$script:GpuAdapterCache = $null
+
+function Get-DevKitGpuAdapterInfo {
+    <#
+    .SYNOPSIS
+        Adapter-level summary for the GPU gauge window: name, utilization,
+        temperature, and VRAM used/total. Follows the Get-DevKitGpuReading
+        pattern - a single nvidia-smi spawn (all five fields in one query),
+        cached per runspace for 10 seconds so the spawn cadence never exceeds
+        the metrics cycle's existing one. Without nvidia-smi, util/temp fall
+        back to the (itself cached) Get-DevKitGpuReading, whose counter path
+        exposes no name or VRAM - those fields stay $null and the UI shows
+        "n/a" rather than inventing a number.
+    #>
+    if ($null -ne $script:GpuAdapterCache -and ((Get-Date) - $script:GpuAdapterCache.At).TotalSeconds -lt 10) {
+        return $script:GpuAdapterCache.Result
+    }
+    $result = @{ Name = $null; UtilPercent = $null; TempC = $null; MemUsedMB = $null; MemTotalMB = $null; Source = 'None' }
+
+    $smi = Get-DevKitWindowsExecutable -Name 'nvidia-smi'
+    if ($smi) {
+        try {
+            $raw = (& $smi.Source '--query-gpu=name,temperature.gpu,utilization.gpu,memory.used,memory.total' '--format=csv,noheader,nounits' 2>$null | Out-String)
+            $parsed = ConvertFrom-DevKitNvidiaSmiAdapterOutput -Output $raw
+            if ($parsed) {
+                $result.Name = $parsed.Name
+                $result.UtilPercent = $parsed.Percent
+                $result.TempC = $parsed.TempC
+                $result.MemUsedMB = $parsed.MemUsedMB
+                $result.MemTotalMB = $parsed.MemTotalMB
+                $result.Source = 'NvidiaSmi'
+                $script:GpuAdapterCache = @{ Result = $result; At = Get-Date }
+                return $result
+            }
+        } catch { }
+    }
+
+    $reading = Get-DevKitGpuReading
+    if ($reading.Source -ne 'None') {
+        $result.UtilPercent = $reading.Percent
+        $result.TempC = $reading.TempC
+        $result.Source = $reading.Source
+    }
+    $script:GpuAdapterCache = @{ Result = $result; At = Get-Date }
+    return $result
+}
+
+function Get-DevKitGpuProcessUsage {
+    <#
+    .SYNOPSIS
+        One snapshot for the clickable GPU gauge window: the adapter summary
+        (Get-DevKitGpuAdapterInfo) plus the $Count heaviest per-process GPU
+        users. Per-process usage aggregates every '\GPU Engine(*)\Utilization
+        Percentage' counter sample by owning PID (via
+        ConvertFrom-DevKitGpuEngineInstance), rounds to 1 decimal, drops ~0
+        values, and caps at 100 (a process can legitimately spread across
+        several engine types). Names come from a single Get-Process pass;
+        PIDs that already exited are reported as '(exited)'. Never throws -
+        no GPU counters means an empty Processes list, not an error.
+    #>
+    param([int]$Count = 15)
+
+    $info = Get-DevKitGpuAdapterInfo
+    $adapter = [PSCustomObject]@{
+        Name        = $info.Name
+        UtilPercent = $info.UtilPercent
+        TempC       = $info.TempC
+        MemUsedMB   = $info.MemUsedMB
+        MemTotalMB  = $info.MemTotalMB
+        Source      = $info.Source
+    }
+
+    $byPid = @{}
+    try {
+        $samples = @((Get-Counter '\GPU Engine(*)\Utilization Percentage' -ErrorAction Stop).CounterSamples)
+        foreach ($s in $samples) {
+            $parsed = ConvertFrom-DevKitGpuEngineInstance -InstanceName $s.InstanceName
+            if (-not $parsed) { continue }
+            if (-not $byPid.ContainsKey($parsed.Pid)) { $byPid[$parsed.Pid] = 0.0 }
+            $byPid[$parsed.Pid] += [double]$s.CookedValue
+        }
+    } catch { }
+
+    $processes = @()
+    if ($byPid.Count -gt 0) {
+        $names = @{}
+        foreach ($p in @(Get-Process -ErrorAction SilentlyContinue)) { $names[$p.Id] = $p.ProcessName }
+        foreach ($procId in @($byPid.Keys)) {
+            $pct = [math]::Round([math]::Min(100, $byPid[$procId]), 1)
+            if ($pct -le 0) { continue }
+            $name = if ($names.ContainsKey($procId)) { $names[$procId] } else { '(exited)' }
+            $processes += [PSCustomObject]@{
+                Name           = $name
+                Pid            = [int]$procId
+                GpuPercent     = $pct
+                Classification = (Get-DevKitProcessClassification -Name $name)
+            }
+        }
+        $processes = @($processes | Sort-Object GpuPercent -Descending | Select-Object -First $Count)
+    }
+
+    return @{ Adapter = $adapter; Processes = $processes }
+}
+
 # ==================== CLAUDE CODE MCP STATUS ====================
 
 function ConvertFrom-DevKitClaudeMcpLine {
@@ -570,10 +957,13 @@ function Get-DevKitMcpWidgetReport {
 
 # ==================== SYSTEM JUNK ====================
 # Size logic mirrors maintenance/Clear-DiskJunk.ps1's scan (same paths, same
-# COM recycle-bin read). The clean below is deliberately the SAFE subset
-# only: temp folder contents + Recycle Bin. No service stop/start, no
-# Windows Update cache, no DISM - anything admin-gated belongs to the real
-# Clear-DiskJunk tool, which the widget launches in a terminal instead.
+# COM recycle-bin read). The clean below is now fully GUI-driven and covers
+# everything the widget dials advertise: user temp + Recycle Bin always, and
+# Windows\Temp + the Windows Update download cache when elevated (attempted
+# silently; non-admin runs report them via SkippedNeedsAdmin instead). What
+# still separates this from the real Clear-DiskJunk tool is the admin-heavy
+# machinery: DISM/WinSxS and service stop/start stay with the terminal tool,
+# which the widget launches via "Cleanup Tool...".
 
 function Get-DevKitJunkPathSize {
     <#
@@ -633,22 +1023,46 @@ function Get-DevKitSystemJunk {
 function Clear-DevKitSystemJunk {
     <#
     .SYNOPSIS
-        The safe subset of Clear-DiskJunk.ps1: deletes the CONTENTS of the
-        user temp folder and empties the Recycle Bin - locations that always
-        work unelevated. Windows\Temp is deliberately excluded (deletes there
-        silently no-op for non-admins), as are service stop/start, the
-        Windows Update cache, and DISM - those belong to the real
-        Clear-DiskJunk tool (launched via "Cleanup Tool..."). Measures
-        before/after on the same subset so "freed X" stays honest.
+        The GUI-driven junk clean behind the widget's junk dial: deletes the
+        CONTENTS of the user temp folder and empties the Recycle Bin (always
+        works unelevated), and - when elevated - also clears Windows\Temp
+        and the Windows Update SoftwareDistribution\Download cache contents.
+        Non-admin runs skip those two admin-gated categories and report them
+        in SkippedNeedsAdmin so the UI can say why they're untouched. What
+        this still does NOT do (vs the real Clear-DiskJunk tool): DISM/
+        WinSxS and service stop/start. Every category is measured before/
+        after so "freed X" and the per-category breakdown stay honest.
         Never throws; designed for the background runspace.
+    .OUTPUTS
+        BytesBefore/BytesAfter/FreedBytes (totals, as before), plus
+        TempUserFreed/TempWindowsFreed/WuCacheFreed/RecycleFreed per
+        category and SkippedNeedsAdmin (category names skipped because the
+        process is not elevated: 'Windows Temp', 'Windows Update Cache').
     #>
-    $tempPaths = @($env:TEMP)
+    $userTempPath = $env:TEMP
+    $windowsTempPath = Join-Path $env:SystemRoot 'Temp'
+    $wuCachePath = Join-Path (Join-Path $env:SystemRoot 'SoftwareDistribution') 'Download'
 
-    $before = 0
-    foreach ($p in $tempPaths) { $before += Get-DevKitJunkPathSize -Path $p }
-    $before += Get-DevKitRecycleBinSize
+    $isAdmin = $false
+    try { $isAdmin = Test-DevKitAdmin } catch { }
+    $skippedNeedsAdmin = @()
+    if (-not $isAdmin) { $skippedNeedsAdmin = @('Windows Temp', 'Windows Update Cache') }
 
-    foreach ($p in $tempPaths) {
+    # Before-snapshot per category (admin categories only when elevated -
+    # the delete would silently no-op anyway, so skip the slow enumeration).
+    $tempUserBefore = Get-DevKitJunkPathSize -Path $userTempPath
+    $recycleBefore = Get-DevKitRecycleBinSize
+    $tempWindowsBefore = 0
+    $wuBefore = 0
+    if ($isAdmin) {
+        $tempWindowsBefore = Get-DevKitJunkPathSize -Path $windowsTempPath
+        $wuBefore = Get-DevKitJunkPathSize -Path $wuCachePath
+    }
+
+    $clearPaths = @($userTempPath)
+    if ($isAdmin) { $clearPaths += @($windowsTempPath, $wuCachePath) }
+    foreach ($p in ($clearPaths | Select-Object -Unique)) {
+        if ([string]::IsNullOrWhiteSpace($p)) { continue }
         if (-not (Test-Path -LiteralPath $p)) { continue }
         try {
             Get-ChildItem -LiteralPath $p -Force -ErrorAction SilentlyContinue | ForEach-Object {
@@ -658,16 +1072,38 @@ function Clear-DevKitSystemJunk {
     }
     try { Clear-RecycleBin -Force -ErrorAction SilentlyContinue } catch { }
 
-    $after = 0
-    foreach ($p in $tempPaths) { $after += Get-DevKitJunkPathSize -Path $p }
-    $after += Get-DevKitRecycleBinSize
+    $tempUserAfter = Get-DevKitJunkPathSize -Path $userTempPath
+    $recycleAfter = Get-DevKitRecycleBinSize
+    $tempWindowsAfter = 0
+    $wuAfter = 0
+    if ($isAdmin) {
+        $tempWindowsAfter = Get-DevKitJunkPathSize -Path $windowsTempPath
+        $wuAfter = Get-DevKitJunkPathSize -Path $wuCachePath
+    }
 
+    $tempUserFreed = $tempUserBefore - $tempUserAfter
+    $tempWindowsFreed = $tempWindowsBefore - $tempWindowsAfter
+    $wuFreed = $wuBefore - $wuAfter
+    $recycleFreed = $recycleBefore - $recycleAfter
+    $before = $tempUserBefore + $tempWindowsBefore + $wuBefore + $recycleBefore
+    $after = $tempUserAfter + $tempWindowsAfter + $wuAfter + $recycleAfter
     $freed = $before - $after
+    # Files appear in temp between the two measurements all the time; a
+    # negative delta means "grew while cleaning", not "freed negative bytes".
     if ($freed -lt 0) { $freed = 0 }
+    if ($tempUserFreed -lt 0) { $tempUserFreed = 0 }
+    if ($tempWindowsFreed -lt 0) { $tempWindowsFreed = 0 }
+    if ($wuFreed -lt 0) { $wuFreed = 0 }
+    if ($recycleFreed -lt 0) { $recycleFreed = 0 }
     return [PSCustomObject]@{
-        BytesBefore = $before
-        BytesAfter  = $after
-        FreedBytes  = $freed
+        BytesBefore       = $before
+        BytesAfter        = $after
+        FreedBytes        = $freed
+        TempUserFreed     = $tempUserFreed
+        TempWindowsFreed  = $tempWindowsFreed
+        WuCacheFreed      = $wuFreed
+        RecycleFreed      = $recycleFreed
+        SkippedNeedsAdmin = $skippedNeedsAdmin
     }
 }
 
@@ -974,6 +1410,141 @@ function Invoke-DevKitGitAction {
         $result.Success = ($exitCode -eq 0)
     } catch {
         $result.LastLine = "$_"
+    }
+    return $result
+}
+
+# ==================== COMMIT DETAILS (git show) ====================
+# Backs the commit graph's click-to-expand: one 'git show --numstat
+# --shortstat' per clicked commit, parsed into plain hashtables.
+
+function ConvertFrom-DevKitGitShow {
+    <#
+    .SYNOPSIS
+        Parses 'git show --format=%H%x1f%an%x1f%ae%x1f%aI%x1f%B%x1e --numstat
+        --shortstat <hash>' output into a plain hashtable: Hash, Author,
+        Email, Date (ISO 8601 strict), Message (the FULL multi-line message,
+        subject included), Files (@{ Path; Added; Deleted; IsBinary }),
+        FilesChanged, Insertions, Deletions. Unit/record separators keep
+        multi-line messages unambiguous; the stat block is everything after
+        the record separator. Merge commits (and empty commits) simply have
+        no numstat lines - Files is empty and the counts fall back to the
+        shortstat summary line (or stay 0 when git prints neither). Returns
+        $null when the output doesn't carry the expected field separators -
+        the caller maps that to an honest "couldn't read" message, never a
+        throw.
+    #>
+    param([AllowEmptyString()][string]$Output)
+
+    if ([string]::IsNullOrWhiteSpace($Output)) { return $null }
+    $rs = [char]0x1e; $us = [char]0x1f
+    $rsIdx = $Output.IndexOf($rs)
+    # Header + message: everything before the record separator; stat block after.
+    $headPart = if ($rsIdx -ge 0) { $Output.Substring(0, $rsIdx) } else { $Output }
+    $statPart = if ($rsIdx -ge 0) { $Output.Substring($rsIdx + 1) } else { '' }
+    # 5-way split cap: a stray US byte inside the message body lands in the
+    # last field instead of shifting the whole parse.
+    $fields = $headPart -split "$us", 5
+    if ($fields.Count -lt 5) { return $null }
+
+    $files = @()
+    $filesChanged = $null; $insertions = 0; $deletions = 0
+    foreach ($line in ($statPart -split "`r?`n")) {
+        if ($line -match '^(\d+|-)\t(\d+|-)\t(.+)$') {
+            $binary = ($Matches[1] -eq '-')
+            $files += @{
+                Path     = $Matches[3].Trim()
+                Added    = if ($binary) { 0 } else { [int]$Matches[1] }
+                Deleted  = if ($binary) { 0 } else { [int]$Matches[2] }
+                IsBinary = $binary
+            }
+        } elseif ($line -match '^\s*(\d+)\s+files?\s+changed(?:,\s*(\d+)\s+insertions?\(\+\))?(?:,\s*(\d+)\s+deletions?\(-\))?\s*$') {
+            $filesChanged = [int]$Matches[1]
+            if ($Matches[2]) { $insertions = [int]$Matches[2] }
+            if ($Matches[3]) { $deletions = [int]$Matches[3] }
+        }
+    }
+    # No shortstat summary (e.g. --shortstat unsupported): count what we saw.
+    if ($null -eq $filesChanged) {
+        $filesChanged = $files.Count
+        if ($files.Count -gt 0) {
+            $insertions = ($files | ForEach-Object Added | Measure-Object -Sum).Sum
+            $deletions = ($files | ForEach-Object Deleted | Measure-Object -Sum).Sum
+        }
+    }
+
+    return @{
+        Hash         = $fields[0].Trim()
+        Author       = [string]$fields[1]
+        Email        = [string]$fields[2]
+        Date         = [string]$fields[3]
+        Message      = ([string]$fields[4]).Trim()
+        Files        = $files
+        FilesChanged = $filesChanged
+        Insertions   = $insertions
+        Deletions    = $deletions
+    }
+}
+
+function Get-DevKitCommitDetails {
+    <#
+    .SYNOPSIS
+        'git show' one commit in the project at -Path and return structured
+        details for the widget flyout's click-to-expand card (parsed by
+        ConvertFrom-DevKitGitShow). Never throws - git missing, an invalid or
+        gone hash (rebased away mid-view), and parse failures all come back
+        as Found=$false with an honest Error line, since this runs in a
+        background runspace where an unhandled exception would silently kill
+        the job.
+    #>
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Hash
+    )
+
+    $result = [PSCustomObject]@{
+        Found        = $false
+        Hash         = $Hash
+        Error        = $null
+        Author       = ''
+        Email        = ''
+        Date         = ''
+        Message      = ''
+        Files        = @()
+        FilesChanged = 0
+        Insertions   = 0
+        Deletions    = 0
+    }
+    # Hex-only guard: the value travels into a git command line, and anything
+    # that isn't a hash isn't worth a git spawn.
+    if ($Hash -notmatch '^[0-9a-fA-F]{4,64}$') { $result.Error = 'Invalid commit hash.'; return $result }
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) {
+        $result.Error = 'No project selected.'
+        return $result
+    }
+    $git = Get-DevKitWindowsExecutable -Name 'git'
+    if (-not $git) { $result.Error = 'git not found on PATH.'; return $result }
+    try {
+        $out = (& $git.Source '-C' $Path 'show' '--format=%H%x1f%an%x1f%ae%x1f%aI%x1f%B%x1e' '--numstat' '--shortstat' $Hash 2>&1 | Out-String)
+        if ($LASTEXITCODE -ne 0) {
+            # bad object / unknown revision: the classic "commit vanished
+            # after a rebase while the graph still showed it" case.
+            $result.Error = 'This commit is no longer available (history may have changed).'
+            return $result
+        }
+        $parsed = ConvertFrom-DevKitGitShow -Output $out
+        if (-not $parsed) { $result.Error = 'Could not read this commit.'; return $result }
+        $result.Found        = $true
+        $result.Author       = $parsed.Author
+        $result.Email        = $parsed.Email
+        $result.Date         = $parsed.Date
+        $result.Message      = $parsed.Message
+        $result.Files        = $parsed.Files
+        $result.FilesChanged = $parsed.FilesChanged
+        $result.Insertions   = $parsed.Insertions
+        $result.Deletions    = $parsed.Deletions
+    } catch {
+        $result.Error = "$_"
     }
     return $result
 }
@@ -1332,4 +1903,518 @@ function Save-DevKitProjectNotes {
     # -InputObject, not pipeline: piping would unroll and serialize only the
     # store's properties one at a time instead of the object itself.
     Set-Content -LiteralPath $NotesFile -Value (ConvertTo-Json -InputObject $store -Depth 6) -Encoding UTF8
+}
+
+function Get-DevKitNoteTitle {
+    <#
+    .SYNOPSIS
+        Derives a note's one-line title for the widget's collapsed note card:
+        the first non-empty line of the body, trimmed. Notes have no title
+        field on disk (the notes.json schema stays exactly what older widget
+        versions read and write) - the title is always derived at render
+        time, so an existing store needs no migration and no data can be
+        lost. Empty/whitespace bodies get a placeholder instead of a blank
+        card.
+    #>
+    param([string]$Text)
+    if (-not [string]::IsNullOrWhiteSpace($Text)) {
+        foreach ($line in ($Text -split "`r?`n")) {
+            $t = $line.Trim()
+            if ($t.Length -gt 0) { return $t }
+        }
+    }
+    return '(empty note)'
+}
+
+# ==================== PER-PROJECT ON-DECK LIST (TO-DO) ====================
+# Backing store for the widget's On-Deck flyout: one JSON file holding every
+# project's to-do items, keyed by the same canonical project-path key the
+# notes store uses (Get-DevKitNotesProjectKey). Same forgiving posture as the
+# notes store: a missing/corrupt file reads as an empty list, and a save is a
+# read-modify-write of the whole store so other projects are untouched. Pure
+# file/list logic only; all rendering lives in DevKit-Widget.ps1.
+
+function Get-DevKitOnDeckFile {
+    return Join-Path $env:LOCALAPPDATA 'NorthstarDevKit\ondeck.json'
+}
+
+function Get-DevKitOnDeckStatus {
+    <#
+    .SYNOPSIS
+        Normalizes an on-deck status string to one of the three known values
+        ('notStarted' / 'inProgress' / 'done'). Anything unknown - including
+        $null, casing drift, or a hand-edited store - becomes 'notStarted',
+        so a mangled entry still lands in a real section instead of vanishing.
+    #>
+    param([string]$Status)
+    switch ([string]$Status) {
+        'inProgress' { return 'inProgress' }
+        'done'       { return 'done' }
+        default      { return 'notStarted' }
+    }
+}
+
+function Get-DevKitProjectOnDeck {
+    <#
+    .SYNOPSIS
+        Returns one project's saved on-deck items as an array of
+        PSCustomObjects (Id, Text, Status, UpdatedAt), in stored (section-
+        grouped) order. Empty for a missing file, an unknown project, or a
+        corrupt store. Callers must wrap the call in @(...) - the repo-wide
+        convention - since an empty return unrolls to nothing in a pipeline.
+    #>
+    param(
+        [Parameter(Mandatory = $true)][string]$ProjectPath,
+        [string]$OnDeckFile
+    )
+    if (-not $OnDeckFile) { $OnDeckFile = Get-DevKitOnDeckFile }
+    if (-not (Test-Path -LiteralPath $OnDeckFile)) { return @() }
+    $key = Get-DevKitNotesProjectKey -ProjectPath $ProjectPath
+    try {
+        $data = Get-Content -LiteralPath $OnDeckFile -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        if (-not $data.projects) { return @() }
+        $entry = $data.projects.PSObject.Properties[$key]
+        if (-not $entry) { return @() }
+        $items = @()
+        foreach ($i in @($entry.Value)) {
+            if ($null -eq $i) { continue }
+            $items += [PSCustomObject]@{
+                Id        = [string]$i.id
+                Text      = [string]$i.text
+                Status    = Get-DevKitOnDeckStatus -Status ([string]$i.status)
+                UpdatedAt = [string]$i.updatedAt
+            }
+        }
+        return $items
+    } catch { return @() }
+}
+
+function Save-DevKitProjectOnDeck {
+    <#
+    .SYNOPSIS
+        Persists one project's on-deck items - a read-modify-write of the
+        whole store, so every other project's list is untouched. $Items is
+        the full replacement list for this project; an empty list removes
+        the project's entry entirely rather than leaving empty stubs behind.
+        A corrupt store is silently rebuilt (same forgiving posture as
+        Save-DevKitProjectNotes).
+    #>
+    param(
+        [Parameter(Mandatory = $true)][string]$ProjectPath,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][array]$Items,
+        [string]$OnDeckFile
+    )
+    if (-not $OnDeckFile) { $OnDeckFile = Get-DevKitOnDeckFile }
+    $key = Get-DevKitNotesProjectKey -ProjectPath $ProjectPath
+
+    $projects = [ordered]@{}
+    if (Test-Path -LiteralPath $OnDeckFile) {
+        try {
+            $data = Get-Content -LiteralPath $OnDeckFile -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+            if ($data.projects) {
+                foreach ($p in $data.projects.PSObject.Properties) {
+                    # @(...) so a one-item project stays a JSON ARRAY on the
+                    # way back out - member access unrolls single-element
+                    # arrays, and without this a lone item would round-trip
+                    # into a bare object.
+                    if ($p.Name -ne $key) { $projects[$p.Name] = @($p.Value) }
+                }
+            }
+        } catch { }
+    }
+
+    $list = @()
+    foreach ($i in $Items) {
+        if ($null -eq $i) { continue }
+        $list += [ordered]@{
+            id        = [string]$i.Id
+            text      = [string]$i.Text
+            status    = Get-DevKitOnDeckStatus -Status ([string]$i.Status)
+            updatedAt = [string]$i.UpdatedAt
+        }
+    }
+    if ($list.Count -gt 0) { $projects[$key] = $list }
+
+    $dir = Split-Path -Parent $OnDeckFile
+    if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+    $store = [ordered]@{ schemaVersion = 1; projects = $projects }
+    # -InputObject, not pipeline: piping would unroll and serialize only the
+    # store's properties one at a time instead of the object itself.
+    Set-Content -LiteralPath $OnDeckFile -Value (ConvertTo-Json -InputObject $store -Depth 6) -Encoding UTF8
+}
+
+function Group-DevKitOnDeckItems {
+    <#
+    .SYNOPSIS
+        Re-sorts an on-deck list into display order - every 'notStarted'
+        item, then every 'inProgress', then every 'done' - stably (relative
+        order within a section is preserved). The widget keeps the stored
+        list in this order at all times, so "the item moves to its new
+        section" is just a status change plus this regroup.
+    #>
+    param([Parameter(Mandatory = $true)][AllowEmptyCollection()][array]$Items)
+    $grouped = @()
+    foreach ($s in @('notStarted', 'inProgress', 'done')) {
+        $grouped += @($Items | Where-Object { $null -ne $_ -and (Get-DevKitOnDeckStatus -Status ([string]$_.Status)) -eq $s })
+    }
+    return $grouped
+}
+
+function Add-DevKitOnDeckItem {
+    <#
+    .SYNOPSIS
+        Returns a new on-deck list with a fresh 'notStarted' item prepended
+        (newest on top of its section, like a new note). $Text is trimmed;
+        an empty/whitespace text returns the list unchanged. Never mutates
+        the input array.
+    #>
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][array]$Items,
+        [string]$Text
+    )
+    if ([string]::IsNullOrWhiteSpace($Text)) { return @($Items) }
+    $item = [PSCustomObject]@{
+        Id        = [guid]::NewGuid().ToString('N')
+        Text      = $Text.Trim()
+        Status    = 'notStarted'
+        UpdatedAt = [DateTime]::UtcNow.ToString('o')
+    }
+    return @(Group-DevKitOnDeckItems -Items (@($item) + @($Items)))
+}
+
+function Remove-DevKitOnDeckItem {
+    <#
+    .SYNOPSIS
+        Returns a new on-deck list without the item whose Id is $Id (a
+        missing id returns an equal list). Never mutates the input array.
+    #>
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][array]$Items,
+        [Parameter(Mandatory = $true)][string]$Id
+    )
+    return @($Items | Where-Object { $null -ne $_ -and [string]$_.Id -ne $Id })
+}
+
+function Set-DevKitOnDeckItemStatus {
+    <#
+    .SYNOPSIS
+        Returns a new on-deck list with one item's status changed and the
+        whole list regrouped (Group-DevKitOnDeckItems), so the item lands in
+        its new section immediately. Also stamps the item's UpdatedAt. An
+        unknown id returns the list unchanged; an unknown status normalizes
+        to 'notStarted'. Never mutates the input array (the matched item is
+        copied first).
+    #>
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][array]$Items,
+        [Parameter(Mandatory = $true)][string]$Id,
+        [Parameter(Mandatory = $true)][string]$Status
+    )
+    $newStatus = Get-DevKitOnDeckStatus -Status $Status
+    $updated = @()
+    foreach ($i in @($Items)) {
+        if ($null -eq $i) { continue }
+        if ([string]$i.Id -eq $Id) {
+            $updated += [PSCustomObject]@{
+                Id        = [string]$i.Id
+                Text      = [string]$i.Text
+                Status    = $newStatus
+                UpdatedAt = [DateTime]::UtcNow.ToString('o')
+            }
+        } else {
+            $updated += $i
+        }
+    }
+    return @(Group-DevKitOnDeckItems -Items $updated)
+}
+
+function Clear-DevKitOnDeckDone {
+    <#
+    .SYNOPSIS
+        Returns a new on-deck list with every 'done' item removed (the Done
+        section header's "Clear Done" button). Never mutates the input
+        array.
+    #>
+    param([Parameter(Mandatory = $true)][AllowEmptyCollection()][array]$Items)
+    return @($Items | Where-Object { $null -ne $_ -and (Get-DevKitOnDeckStatus -Status ([string]$_.Status)) -ne 'done' })
+}
+
+# ==================== PROJECT FILE EXPLORER (FILES FLYOUT) ====================
+# Pure file logic behind the widget's Files flyout: one-level directory
+# enumeration, path-containment and name validation for the mutating toolbar/
+# context-menu operations, and Explorer-style " - Copy" collision naming.
+# All tree building/rendering stays in DevKit-Widget.ps1 - nothing here
+# touches WPF.
+
+function Get-DevKitDirChildren {
+    <#
+    .SYNOPSIS
+        Enumerates ONE directory level for the Files flyout tree: folders
+        first, then files, each alphabetical case-insensitive.
+    .DESCRIPTION
+        Never recurses (the tree expands lazily, one level per expansion).
+        Hidden/system entries are included - the explorer skips nothing
+        visually. An enumeration failure (access denied, vanished folder)
+        does not throw: the result's Error carries the message and Children
+        is empty, so the UI can degrade to a greyed node.
+    #>
+    param([Parameter(Mandatory = $true)][string]$Path)
+    $result = @{ Children = @(); Error = $null }
+    try {
+        $items = @(Get-ChildItem -LiteralPath $Path -Force -ErrorAction Stop)
+    } catch {
+        $result.Error = $_.Exception.Message
+        return $result
+    }
+    # Sort-Object's string comparison is case-insensitive by default; the
+    # leading key puts folders (0) before files (1).
+    $sorted = @($items | Sort-Object -Property @{ Expression = { [int](-not $_.PSIsContainer) } }, @{ Expression = { $_.Name } })
+    $children = @()
+    foreach ($item in $sorted) {
+        $children += [PSCustomObject]@{
+            Name        = $item.Name
+            FullName    = $item.FullName
+            IsDirectory = [bool]$item.PSIsContainer
+        }
+    }
+    $result.Children = $children
+    return $result
+}
+
+function Test-DevKitPathWithinRoot {
+    <#
+    .SYNOPSIS
+        True when $Path is the root itself or lives underneath it, after
+        full-path normalization (so '..' escapes resolve BEFORE the prefix
+        comparison). The safety gate for every mutating Files-flyout op.
+    #>
+    param([string]$Root, [Parameter(Mandatory = $true)][string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Root) -or [string]::IsNullOrWhiteSpace($Path)) { return $false }
+    try {
+        $r = [IO.Path]::GetFullPath($Root).TrimEnd('\')
+        $p = [IO.Path]::GetFullPath($Path).TrimEnd('\')
+    } catch { return $false }
+    if ($p.Equals($r, [StringComparison]::OrdinalIgnoreCase)) { return $true }
+    # The separator in the prefix stops 'C:\proj' from matching 'C:\proj2'.
+    return $p.StartsWith($r + '\', [StringComparison]::OrdinalIgnoreCase)
+}
+
+function Get-DevKitSafeChildName {
+    <#
+    .SYNOPSIS
+        Validates a proposed file/folder name for the Files flyout's
+        New/Rename operations. Returns the (trimmed) name when usable,
+        $null when not: empty/whitespace, any of \/:*?"<>| (via
+        GetInvalidFileNameChars), a bare '.'/'..', or a trailing dot/space
+        (which Windows silently strips, producing a file that does not
+        match what the user typed).
+    #>
+    param([string]$Name)
+    if ([string]::IsNullOrWhiteSpace($Name)) { return $null }
+    $n = $Name.Trim()
+    if ($n -eq '.' -or $n -eq '..') { return $null }
+    if ($n.IndexOfAny([IO.Path]::GetInvalidFileNameChars()) -ge 0) { return $null }
+    if ($n.EndsWith('.') -or $n.EndsWith(' ')) { return $null }
+    return $n
+}
+
+function Get-DevKitCopyName {
+    <#
+    .SYNOPSIS
+        Explorer-style collision renaming for Paste inside the Files flyout:
+        'name' -> 'name - Copy' -> 'name - Copy (2)' -> ... - files keep
+        their extension last ('a - Copy.txt'). Returns $Name unchanged when
+        nothing collides. Pure check against the target folder on disk.
+    #>
+    param(
+        [Parameter(Mandatory = $true)][string]$Folder,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [switch]$IsDirectory
+    )
+    if (-not (Test-Path -LiteralPath (Join-Path $Folder $Name))) { return $Name }
+    $base = $Name
+    $ext = ''
+    if (-not $IsDirectory) {
+        $ext = [IO.Path]::GetExtension($Name)
+        $base = [IO.Path]::GetFileNameWithoutExtension($Name)
+    }
+    $candidate = "$base - Copy$ext"
+    $i = 2
+    while (Test-Path -LiteralPath (Join-Path $Folder $candidate)) {
+        $candidate = "$base - Copy ($i)$ext"
+        $i++
+    }
+    return $candidate
+}
+
+function Get-DevKitRelativePath {
+    <#
+    .SYNOPSIS
+        Root-relative path ('src\app\index.ts') for the Files flyout's
+        expansion-state keys and Copy Relative Path. Returns '' for the root
+        itself and $null when $Path is outside the root. .NET Framework 4.x
+        (PS 5.1) has no [IO.Path]::GetRelativePath, hence the manual form.
+    #>
+    param([string]$Root, [Parameter(Mandatory = $true)][string]$Path)
+    if (-not (Test-DevKitPathWithinRoot -Root $Root -Path $Path)) { return $null }
+    $r = [IO.Path]::GetFullPath($Root).TrimEnd('\')
+    $p = [IO.Path]::GetFullPath($Path).TrimEnd('\')
+    if ($p.Equals($r, [StringComparison]::OrdinalIgnoreCase)) { return '' }
+    return $p.Substring($r.Length + 1)
+}
+
+# ==================== FILE ICON MAPPING (FILES FLYOUT / GIT GRAPH) ====================
+# Pure name -> icon-key + Material-palette color mapping behind the widget's
+# built-in vector icon set. No WPF here: gui/DevKit-WidgetIcons.ps1 owns the
+# frozen drawings and consumes the Key/Color this returns (every Key below has
+# a catalog entry there).
+
+# Special names checked BEFORE the extension table (a name like
+# 'package-lock.json' must win over '.json', 'docker-compose.yml' over '.yml').
+# Matched case-insensitively against the exact file name.
+$script:DevKitIconNameMap = @{
+    'dockerfile'           = 'docker'
+    '.dockerignore'        = 'docker'
+    'docker-compose.yml'   = 'docker'
+    'docker-compose.yaml'  = 'docker'
+    '.gitignore'           = 'git'
+    '.gitattributes'       = 'git'
+    '.gitmodules'          = 'git'
+    'package-lock.json'    = 'lock'
+    'npm-shrinkwrap.json'  = 'lock'
+    'yarn.lock'            = 'lock'
+    'pnpm-lock.yaml'       = 'lock'
+    'bun.lock'             = 'lock'
+    'bun.lockb'            = 'lock'
+    'composer.lock'        = 'lock'
+    'cargo.lock'           = 'lock'
+}
+
+# Extension (no dot, lowercase) -> icon key. Anything missing falls back to
+# the generic 'file' key.
+$script:DevKitIconExtensionMap = @{
+    'js' = 'js';  'mjs' = 'js';  'cjs' = 'js'
+    'jsx' = 'jsx'
+    'ts' = 'ts';  'mts' = 'ts';  'cts' = 'ts'
+    'tsx' = 'tsx'
+    'json' = 'json'; 'jsonc' = 'json'; 'json5' = 'json'; 'map' = 'json'
+    'md' = 'md'; 'markdown' = 'md'; 'mdx' = 'md'
+    'ps1' = 'ps1'; 'psm1' = 'ps1'; 'psd1' = 'ps1'
+    'bat' = 'bat'; 'cmd' = 'bat'
+    'html' = 'html'; 'htm' = 'html'
+    'css' = 'css'
+    'scss' = 'scss'; 'sass' = 'scss'; 'less' = 'scss'
+    'vue' = 'vue'
+    'svelte' = 'svelte'
+    'py' = 'py'; 'pyw' = 'py'
+    'cs' = 'cs'; 'csproj' = 'cs'
+    'c' = 'c'; 'h' = 'c'
+    'cpp' = 'cpp'; 'cc' = 'cpp'; 'cxx' = 'cpp'; 'hpp' = 'cpp'
+    'java' = 'java'; 'class' = 'java'; 'jar' = 'java'
+    'go' = 'go'
+    'rs' = 'rs'
+    'php' = 'php'
+    'rb' = 'rb'
+    'xml' = 'xml'; 'xaml' = 'xml'; 'svg+xml' = 'xml'
+    'yml' = 'yml'; 'yaml' = 'yml'
+    'toml' = 'toml'
+    'lock' = 'lock'
+    'ini' = 'config'; 'cfg' = 'config'; 'conf' = 'config'; 'config' = 'config'; 'editorconfig' = 'config'; 'props' = 'config'; 'targets' = 'config'
+    'png' = 'image'; 'jpg' = 'image'; 'jpeg' = 'image'; 'gif' = 'image'; 'svg' = 'image'; 'ico' = 'image'; 'webp' = 'image'; 'bmp' = 'image'
+    'zip' = 'archive'; 'tar' = 'archive'; 'gz' = 'archive'; 'tgz' = 'archive'; '7z' = 'archive'; 'rar' = 'archive'; 'bz2' = 'archive'
+    'sql' = 'sql'
+    'txt' = 'txt'; 'log' = 'txt'
+    'pdf' = 'pdf'
+    'exe' = 'exe'; 'dll' = 'exe'; 'msi' = 'exe'; 'sys' = 'exe'
+}
+
+# Canonical Material-ish color per icon key. Kept here (not in the icons file)
+# so the color is part of the tested contract.
+$script:DevKitIconColors = @{
+    'folder'      = '#E5C07B'  # amber (matches the widget's old folder glyph)
+    'folder-open' = '#E5C07B'
+    'file'        = '#8A93A6'  # muted steel
+    'js'          = '#F7DF1E'  # JS yellow
+    'jsx'         = '#61DAFB'  # React cyan
+    'ts'          = '#3178C6'  # TS blue
+    'tsx'         = '#61DAFB'  # React cyan
+    'json'        = '#FBC02D'  # amber
+    'md'          = '#78909C'  # slate
+    'ps1'         = '#5391FE'  # sapphire
+    'bat'         = '#9AA0A6'  # console gray
+    'html'        = '#E44D26'  # HTML5 orange
+    'css'         = '#42A5F5'  # CSS blue
+    'scss'        = '#CD6799'  # Sass pink
+    'vue'         = '#41B883'  # Vue green
+    'svelte'      = '#FF3E00'  # Svelte orange
+    'py'          = '#4B8BBE'  # Python blue
+    'cs'          = '#68217A'  # .NET purple
+    'c'           = '#5C6BC0'  # indigo
+    'cpp'         = '#649AD2'  # C++ blue
+    'java'        = '#E76F00'  # Java orange
+    'go'          = '#00ADD8'  # Go cyan
+    'rs'          = '#DEA584'  # Rust
+    'php'         = '#777BB3'  # PHP periwinkle
+    'rb'          = '#CC342D'  # Ruby red
+    'xml'         = '#E37933'  # XML orange
+    'yml'         = '#F0524F'  # YAML red
+    'toml'        = '#9C6570'  # TOML mauve
+    'env'         = '#ECD53F'  # dotenv yellow
+    'lock'        = '#E8B339'  # padlock gold
+    'image'       = '#26A69A'  # teal
+    'archive'     = '#C0CA33'  # lime
+    'git'         = '#F05033'  # git orange-red
+    'docker'      = '#0DB7ED'  # Docker blue
+    'sql'         = '#FFCA28'  # database amber
+    'txt'         = '#9AA0A6'  # gray
+    'pdf'         = '#E53935'  # PDF red
+    'exe'         = '#7986CB'  # binary indigo
+    'config'      = '#6D8086'  # settings slate
+    'git-branch'  = '#C8D3E0'  # bright steel (reads on translucent pills)
+    'git-tag'     = '#FFB020'  # matches the tag pill's amber
+    'git-head'    = '#0A0D12'  # dark glyph on the HEAD pill's bright fill
+}
+
+function Get-DevKitFileIconInfo {
+    <#
+    .SYNOPSIS
+        Maps a file/folder name to an icon key + Material-palette color hex
+        for the widget's built-in icon set (gui/DevKit-WidgetIcons.ps1).
+    .DESCRIPTION
+        Pure mapping (no WPF) so it stays Pester-testable. Folders always map
+        to the 'folder' key - the open/closed swap is a UI concern (the tree
+        swaps the image source between the 'folder' and 'folder-open' frozen
+        drawings in its expand/collapse handlers). Files check the special-
+        name table first (Dockerfile, .gitignore, package-lock.json, any
+        '.env*' name), then the extension table, then fall back to 'file'.
+        All matching is case-insensitive.
+    .OUTPUTS
+        @{ Key = <string>; Color = '#RRGGBB' } - Key is always a valid
+        Get-DevKitIconDrawing key.
+    #>
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Name,
+        [switch]$IsFolder
+    )
+    if ($IsFolder) {
+        return @{ Key = 'folder'; Color = $script:DevKitIconColors['folder'] }
+    }
+    $key = $null
+    $lower = $Name.ToLowerInvariant()
+    if ($script:DevKitIconNameMap.ContainsKey($lower)) {
+        $key = $script:DevKitIconNameMap[$lower]
+    } elseif ($lower -eq '.env' -or $lower.StartsWith('.env.')) {
+        $key = 'env'
+    } else {
+        $ext = ''
+        # Leading-dot names ('.editorconfig') treat the dotless name as the
+        # "extension" so they can map too ('.env' was already caught above).
+        $dot = $lower.LastIndexOf('.')
+        if ($dot -ge 0 -and $dot -lt $lower.Length - 1) { $ext = $lower.Substring($dot + 1) }
+        if ($ext -and $script:DevKitIconExtensionMap.ContainsKey($ext)) {
+            $key = $script:DevKitIconExtensionMap[$ext]
+        }
+    }
+    if (-not $key) { $key = 'file' }
+    return @{ Key = $key; Color = $script:DevKitIconColors[$key] }
 }

@@ -25,7 +25,7 @@
 #>
 
 BeforeAll {
-    $script:AddFlowScript = (Resolve-Path (Join-Path $PSScriptRoot "..\..\lib\DevKit-McpAddFlow.ps1")).Path
+    $script:AddFlowScript = (Resolve-Path (Join-Path $PSScriptRoot "..\..\tools\lib\DevKit-McpAddFlow.ps1")).Path
 
     # Reset every "load once per process" flag this file's dot-source chain
     # touches, so this file always gets a real, fresh load of

@@ -40,9 +40,10 @@ function Get-DevKitGuiCatalog {
     <#
     .SYNOPSIS
         Loads every tool-category manifest (via Get-DevKitModule from
-        lib/DevKit-Common.ps1) into the GUI's grouped catalog structure.
+        tools/lib/DevKit-Common.ps1) into the GUI's grouped catalog structure.
     .PARAMETER RootPath
-        The DevKit repo root (the folder containing ports/, node/, ...).
+        The DevKit repo root (the folder containing the tools\ directory,
+        which holds ports/, node/, ...).
     .OUTPUTS
         Array of @{ Group; Modules = @( <module hashtables, each carrying
         Folder/FolderPath plus the manifest's Name/Description/Items> ) }.
@@ -56,10 +57,11 @@ function Get-DevKitGuiCatalog {
 
     $catalog = @()
     $global:DevKitCatalogLoadErrors = @()
+    $toolsRoot = Join-Path $RootPath 'tools'
     foreach ($category in (Get-DevKitGuiCategories)) {
         $modules = @()
         foreach ($folder in $category.Folders) {
-            $folderPath = Join-Path $RootPath $folder
+            $folderPath = Join-Path $toolsRoot $folder
             try {
                 $module = Get-DevKitModule -FolderPath $folderPath
                 $module.Folder = $folder

@@ -23,7 +23,7 @@
 #>
 
 BeforeAll {
-    $script:McpListScript = (Resolve-Path (Join-Path $PSScriptRoot "..\..\lib\DevKit-McpList.ps1")).Path
+    $script:McpListScript = (Resolve-Path (Join-Path $PSScriptRoot "..\..\tools\lib\DevKit-McpList.ps1")).Path
 
     # lib/*.ps1 files guard themselves with a $global:...Loaded "load once
     # per process" flag. That's correct for the real app, but when Pester

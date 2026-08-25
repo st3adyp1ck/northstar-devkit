@@ -18,11 +18,11 @@
 
     Ten tool-category submenus (Port/Node/Next.js/Vite/Git/Docker/System/
     Workflow/Diagnostics/WiFi Tools) are driven generically by
-    Start-DevKitModuleTools (lib/DevKit-Common.ps1) reading each category's
-    "_module.psd1" manifest - see e.g. ports/_module.psd1. The Main Menu and
-    Projects menu below are deliberately hand-written rather than manifest-
-    driven; see the note above Start-DevKitModuleTools in lib/DevKit-Common.ps1
-    for why.
+    Start-DevKitModuleTools (tools/lib/DevKit-Common.ps1) reading each
+    category's "_module.psd1" manifest - see e.g. tools/ports/_module.psd1.
+    The Main Menu and Projects menu below are deliberately hand-written
+    rather than manifest-driven; see the note above Start-DevKitModuleTools
+    in tools/lib/DevKit-Common.ps1 for why.
 .LINK
     https://www.northstarcoding.com
 .EXAMPLE
@@ -30,7 +30,10 @@
 #>
 
 $ScriptDir = $PSScriptRoot
-. (Join-Path $ScriptDir "lib\DevKit-Common.ps1")
+# All tool categories and the shared lib live under tools\ since 4.0 - the
+# repo root only carries launchers, the installer, and docs.
+$ToolsDir = Join-Path $ScriptDir "tools"
+. (Join-Path $ToolsDir "lib\DevKit-Common.ps1")
 
 # Read the version once at startup so the header banner never drifts out of
 # sync with the VERSION file (previously hardcoded as a literal string).
@@ -163,7 +166,7 @@ function Search-DevKitTools {
 
     $found = @()
     foreach ($cat in (Get-DevKitSearchableCategories)) {
-        $folderPath = Join-Path $ScriptDir $cat.Folder
+        $folderPath = Join-Path $ToolsDir $cat.Folder
         try {
             $module = Get-DevKitModule -FolderPath $folderPath
         } catch {
@@ -288,19 +291,19 @@ while ($true) {
     Show-MainMenu
     $mainChoice = Show-DevKitInteractiveMenu -Entries (Get-DevKitMainMenuEntries) -PromptLabel 'Select option'
     switch ($mainChoice.Trim()) {
-        '1' { Start-DevKitModuleTools -FolderPath (Join-Path $ScriptDir "ports") }
-        '2' { Start-DevKitModuleTools -FolderPath (Join-Path $ScriptDir "node") }
-        '3' { Start-DevKitModuleTools -FolderPath (Join-Path $ScriptDir "nextjs") }
-        '4' { Start-DevKitModuleTools -FolderPath (Join-Path $ScriptDir "vite") }
-        '5' { Start-DevKitModuleTools -FolderPath (Join-Path $ScriptDir "git") }
-        '6' { Start-DevKitModuleTools -FolderPath (Join-Path $ScriptDir "docker") }
-        '7' { Start-DevKitModuleTools -FolderPath (Join-Path $ScriptDir "system") }
-        '8' { Start-DevKitModuleTools -FolderPath (Join-Path $ScriptDir "workflow") }
-        '9' { Start-DevKitModuleTools -FolderPath (Join-Path $ScriptDir "diagnostics") }
+        '1' { Start-DevKitModuleTools -FolderPath (Join-Path $ToolsDir "ports") }
+        '2' { Start-DevKitModuleTools -FolderPath (Join-Path $ToolsDir "node") }
+        '3' { Start-DevKitModuleTools -FolderPath (Join-Path $ToolsDir "nextjs") }
+        '4' { Start-DevKitModuleTools -FolderPath (Join-Path $ToolsDir "vite") }
+        '5' { Start-DevKitModuleTools -FolderPath (Join-Path $ToolsDir "git") }
+        '6' { Start-DevKitModuleTools -FolderPath (Join-Path $ToolsDir "docker") }
+        '7' { Start-DevKitModuleTools -FolderPath (Join-Path $ToolsDir "system") }
+        '8' { Start-DevKitModuleTools -FolderPath (Join-Path $ToolsDir "workflow") }
+        '9' { Start-DevKitModuleTools -FolderPath (Join-Path $ToolsDir "diagnostics") }
         '10' { Start-ProjectTools }
-        '11' { Start-DevKitModuleTools -FolderPath (Join-Path $ScriptDir "wifi") }
-        '12' { Start-DevKitModuleTools -FolderPath (Join-Path $ScriptDir "maintenance") }
-        '13' { Start-DevKitModuleTools -FolderPath (Join-Path $ScriptDir "agents") }
+        '11' { Start-DevKitModuleTools -FolderPath (Join-Path $ToolsDir "wifi") }
+        '12' { Start-DevKitModuleTools -FolderPath (Join-Path $ToolsDir "maintenance") }
+        '13' { Start-DevKitModuleTools -FolderPath (Join-Path $ToolsDir "agents") }
         '/' { Search-DevKitTools }
         '?' { Show-DevKitGettingStarted }
         '0' { exit }

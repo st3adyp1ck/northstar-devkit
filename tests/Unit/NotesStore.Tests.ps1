@@ -15,7 +15,7 @@ BeforeAll {
     # See Get-DevKitPackageManager.Tests.ps1 for why these load-once flags
     # get reset when several test files share one Pester process.
     $global:DevKitCommonLoaded = $false
-    . (Join-Path $script:RepoRoot 'lib\DevKit-Common.ps1')
+    . (Join-Path $script:RepoRoot 'tools\lib\DevKit-Common.ps1')
     $global:DevKitWidgetCoreLoaded = $false
     . (Join-Path $script:RepoRoot 'gui\DevKit-WidgetCore.ps1')
 

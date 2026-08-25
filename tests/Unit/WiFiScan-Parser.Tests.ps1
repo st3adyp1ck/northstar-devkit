@@ -17,7 +17,7 @@
 #>
 
 BeforeAll {
-    $script:ScanScript = (Resolve-Path (Join-Path $PSScriptRoot "..\..\wifi\WiFi-Scan.ps1")).Path
+    $script:ScanScript = (Resolve-Path (Join-Path $PSScriptRoot "..\..\tools\wifi\WiFi-Scan.ps1")).Path
     . $script:ScanScript
 
     # Realistic sample matching real `netsh wlan show networks mode=Bssid` output:

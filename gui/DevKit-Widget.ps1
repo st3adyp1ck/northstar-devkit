@@ -8,9 +8,15 @@
     from DevKit and it keeps running after DevKit closes.
 
     Shows live CPU/memory/GPU load with best-effort temperatures (plus a
-    reboot-pending / long-uptime hint), a System Junk dial (reclaimable
-    temp/Windows-Update/Recycle-Bin bytes, with a safe in-widget clean of
-    temp files + Recycle Bin behind a confirm) next to a Disk Free dial per
+    reboot-pending / long-uptime hint) - each gauge is clickable and toggles a
+    slide-out per-process management panel (top processes by that metric,
+    SAFE TO CLOSE / CAUTION / LEAVE ALONE badges, confirmed per-row kills,
+    and for memory a working-set Free Memory button), refreshed every 3s from
+    the work runspace while open - a System Junk dial (reclaimable
+    temp/Windows-Update/Recycle-Bin bytes, with a safe in-widget clean behind
+    a confirm that reports a per-category breakdown, and a Details... dialog
+    showing what the last scan found - no terminal window anywhere in the flow)
+    next to a Disk Free dial per
     ready drive (added/removed live as USB sticks etc. connect and
     disconnect), the running Node.js processes with their ages and listening
     ports (click a port to open it in the browser, kill just one process after a confirm,
@@ -26,11 +32,19 @@
     reports Configured/Disabled from its documented mcp.json files since it
     has no headless status command) - each with a "Manage..." dialog
     (re-check, sign-in, catalog add, gap scan, Claude server removal, Kimi
-    config file). A side pull-tab (on whichever edge faces into the screen)
-    slides out a Git panel for the active project: branch + ahead/behind, a
+    config file). Side pull-tabs (on whichever edge faces into the screen)
+    slide out per-project panels - Git (branch + ahead/behind, a
     drawn commit graph (bright lanes, gradient S-curve links, branch/tag
     pills), fetch/pull/push, open-on-GitHub / Actions links, and the Git
-    Cleanup tool. The panel's own width is grip-resizable too.
+    Cleanup tool), Notes, Files, On-Deck - which form a single-flyout
+    carousel together with the gauge management panel (opening one closes the
+    others). A bottom-anchored TERMINAL tab slides out a REAL hosted terminal
+    (Windows Terminal when available, a classic pwsh/powershell console
+    window otherwise - its chrome stripped, owned by the widget window and
+    glued over the panel, so interactive CLIs like kimi/claude work exactly
+    as in a normal terminal) that opens in the active project's folder and
+    is INDEPENDENT of the carousel: it coexists with any open flyout,
+    sitting on the outside. Each panel's own width is grip-resizable too.
 
     The window is always work-area full height and always docked to the left
     or right screen edge (no free-floating rest state); its width is fixed
@@ -68,6 +82,16 @@ trap {
         $entry = "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] PID=$PID PSEdition=$($PSVersionTable.PSEdition) " +
                  "$($_.Exception.GetType().FullName): $($_.Exception.Message)`n$($_.InvocationInfo.PositionMessage)`n"
         Add-Content -LiteralPath $logPath -Value $entry -Encoding UTF8
+        # The log alone made startup deaths invisible (headless launch, no
+        # console): say out loud that the widget failed and where the detail is.
+        try {
+            Add-Type -AssemblyName PresentationFramework -ErrorAction SilentlyContinue
+            [System.Windows.MessageBox]::Show(
+                "The Northstar DevKit companion widget failed to start:`n`n$($_.Exception.Message)`n`nDetails: $logPath",
+                'Northstar DevKit Companion',
+                [System.Windows.MessageBoxButton]::OK,
+                [System.Windows.MessageBoxImage]::Error) | Out-Null
+        } catch { }
     } catch { }
     # No 'continue': a startup-time terminating error means the process is in
     # an unknown state, so let it keep propagating and exit rather than try
@@ -111,23 +135,32 @@ if ($PSHOME -like '*\WindowsApps\*') {
 # mutex from one session would invisibly veto launches in every other one.
 #
 # The mutex and event are created with an ACL granting authenticated users
-# Synchronize+Modify where the runtime supports it (Windows PowerShell - and
-# the MSIX hop above means that is the usual final host). The default DACL
-# of an elevated process does NOT let a normal-elevation process open its
-# kernel objects, so without this an accidental "Run as administrator"
-# widget turns every later normal launch into a silent no-op: it can
-# neither take the mutex nor summon the owner. With the ACL, summoning
-# works across the elevation boundary (UIPI blocks window messages, not
-# kernel-object signaling); when even opening the mutex is denied, the
-# blocked branch below says so out loud instead of just vanishing.
+# Synchronize+Modify on BOTH PowerShell editions (on pwsh 7 the
+# System.Threading.AccessControl assembly has to be loaded first). An
+# explicit ACL is belt-and-braces against cross-integrity/edge cases: an
+# instance created at a different elevation level (e.g. an accidental "Run
+# as administrator" launch) can otherwise leave normal launches unable to
+# take the mutex or summon the owner, turning every later launch into a
+# silent no-op. With the ACL, summoning works across the elevation boundary
+# (UIPI blocks window messages, not kernel-object signaling); when even
+# opening the mutex is denied, the blocked branch below says so out loud
+# instead of just vanishing.
 $script:InstanceMutexName = 'Local\NorthstarDevKitCompanion'
 $script:SummonEventName = 'Local\NorthstarDevKitCompanionSummon'
 $authUsersSid = New-Object System.Security.Principal.SecurityIdentifier([System.Security.Principal.WellKnownSidType]::AuthenticatedUserSid, $null)
 $script:InstanceMutex = $null
 $mutexCreated = $false
 $mutexBlocked = $false
+$script:CanAclKernelObjects = $true
+if ($PSVersionTable.PSEdition -ne 'Desktop') {
+    try {
+        Add-Type -AssemblyName System.Threading.AccessControl -ErrorAction Stop
+    } catch {
+        $script:CanAclKernelObjects = $false
+    }
+}
 try {
-    if ($PSVersionTable.PSEdition -eq 'Desktop') {
+    if ($script:CanAclKernelObjects) {
         $mutexSec = New-Object System.Security.AccessControl.MutexSecurity
         $mutexSec.AddAccessRule((New-Object System.Security.AccessControl.MutexAccessRule($authUsersSid,
             ([System.Security.AccessControl.MutexRights]::Synchronize -bor [System.Security.AccessControl.MutexRights]::Modify),
@@ -178,7 +211,7 @@ if ($script:InstanceMutex -and -not $mutexCreated) {
 $script:SummonEvent = $null
 try {
     $eventCreated = $false
-    if ($PSVersionTable.PSEdition -eq 'Desktop') {
+    if ($script:CanAclKernelObjects) {
         $eventSec = New-Object System.Security.AccessControl.EventWaitHandleSecurity
         $eventSec.AddAccessRule((New-Object System.Security.AccessControl.EventWaitHandleAccessRule($authUsersSid,
             ([System.Security.AccessControl.EventWaitHandleRights]::Synchronize -bor [System.Security.AccessControl.EventWaitHandleRights]::Modify),
@@ -197,15 +230,20 @@ try {
 $ErrorActionPreference = 'Stop'
 $GuiDir = $PSScriptRoot
 $ScriptDir = Split-Path -Parent $PSScriptRoot   # repo root
+$ToolsDir = Join-Path $ScriptDir "tools"        # categories + shared lib (4.0 layout)
 
-. (Join-Path $ScriptDir "lib\DevKit-Common.ps1")
-. (Join-Path $ScriptDir "lib\DevKit-McpList.ps1")
+. (Join-Path $ToolsDir "lib\DevKit-Common.ps1")
+. (Join-Path $ToolsDir "lib\DevKit-McpList.ps1")
 . (Join-Path $GuiDir "DevKit-GuiCore.ps1")
 . (Join-Path $GuiDir "DevKit-WidgetCore.ps1")
+# Built-in vector icon set (Files flyout tree + git graph pills). UI-side
+# only - the background runspaces (New-DevKitWidgetRunspace) load just
+# lib + WidgetCore, never this.
+. (Join-Path $GuiDir "DevKit-WidgetIcons.ps1")
 # Open-Repo is dot-source-safe by design (its InvocationName guard stops
 # before the interactive body) - this brings in ConvertTo-DevKitBrowsableUrl
 # for the GitHub flyout's "Open on GitHub" / "Actions" buttons.
-. (Join-Path $ScriptDir "workflow\Open-Repo.ps1")
+. (Join-Path $ToolsDir "workflow\Open-Repo.ps1")
 
 Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
@@ -256,14 +294,15 @@ $window = [Windows.Markup.XamlReader]::Load($nodeReader)
 
 $ui = @{}
 foreach ($name in @(
-    'RootBorder', 'TitleBar', 'WidgetLogoImage', 'BtnPin', 'BtnHide', 'BtnGitTab', 'ProjectCombo',
+    'RootBorder', 'TitleBar', 'WidgetLogoImage', 'BtnPin', 'BtnHide', 'BtnDevKitHub', 'BtnGitTab', 'ProjectCombo',
     'GitBadgeText', 'EnvDriftRow', 'EnvDriftText', 'BtnEnvFix', 'BtnEnvSilence', 'BtnEnvDriftUnsilence',
-    'CpuGaugeTrack', 'CpuGaugeArc', 'CpuGaugeValue', 'CpuGaugeSub',
-    'MemGaugeTrack', 'MemGaugeArc', 'MemGaugeValue', 'MemGaugeSub',
-    'GpuGaugeTrack', 'GpuGaugeArc', 'GpuGaugeValue', 'GpuGaugeSub', 'MetricsHint',
+    'CpuGaugeTrack', 'CpuGaugeArc', 'CpuGaugeValue', 'CpuGaugeSub', 'CpuGaugeStack',
+    'MemGaugeTrack', 'MemGaugeArc', 'MemGaugeValue', 'MemGaugeSub', 'MemGaugeStack',
+    'GpuGaugeTrack', 'GpuGaugeArc', 'GpuGaugeValue', 'GpuGaugeSub', 'GpuGaugeStack', 'MetricsHint',
+    'GaugesCard', 'JunkCard',
     'JunkGaugeTrack', 'JunkGaugeArc', 'JunkGaugeValue', 'JunkGaugeSub',
     'DiskGaugesPanel',
-    'BtnJunkClean', 'BtnJunkTool', 'JunkStatusText',
+    'BtnJunkClean', 'BtnJunkDetails', 'JunkStatusText',
     'NodeCountBadge', 'NodeCountBadgeText', 'NodeListPanel', 'OtherPortsText', 'ReservedPortsText',
     'QuickActionsExpander',
     'BtnClearNpmCache', 'BtnKillNode', 'BtnKillPort', 'BtnDoctor', 'BtnOpenDevKit',
@@ -273,13 +312,25 @@ foreach ($name in @(
     'SettingsExpander', 'ChkStartup', 'ChkTopmost', 'CmbDefaultView',
     'MainColumn',
     'GitFlyout', 'GitFlyoutInner', 'GitFlyoutGrip', 'GitFlyoutTitle', 'GitFlyoutBranch', 'GitGraphText', 'GitGraphCanvas', 'GitFlyoutStatus',
-    'UncommittedExpander', 'UncommittedCountBadgeText', 'UncommittedFilesPanel',
+    'UncommittedExpander', 'UncommittedCountBadgeText', 'UncommittedFilesPanel', 'CommitGraphExpander', 'CommitGraphCountBadgeText',
     'TabCommits', 'TabPullRequests', 'TabIssues', 'PrCountBadge', 'PrCountBadgeText', 'IssuesCountBadge', 'IssuesCountBadgeText',
     'GitTabCommitsView', 'GitTabPullRequestsView', 'GitTabIssuesView', 'PullRequestsPanel', 'IssuesPanel', 'GitFlyoutFooter',
     'BtnGitFetch', 'BtnGitPull', 'BtnGitPush', 'BtnGitOpenHub', 'BtnGitActions', 'BtnGitCleanup', 'BtnGitClose',
-    'SideTabStack', 'BtnNotesTab', 'NotesFlyout', 'NotesFlyoutInner', 'NotesFlyoutGrip',
+    'SideTabStack', 'SideTabCanvas', 'SideTabDivider', 'TabGroupFilesGit', 'TabGroupNotesOnDeck', 'TabGroupSepBig',
+    'BtnNotesTab', 'NotesFlyout', 'NotesFlyoutInner', 'NotesFlyoutGrip',
     'NotesFlyoutTitle', 'NotesFlyoutSub', 'BtnNoteAdd', 'BtnNotesClose', 'NotesPanel',
-    'LastUpdatedText', 'BtnRefreshMcp', 'ContentScroll'
+    'BtnFilesTab', 'FilesFlyout', 'FilesFlyoutInner', 'FilesFlyoutGrip',
+    'FilesFlyoutTitle', 'FilesFlyoutSub', 'BtnFilesClose', 'BtnFileNew', 'BtnFolderNew',
+    'BtnFilesRefresh', 'BtnFilesCollapse', 'FilesTree', 'FilesEmptyText', 'FilesFlyoutStatus',
+    'BtnOnDeckTab', 'OnDeckFlyout', 'OnDeckFlyoutInner', 'OnDeckFlyoutGrip',
+    'OnDeckFlyoutTitle', 'OnDeckFlyoutSub', 'BtnOnDeckClose', 'OnDeckNewText', 'BtnOnDeckAdd', 'OnDeckPanel',
+    'BtnTerminalTab', 'TermFlyout', 'TermFlyoutInner', 'TermFlyoutGrip',
+    'TermFlyoutTitle', 'TermFlyoutSub', 'TermNoProjectNote', 'TermHostSurface', 'TermHostStatus',
+    'BtnTermRestart', 'BtnTermClose', 'TermFlyoutStatus',
+    'ProcFlyout', 'ProcFlyoutInner', 'ProcFlyoutGrip',
+    'ProcFlyoutTitle', 'ProcFlyoutSub', 'BtnProcClose', 'ProcSummaryText', 'BtnProcFreeMem',
+    'ProcAdapterPanel', 'ProcRowsPanel', 'ProcFlyoutStatus',
+    'LastUpdatedText', 'BtnRefreshMcp', 'ContentScroll', 'BodyContent'
 )) {
     $ui[$name] = $window.FindName($name)
 }
@@ -322,9 +373,12 @@ $script:MaxWidgetWidth = 700
 # boundary against the widget) creep while the user dragged its OUTER grip.
 # Pinning Main makes that boundary immovable by construction.
 $script:WidgetContentWidth = 475
-# Everything in the window that is neither Main nor the flyout: RootBorder's
-# 8px margin and 1px border on each side, plus the 24px GIT pull-tab column.
-$script:WidgetChromeWidth = 42
+# Everything in the window that is neither Main nor a side panel: RootBorder's
+# 8px margin and 1px border on each side, plus the 26px side-tab strip column
+# (24px of tabs + the 2px SideTabDivider hairline; the terminal and carousel
+# panels are 0-width until opened and are counted separately via
+# Get-DevKitWidgetPanelExtra).
+$script:WidgetChromeWidth = 44
 
 function Sync-DevKitDockUi {
     $script:SuppressDockUi = $true
@@ -365,16 +419,34 @@ function Get-DevKitWidgetWidth {
     return $script:WidgetContentWidth
 }
 
+function Get-DevKitWidgetPanelExtra {
+    # The TARGET layout's extra width beyond chrome+Main: whichever CAROUSEL
+    # flyout is open (Git/Notes/Files/OnDeck/gauge panel - flag-driven, so it
+    # reads correctly even mid-slide), plus the independent terminal panel's
+    # width when open. Both Update-DevKitWidgetGeometry and every
+    # Set-DevKit*Flyout slide derive window.Width from these flags/width
+    # variables (the target layout), never from live animated values - which
+    # is what lets a terminal slide and a carousel slide safely overlap: when
+    # the newer BeginAnimation supersedes the older one on window.Width/Left,
+    # both were chasing flag-derived totals, so whichever wins converges to
+    # the same correct end state.
+    $extra = 0
+    if ($script:GitFlyoutOpen) { $extra += $script:FlyoutWidth }
+    elseif ($script:NotesFlyoutOpen) { $extra += $script:NotesFlyoutWidth }
+    elseif ($script:FilesFlyoutOpen) { $extra += $script:FilesFlyoutWidth }
+    elseif ($script:OnDeckFlyoutOpen) { $extra += $script:OnDeckFlyoutWidth }
+    elseif ($script:ProcPanelKind) { $extra += $script:ProcFlyoutWidth }
+    if ($script:TermFlyoutOpen) { $extra += $script:TermFlyoutWidth }
+    return $extra
+}
+
 function Update-DevKitWidgetGeometry {
     # The one place window width/position is decided, computed ABSOLUTELY from
     # the fixed parts rather than by nudging the current values: width is
-    # exactly chrome + Main + (flyout, when open), and the docked edge is
+    # exactly chrome + Main + (open side panels), and the docked edge is
     # re-pinned from the work area. Deriving it fresh every time is what keeps
     # many small drag steps from accumulating rounding drift.
-    $flyout = 0
-    if ($script:GitFlyoutOpen) { $flyout = $script:FlyoutWidth }
-    elseif ($script:NotesFlyoutOpen) { $flyout = $script:NotesFlyoutWidth }
-    $window.Width = $script:WidgetChromeWidth + $script:WidgetContentWidth + $flyout
+    $window.Width = $script:WidgetChromeWidth + $script:WidgetContentWidth + (Get-DevKitWidgetPanelExtra)
     try {
         $wa = [System.Windows.SystemParameters]::WorkArea
         if ($script:DockMode -eq 'Right') {
@@ -386,11 +458,12 @@ function Update-DevKitWidgetGeometry {
 }
 
 function Save-DevKitWidgetWidthSetting {
-    # Persist the CONTENT width - the GitHub flyout's extra pixels (see
-    # Get-DevKitWidgetFlyoutExtra) are temporary and never saved.
+    # Persist the CONTENT width - every side panel's extra pixels (carousel
+    # flyout + terminal, see Get-DevKitWidgetPanelExtra) are temporary and
+    # never saved.
     try {
         $settings = Get-DevKitSettings
-        $settings.preferences.widgetWidth = [int][math]::Round($window.Width - (Get-DevKitWidgetFlyoutExtra))
+        $settings.preferences.widgetWidth = [int][math]::Round($window.Width - (Get-DevKitWidgetPanelExtra))
         Set-DevKitSettings -Settings $settings
     } catch { }
 }
@@ -402,7 +475,7 @@ function Set-DevKitWidgetDock {
     # needlessly closing an already-open Git flyout for a no-op dock change.
     if ($Mode -eq $script:DockMode) { return }
     try {
-        # A dock-side change while the Git flyout is open would otherwise
+        # A dock-side change while a flyout is open would otherwise
         # have to reflow a live-open panel across sides mid-flight - simplest
         # correct behavior is to close it first; it reopens fresh on the
         # newly-correct side next time. -Instant snaps the close straight to
@@ -411,52 +484,96 @@ function Set-DevKitWidgetDock {
         # otherwise be fought/overridden by an in-flight close animation still
         # chasing the OLD side's geometry (WPF animations win over local value
         # sets while running), and its Completed handler would later pin
-        # window.Left back to that stale OLD-side target.
+        # window.Left back to that stale OLD-side target. This covers the
+        # independent terminal panel too - it reflows sides no better than
+        # the carousel panels do.
         if ($script:GitFlyoutOpen) { Set-DevKitGitFlyout -Open $false -Instant }
         if ($script:NotesFlyoutOpen) { Set-DevKitNotesFlyout -Open $false -Instant }
+        if ($script:FilesFlyoutOpen) { Set-DevKitFilesFlyout -Open $false -Instant }
+        if ($script:OnDeckFlyoutOpen) { Set-DevKitOnDeckFlyout -Open $false -Instant }
+        if ($script:ProcPanelKind) { Set-DevKitProcPanel -Open $false -Instant }
+        if ($script:TermFlyoutOpen) { Set-DevKitTerminalFlyout -Open $false -Instant }
         $wa = [System.Windows.SystemParameters]::WorkArea
         $script:DockMode = $Mode
         # Full height in every mode - modes only set horizontal placement.
         $window.Top = $wa.Top
         $window.Height = $wa.Height
         Update-DevKitWidgetGeometry
-        # The Git pull-tab and flyout always sit on whichever side FACES INTO
-        # the screen - i.e. mirrors the dock side: docked right -> west slot
-        # (flyout column 1, tab column 0 - the window's true left edge, flyout
-        # opens between the tab and Main); docked left -> east slot (flyout
-        # column 3, tab column 4 - the window's true right edge). Each of
-        # GitFlyout/BtnGitTab now owns its own dedicated column (see the root
-        # Grid's 5-column layout in the XAML), so they never overlap Main or
-        # each other. The flyout's grip sits on its OUTER edge - the side
+        # The pull-tabs and panels always sit on whichever side FACES INTO
+        # the screen - i.e. mirrors the dock side: docked right -> west slots
+        # (terminal column 0, tab strip column 1, carousel flyout column 2);
+        # docked left -> east slots (carousel column 4, tab strip column 5,
+        # terminal column 6). The terminal column is FARTHER OUT than the tab
+        # strip so the terminal panel always sits on the outside when it
+        # coexists with a carousel flyout: docked right, west-to-east order is
+        # [terminal][tabs][flyout][widget]. Each panel owns (or shares, for
+        # the mutually-exclusive carousel) a dedicated column, so nothing ever
+        # overlaps Main. A panel's grip sits on its OUTER edge - the side
         # facing the tab/window edge, away from Main - so it flips opposite
-        # to the tab's own facing side: west flyout's outer edge is its LEFT
-        # (grip HorizontalAlignment="Left"), east flyout's outer edge is its
+        # to the tab's own facing side: west panels' outer edge is their LEFT
+        # (grip HorizontalAlignment="Left"), east panels' outer edge is their
         # RIGHT (grip HorizontalAlignment="Right").
         if ($Mode -eq 'Right') {
-            [Windows.Controls.Grid]::SetColumn($ui.GitFlyout, 1)
-            [Windows.Controls.Grid]::SetColumn($ui.NotesFlyout, 1)
-            [Windows.Controls.Grid]::SetColumn($ui.SideTabStack, 0)
+            [Windows.Controls.Grid]::SetColumn($ui.GitFlyout, 2)
+            [Windows.Controls.Grid]::SetColumn($ui.NotesFlyout, 2)
+            [Windows.Controls.Grid]::SetColumn($ui.FilesFlyout, 2)
+            [Windows.Controls.Grid]::SetColumn($ui.OnDeckFlyout, 2)
+            [Windows.Controls.Grid]::SetColumn($ui.ProcFlyout, 2)
+            [Windows.Controls.Grid]::SetColumn($ui.TermFlyout, 0)
+            [Windows.Controls.Grid]::SetColumn($ui.SideTabStack, 1)
             $ui.SideTabStack.HorizontalAlignment = 'Left'
+            # The tab buttons hug the window's outer edge; the divider
+            # hairline sits on the strip's widget-facing (inner) edge.
+            $ui.SideTabCanvas.HorizontalAlignment = 'Left'
+            $ui.SideTabDivider.HorizontalAlignment = 'Right'
             $ui.BtnGitTab.Style = Get-WidgetResource 'GitTabButtonWest'
             $ui.BtnNotesTab.Style = Get-WidgetResource 'NotesTabButtonWest'
+            $ui.BtnFilesTab.Style = Get-WidgetResource 'FilesTabButtonWest'
+            $ui.BtnOnDeckTab.Style = Get-WidgetResource 'OnDeckTabButtonWest'
+            $ui.BtnTerminalTab.Style = Get-WidgetResource 'TerminalTabButtonWest'
             $ui.GitFlyoutGrip.HorizontalAlignment = 'Left'
             $ui.NotesFlyoutGrip.HorizontalAlignment = 'Left'
+            $ui.FilesFlyoutGrip.HorizontalAlignment = 'Left'
+            $ui.OnDeckFlyoutGrip.HorizontalAlignment = 'Left'
+            $ui.ProcFlyoutGrip.HorizontalAlignment = 'Left'
+            $ui.TermFlyoutGrip.HorizontalAlignment = 'Left'
             # Panel content hugs the INNER edge (the boundary against Main) so
             # the open/close reveal unfurls outward from the widget instead of
             # the content sliding sideways under the clip.
             $ui.GitFlyoutInner.HorizontalAlignment = 'Right'
             $ui.NotesFlyoutInner.HorizontalAlignment = 'Right'
+            $ui.FilesFlyoutInner.HorizontalAlignment = 'Right'
+            $ui.OnDeckFlyoutInner.HorizontalAlignment = 'Right'
+            $ui.ProcFlyoutInner.HorizontalAlignment = 'Right'
+            $ui.TermFlyoutInner.HorizontalAlignment = 'Right'
         } else {
-            [Windows.Controls.Grid]::SetColumn($ui.GitFlyout, 3)
-            [Windows.Controls.Grid]::SetColumn($ui.NotesFlyout, 3)
-            [Windows.Controls.Grid]::SetColumn($ui.SideTabStack, 4)
+            [Windows.Controls.Grid]::SetColumn($ui.GitFlyout, 4)
+            [Windows.Controls.Grid]::SetColumn($ui.NotesFlyout, 4)
+            [Windows.Controls.Grid]::SetColumn($ui.FilesFlyout, 4)
+            [Windows.Controls.Grid]::SetColumn($ui.OnDeckFlyout, 4)
+            [Windows.Controls.Grid]::SetColumn($ui.ProcFlyout, 4)
+            [Windows.Controls.Grid]::SetColumn($ui.TermFlyout, 6)
+            [Windows.Controls.Grid]::SetColumn($ui.SideTabStack, 5)
             $ui.SideTabStack.HorizontalAlignment = 'Right'
+            $ui.SideTabCanvas.HorizontalAlignment = 'Right'
+            $ui.SideTabDivider.HorizontalAlignment = 'Left'
             $ui.BtnGitTab.Style = Get-WidgetResource 'GitTabButtonEast'
             $ui.BtnNotesTab.Style = Get-WidgetResource 'NotesTabButtonEast'
+            $ui.BtnFilesTab.Style = Get-WidgetResource 'FilesTabButtonEast'
+            $ui.BtnOnDeckTab.Style = Get-WidgetResource 'OnDeckTabButtonEast'
+            $ui.BtnTerminalTab.Style = Get-WidgetResource 'TerminalTabButtonEast'
             $ui.GitFlyoutGrip.HorizontalAlignment = 'Right'
             $ui.NotesFlyoutGrip.HorizontalAlignment = 'Right'
+            $ui.FilesFlyoutGrip.HorizontalAlignment = 'Right'
+            $ui.OnDeckFlyoutGrip.HorizontalAlignment = 'Right'
+            $ui.ProcFlyoutGrip.HorizontalAlignment = 'Right'
+            $ui.TermFlyoutGrip.HorizontalAlignment = 'Right'
             $ui.GitFlyoutInner.HorizontalAlignment = 'Left'
             $ui.NotesFlyoutInner.HorizontalAlignment = 'Left'
+            $ui.FilesFlyoutInner.HorizontalAlignment = 'Left'
+            $ui.OnDeckFlyoutInner.HorizontalAlignment = 'Left'
+            $ui.ProcFlyoutInner.HorizontalAlignment = 'Left'
+            $ui.TermFlyoutInner.HorizontalAlignment = 'Left'
         }
     } catch { }
     Sync-DevKitDockUi
@@ -471,6 +588,132 @@ $ui.CmbDefaultView.Add_SelectionChanged({
     Set-DevKitWidgetDock -Mode $mode
     Save-DevKitWidgetDockSetting -Mode $mode
 })
+
+# ==================== SIDE-TAB SECTION ANCHORING ====================
+# The strip's tabs sit ACROSS FROM the body section they belong to instead of
+# in one centered stack: FILES+GIT centered on the gauges card (GaugesCard),
+# NOTES+ON DECK centered on the SYSTEM JUNK/drives card (JunkCard), TERMINAL
+# centered on the QUICK ACTIONS expander. The groups live on a full-height
+# Canvas (SideTabCanvas) and are positioned purely by Canvas.Top.
+# POSITIONS ARE FIXED, NOT SCROLL-TRACKED: each anchor's center is read at
+# SCROLL-OFFSET ZERO (Get-DevKitAnchorCenterY adds ContentScroll's live
+# VerticalOffset back onto the rendered position), so scrolling the body
+# under the strip never moves a tab - there is deliberately NO
+# ScrollChanged hook. Positions are recomputed only on structural changes
+# (cheap, event-driven; NO timers): window SizeChanged (the dock-mode
+# height set), BodyContent LayoutUpdated (content layout changes that shift
+# the un-scrolled layout - expander opens, node-list rebuilds, badge rows
+# appearing), and ContentRendered once at startup.
+# Clamp invariants (Resolve-DevKitSideTabTops): the stack order FILES+GIT ->
+# NOTES+ON DECK -> TERMINAL is fixed, consecutive groups always keep at
+# least their gap pixels (never overlap), nothing goes above/below the
+# strip, and on a very short window the gaps give first, then the stack
+# compresses against the top/bottom - tabs may end up touching but are
+# never pushed off-screen. The math is side-independent (only Y), so both
+# dock sides behave identically.
+
+function Get-DevKitAnchorCenterY {
+    # The anchor element's vertical center in the strip canvas's coordinate
+    # space AS IF THE BODY WERE SCROLLED TO THE TOP: TransformToVisual (not
+    # TransformToAncestor - the anchor lives in the Main column, the canvas
+    # in the tab column, neither is an ancestor of the other) returns the
+    # live RENDERED position, which scrolling shifted up by the scroll
+    # offset, so ContentScroll's VerticalOffset is added back on. That makes
+    # the reading scroll-independent: the same layout yields the same center
+    # no matter where the user has scrolled, which is exactly what keeps the
+    # tabs fixed while the body scrolls underneath them. $null when the
+    # visual tree can't transform yet (early load) so the caller can fall
+    # back to a stack-order estimate.
+    param([Windows.FrameworkElement]$Anchor, [Windows.FrameworkElement]$RelativeTo)
+    try {
+        if ($null -eq $Anchor -or $null -eq $RelativeTo -or -not $Anchor.IsLoaded) { return $null }
+        $origin = $Anchor.TransformToVisual($RelativeTo).Transform([Windows.Point]::new(0, 0))
+        $offset = 0.0
+        if ($ui.ContentScroll) { $offset = $ui.ContentScroll.VerticalOffset }
+        return $origin.Y + $offset + ($Anchor.ActualHeight / 2.0)
+    } catch { return $null }
+}
+
+function Resolve-DevKitSideTabTops {
+    # Pure clamp: given desired tops and the strip height, return the three
+    # clamped Canvas.Top values in fixed stack order with non-overlap gaps.
+    # Forward pass pins each group between the previous group's bottom and
+    # the strip bottom; the backward pass then pulls the stack back up if the
+    # forward clamp overflowed the bottom (near-full strips). Callers shrink
+    # the gaps to fit BEFORE calling, so g1+g2+heights never exceeds H here.
+    param(
+        [double]$H,
+        [double]$D1, [double]$H1,
+        [double]$D2, [double]$H2,
+        [double]$D3, [double]$H3,
+        [double]$Gap12, [double]$Gap23
+    )
+    $t1 = [math]::Min([math]::Max($D1, 0), [math]::Max(0, $H - $H1))
+    $t2min = $t1 + $H1 + $Gap12
+    $t2 = [math]::Min([math]::Max($D2, $t2min), [math]::Max($t2min, $H - $H2))
+    $t3min = $t2 + $H2 + $Gap23
+    $t3 = [math]::Min([math]::Max($D3, $t3min), [math]::Max($t3min, $H - $H3))
+    # Backward pass: only moves anything when the forward pass was forced
+    # past the strip bottom (content nearly fills the strip).
+    if ($t3 + $H3 -gt $H) { $t3 = [math]::Max(0, $H - $H3) }
+    if ($t2 + $H2 + $Gap23 -gt $t3) { $t2 = [math]::Max(0, $t3 - $Gap23 - $H2) }
+    if ($t1 + $H1 + $Gap12 -gt $t2) { $t1 = [math]::Max(0, $t2 - $Gap12 - $H1) }
+    return @($t1, $t2, $t3)
+}
+
+function Update-DevKitSideTabLayout {
+    try {
+        $canvas = $ui.SideTabCanvas
+        if ($null -eq $canvas -or $canvas.ActualHeight -le 0) { return }
+        $H = $canvas.ActualHeight
+        $g1 = $ui.TabGroupFilesGit; $g2 = $ui.TabGroupNotesOnDeck; $tb = $ui.BtnTerminalTab
+        if ($null -eq $g1 -or $null -eq $g2 -or $null -eq $tb) { return }
+        $h1 = $g1.ActualHeight; $h2 = $g2.ActualHeight; $h3 = $tb.ActualHeight
+        if ($h1 -le 0 -or $h2 -le 0 -or $h3 -le 0) { return }   # pre-layout
+        # Group 2 leads with the tall separator (kept from the old centered
+        # stack so a compressed strip keeps the same group break), so only
+        # its BUTTONS portion is centered on the anchor.
+        $sepBig = 0.0
+        if ($ui.TabGroupSepBig) { $sepBig = $ui.TabGroupSepBig.ActualHeight }
+        # Scroll-compensated (offset-zero) anchor centers - see
+        # Get-DevKitAnchorCenterY. The same un-scrolled layout therefore
+        # always yields the same tab tops, scrolled or not.
+        $c1 = Get-DevKitAnchorCenterY -Anchor $ui.GaugesCard -RelativeTo $canvas
+        $c2 = Get-DevKitAnchorCenterY -Anchor $ui.JunkCard -RelativeTo $canvas
+        $c3 = Get-DevKitAnchorCenterY -Anchor $ui.QuickActionsExpander -RelativeTo $canvas
+        # Fallbacks (anchor not transformable yet) keep the stack order with
+        # sensible gaps; the very next SizeChanged replaces them.
+        $d1 = if ($null -ne $c1) { $c1 - $h1 / 2.0 } else { 0.0 }
+        $d2 = if ($null -ne $c2) { $c2 - $sepBig - ($h2 - $sepBig) / 2.0 } else { $d1 + $h1 + 24.0 }
+        $d3 = if ($null -ne $c3) { $c3 - $h3 / 2.0 } else { $d2 + $h2 + 8.0 }
+        # Gaps: none needed after group 1 (group 2's leading tall separator IS
+        # the visual break) and 8px before TERMINAL; the gap yields first on
+        # very short strips so the groups themselves never overlap.
+        $gap12 = 0.0; $gap23 = 8.0
+        if (($h1 + $gap12 + $h2 + $gap23 + $h3) -gt $H) { $gap23 = 0.0 }
+        $tops = Resolve-DevKitSideTabTops -H $H -D1 $d1 -H1 $h1 -D2 $d2 -H2 $h2 -D3 $d3 -H3 $h3 -Gap12 $gap12 -Gap23 $gap23
+        # Rounded to whole DIPs so unchanged results set the same value and
+        # never re-invalidate layout on a no-change structural event.
+        [Windows.Controls.Canvas]::SetTop($g1, [double][math]::Round($tops[0]))
+        [Windows.Controls.Canvas]::SetTop($g2, [double][math]::Round($tops[1]))
+        [Windows.Controls.Canvas]::SetTop($tb, [double][math]::Round($tops[2]))
+    } catch { }
+}
+
+# Recompute triggers - structural changes only, NEVER scroll: BodyContent's
+# LayoutUpdated fires after any layout pass that actually changed the body
+# (expander opens, node-list rebuilds, badge rows appearing, text rewraps) -
+# and, raised AFTER the pass completes, it always reads post-layout anchor
+# positions. Pure scrolling never fires it (the ScrollViewer translates the
+# content; it does not re-layout it), and the scroll-compensated anchor read
+# would return the same tops anyway. Window SizeChanged covers the dock-mode
+# height set, ContentRendered places the tabs once at startup. SetTop writes
+# are value-rounded no-ops when nothing moved, so a fire changes no layout
+# and cannot self-trigger. There is intentionally no ScrollChanged hook and
+# no timer.
+$ui.BodyContent.Add_LayoutUpdated({ Update-DevKitSideTabLayout })
+$window.Add_SizeChanged({ Update-DevKitSideTabLayout })
+$window.Add_ContentRendered({ Update-DevKitSideTabLayout })
 
 function Get-WidgetResource([string]$Key) { return $window.FindResource($Key) }
 
@@ -528,7 +771,7 @@ public class DevKitDarkMenuColors : ProfessionalColorTable {
 $script:ReallyClose = $false
 # The window is shown at startup, so the toggle item starts as 'Hide'.
 $script:TrayShowItem = $trayMenu.Items.Add('Hide Companion')
-$trayMenu.Items.Add('Open DevKit') | Out-Null
+$trayMenu.Items.Add('Open DevKit Control Center') | Out-Null
 [void]$trayMenu.Items.Add('-')
 $script:TrayStartupItem = $trayMenu.Items.Add('Start with Windows')
 [void]$trayMenu.Items.Add('-')
@@ -540,10 +783,49 @@ function Show-DevKitWidget {
     $window.WindowState = 'Normal'
     $window.Activate() | Out-Null
     $script:TrayShowItem.Text = 'Hide Companion'
+    # Wake from the hidden-to-tray sleep (see Hide-DevKitWidget): resume the
+    # refresh timers and kick a metrics cycle right away so the dials aren't
+    # showing pre-hide readings for the first couple of seconds.
+    if ($script:FastTimer -and -not $script:FastTimer.IsEnabled) {
+        $script:FastTimer.Start()
+        $script:SlowTimer.Start()
+        if (-not $script:MetricsBusy) { Start-DevKitMetricsRefresh }
+    }
+    # The hosted terminal's SESSION was left running across the hide: re-show
+    # its window over the panel and resume its rect sync (stopped on hide).
+    if ($script:TermFlyoutOpen -and $null -ne $script:TermHostedHwnd -and $script:TermHostedHwnd -ne [IntPtr]::Zero) {
+        try { [DevKitTermWin32]::ShowWindow($script:TermHostedHwnd, [DevKitTermWin32]::SW_SHOWNA) | Out-Null } catch { }
+        if ($script:TermSyncTimer -and -not $script:TermSyncTimer.IsEnabled) { $script:TermSyncTimer.Start() }
+        try { Sync-DevKitHostedTerminalRect } catch { }
+    }
 }
 function Hide-DevKitWidget {
     $window.Hide()
     $script:TrayShowItem.Text = 'Show Companion'
+    # Hidden-to-tray sleep: stop every refresh timer. A tray-resident widget
+    # must cost the machine ~nothing while it isn't visible - no metrics
+    # cycles, no junk rescans, no git/env/MCP checks. The SummonTimer keeps
+    # running (a 750ms WaitOne(0), effectively free) because it's the wake-up
+    # path; any in-flight job simply completes and renders harmlessly into
+    # the hidden window, and its result poll resumes on Show.
+    if ($script:FastTimer) { $script:FastTimer.Stop() }
+    if ($script:SlowTimer) { $script:SlowTimer.Stop() }
+    # An open gauge management PANEL (Task Manager-style process list) must
+    # close too: its 3s refresh jobs are collected by the FastTimer's
+    # work-runspace poll, which just stopped - a panel left open on a hidden
+    # widget would keep spawning jobs whose results are never picked up,
+    # wedging the shared work runspace until each 30s timeout. The close also
+    # stops the panel's own DispatcherTimer (see Set-DevKitProcPanel).
+    Close-DevKitProcessDialogs
+    # The hosted terminal's SESSION survives a hide (it is not a timer-driven
+    # REPL) - only its window is hidden alongside the widget, and its rect
+    # sync stops so a tray-resident widget keeps costing ~nothing. (The window
+    # manager hides owned windows with their owner anyway; the explicit
+    # SW_HIDE just makes it deterministic.)
+    if ($null -ne $script:TermHostedHwnd -and $script:TermHostedHwnd -ne [IntPtr]::Zero) {
+        try { [DevKitTermWin32]::ShowWindow($script:TermHostedHwnd, [DevKitTermWin32]::SW_HIDE) | Out-Null } catch { }
+    }
+    if ($script:TermSyncTimer) { $script:TermSyncTimer.Stop() }
     if (-not $script:TrayHintShown) {
         $script:TrayHintShown = $true
         $script:TrayIcon.BalloonTipTitle = 'Northstar DevKit Companion'
@@ -583,30 +865,50 @@ $script:SuppressStartupUi = $false
 function Get-DevKitStartupEnabled {
     return $null -ne (Get-ItemProperty -Path $script:RunKeyPath -Name $script:RunValueName -ErrorAction SilentlyContinue)
 }
+function Get-DevKitStartupCommand {
+    # The exact Run-value string both registration and self-healing use, so
+    # they can never disagree about what "correct" looks like. Point at the
+    # .vbs startup launcher, NOT a resolved pwsh.exe path (Store-packaged
+    # pwsh lives in a version-stamped folder that moves on every background
+    # auto-update, so a baked-in path goes stale and the launch fails with
+    # no visible error) and NOT a .bat (a Run-key .bat flashes a console
+    # window at every sign-in). The 45 is a startup delay in seconds: at
+    # sign-in powershell.exe can fail to initialize with loader error
+    # 0xC0000142 while the logon storm is still settling - the identical
+    # launch works moments later - so the launcher waits it out and retries
+    # via its pid-file handshake. Every path baked in here is stable:
+    # wscript.exe (System32) and the .vbs itself (moves only if DevKit is
+    # reinstalled/moved - which the self-heal below then repairs).
+    $launcher = Join-Path $GuiDir 'Start-Widget-Startup.vbs'
+    $wscript = Join-Path ([Environment]::SystemDirectory) 'wscript.exe'
+    return "`"$wscript`" `"$launcher`" 45"
+}
 function Set-DevKitStartupEnabled {
     param([bool]$Enabled)
     try {
         if ($Enabled) {
-            # Point at the .vbs startup launcher, NOT a resolved pwsh.exe
-            # path (Store-packaged pwsh lives in a version-stamped folder
-            # that moves on every background auto-update, so a baked-in
-            # path goes stale and the launch fails with no visible error)
-            # and NOT a .bat (a Run-key .bat flashes a console window at
-            # every sign-in). The 45 is a startup delay in seconds: at
-            # sign-in powershell.exe can fail to initialize with loader
-            # error 0xC0000142 while the logon storm is still settling -
-            # the identical launch works moments later - so the launcher
-            # waits it out and retries fast failures. Every path baked in
-            # here is stable: wscript.exe (System32) and the .vbs itself
-            # (moves only if DevKit is reinstalled/moved, which
-            # re-registers Startup anyway).
-            $launcher = Join-Path $GuiDir 'Start-Widget-Startup.vbs'
-            $wscript = Join-Path ([Environment]::SystemDirectory) 'wscript.exe'
-            Set-ItemProperty -Path $script:RunKeyPath -Name $script:RunValueName -Value "`"$wscript`" `"$launcher`" 45"
+            Set-ItemProperty -Path $script:RunKeyPath -Name $script:RunValueName -Value (Get-DevKitStartupCommand)
         } else {
             Remove-ItemProperty -Path $script:RunKeyPath -Name $script:RunValueName -ErrorAction SilentlyContinue
         }
-    } catch { }
+    } catch {
+        # Never swallow this silently - a failed write with the checkbox
+        # still showing "on" is how "Start with Windows just stopped working"
+        # bugs stay invisible. Balloon tip first, MessageBox as fallback.
+        try {
+            $script:TrayIcon.BalloonTipTitle = 'Northstar DevKit Companion'
+            $script:TrayIcon.BalloonTipText = "Could not update the 'Start with Windows' setting: $($_.Exception.Message)"
+            $script:TrayIcon.ShowBalloonTip(8000)
+        } catch {
+            try {
+                [System.Windows.MessageBox]::Show(
+                    "Could not update the 'Start with Windows' setting:`n`n$($_.Exception.Message)",
+                    'Northstar DevKit Companion',
+                    [System.Windows.MessageBoxButton]::OK,
+                    [System.Windows.MessageBoxImage]::Warning) | Out-Null
+            } catch { }
+        }
+    }
     Sync-DevKitStartupUi
 }
 function Sync-DevKitStartupUi {
@@ -616,10 +918,32 @@ function Sync-DevKitStartupUi {
     $ui.ChkStartup.IsChecked = $enabled
     $script:SuppressStartupUi = $false
 }
+function Repair-DevKitStartupRegistration {
+    # Self-heal a stale Run value: the registered command bakes in the .vbs
+    # absolute path, and nothing re-registers it when DevKit is moved or
+    # reinstalled elsewhere - the old entry then pops "Can not find script
+    # file" at every logon. If startup is enabled but the value differs from
+    # what this install would write, or the .vbs it points at is gone,
+    # rewrite it. Silent on success and on failure (the next widget start
+    # simply tries again).
+    if (-not (Get-DevKitStartupEnabled)) { return }
+    try {
+        $expected = Get-DevKitStartupCommand
+        $current = (Get-ItemProperty -Path $script:RunKeyPath -Name $script:RunValueName -ErrorAction Stop).$($script:RunValueName)
+        $stale = ($current -ne $expected)
+        if (-not $stale -and $current -match '"([^"]+\.vbs)"') {
+            $stale = -not (Test-Path $Matches[1])
+        }
+        if ($stale) {
+            Set-ItemProperty -Path $script:RunKeyPath -Name $script:RunValueName -Value $expected
+        }
+    } catch { }
+}
 
 $script:TrayStartupItem.Add_Click({ Set-DevKitStartupEnabled -Enabled (-not (Get-DevKitStartupEnabled)) })
 $ui.ChkStartup.Add_Checked({ if (-not $script:SuppressStartupUi) { Set-DevKitStartupEnabled -Enabled $true } })
 $ui.ChkStartup.Add_Unchecked({ if (-not $script:SuppressStartupUi) { Set-DevKitStartupEnabled -Enabled $false } })
+Repair-DevKitStartupRegistration
 Sync-DevKitStartupUi
 
 $trayMenu.Items[5].Add_Click({
@@ -660,17 +984,16 @@ $ui.TitleBar.Add_MouseLeftButtonUp({
     } catch { }
 })
 
-# ==================== FLYOUT WIDTH GRIPS (GIT + NOTES) ====================
+# ==================== PANEL WIDTH GRIPS (CAROUSEL FLYOUTS + TERMINAL) ====================
 # The main widget window is NOT interactively width-resizable - its width
 # comes solely from the persisted preferences.widgetWidth, applied once at
 # startup via Get-DevKitWidgetWidth (window.Width assignment near the bottom
-# of this file). Only the flyouts keep drag-to-resize grips, each on its own
-# OUTER edge (the far side from the main widget, facing the pull-tab/window
-# edge - see GitFlyoutGrip/NotesFlyoutGrip in the XAML). A drag only ever
-# adjusts that flyout's own width variable - the main content width is
-# untouched. One shared set of drag functions serves both flyouts, routed
-# by $Kind ('Git'/'Notes'); only one can be mid-drag at a time because only
-# one is ever open at a time.
+# of this file). Only the side panels keep drag-to-resize grips, each on its
+# own OUTER edge (the far side from the main widget, facing the pull-tab/
+# window edge). A drag only ever adjusts that panel's own width variable -
+# the main content width is untouched. One shared set of drag functions
+# serves all six panels (Git/Notes/Files/OnDeck carousel flyouts, the gauge
+# management panel, and the independent terminal panel), routed by $Kind.
 $script:FlyoutResizeActive = $false
 $script:FlyoutResizeKind = 'Git'
 $script:FlyoutResizeStartX = 0.0
@@ -682,6 +1005,18 @@ function Get-DevKitFlyoutKindParts {
     param([string]$Kind)
     if ($Kind -eq 'Notes') {
         return @{ Border = $ui.NotesFlyout; Inner = $ui.NotesFlyoutInner; Width = $script:NotesFlyoutWidth }
+    }
+    if ($Kind -eq 'Files') {
+        return @{ Border = $ui.FilesFlyout; Inner = $ui.FilesFlyoutInner; Width = $script:FilesFlyoutWidth }
+    }
+    if ($Kind -eq 'OnDeck') {
+        return @{ Border = $ui.OnDeckFlyout; Inner = $ui.OnDeckFlyoutInner; Width = $script:OnDeckFlyoutWidth }
+    }
+    if ($Kind -eq 'Proc') {
+        return @{ Border = $ui.ProcFlyout; Inner = $ui.ProcFlyoutInner; Width = $script:ProcFlyoutWidth }
+    }
+    if ($Kind -eq 'Terminal') {
+        return @{ Border = $ui.TermFlyout; Inner = $ui.TermFlyoutInner; Width = $script:TermFlyoutWidth }
     }
     return @{ Border = $ui.GitFlyout; Inner = $ui.GitFlyoutInner; Width = $script:FlyoutWidth }
 }
@@ -725,7 +1060,12 @@ function Update-DevKitFlyoutGripDrag {
     $newWidth = [math]::Min($script:MaxFlyoutWidth, [math]::Max($script:MinFlyoutWidth, $newWidth))
     $parts = Get-DevKitFlyoutKindParts -Kind $script:FlyoutResizeKind
     if ($newWidth -eq $parts.Width) { return }
-    if ($script:FlyoutResizeKind -eq 'Notes') { $script:NotesFlyoutWidth = $newWidth } else { $script:FlyoutWidth = $newWidth }
+    if ($script:FlyoutResizeKind -eq 'Notes') { $script:NotesFlyoutWidth = $newWidth }
+    elseif ($script:FlyoutResizeKind -eq 'Files') { $script:FilesFlyoutWidth = $newWidth }
+    elseif ($script:FlyoutResizeKind -eq 'OnDeck') { $script:OnDeckFlyoutWidth = $newWidth }
+    elseif ($script:FlyoutResizeKind -eq 'Proc') { $script:ProcFlyoutWidth = $newWidth }
+    elseif ($script:FlyoutResizeKind -eq 'Terminal') { $script:TermFlyoutWidth = $newWidth }
+    else { $script:FlyoutWidth = $newWidth }
     $parts.Border.Width = $newWidth
     $parts.Inner.Width = $newWidth
     # Main is a fixed column and the docked edge is re-pinned from the work
@@ -739,7 +1079,12 @@ function Stop-DevKitFlyoutGripDrag {
     if (-not $script:FlyoutResizeActive) { return }
     $script:FlyoutResizeActive = $false
     try { $Sender.ReleaseMouseCapture() } catch { }
-    if ($script:FlyoutResizeKind -eq 'Notes') { Save-DevKitNotesFlyoutWidthSetting } else { Save-DevKitGitFlyoutWidthSetting }
+    if ($script:FlyoutResizeKind -eq 'Notes') { Save-DevKitNotesFlyoutWidthSetting }
+    elseif ($script:FlyoutResizeKind -eq 'Files') { Save-DevKitFilesFlyoutWidthSetting }
+    elseif ($script:FlyoutResizeKind -eq 'OnDeck') { Save-DevKitOnDeckFlyoutWidthSetting }
+    elseif ($script:FlyoutResizeKind -eq 'Proc') { Save-DevKitProcFlyoutWidthSetting }
+    elseif ($script:FlyoutResizeKind -eq 'Terminal') { Save-DevKitTerminalFlyoutWidthSetting }
+    else { Save-DevKitGitFlyoutWidthSetting }
 }
 
 $ui.GitFlyoutGrip.Add_MouseLeftButtonDown({ param($s, $e) Start-DevKitFlyoutGripDrag -Sender $s -MouseArgs $e -Kind 'Git' })
@@ -753,6 +1098,30 @@ $ui.NotesFlyoutGrip.Add_MouseMove({ param($s, $e) Update-DevKitFlyoutGripDrag -S
 $ui.NotesFlyoutGrip.Add_MouseLeftButtonUp({ param($s, $e) Stop-DevKitFlyoutGripDrag -Sender $s })
 $ui.NotesFlyoutGrip.Add_MouseEnter({ param($s, $e) $s.Background = Get-DevKitGitBrush '#26E5C07B' })
 $ui.NotesFlyoutGrip.Add_MouseLeave({ param($s, $e) if (-not $s.IsMouseCaptured) { $s.Background = [Windows.Media.Brushes]::Transparent } })
+
+$ui.FilesFlyoutGrip.Add_MouseLeftButtonDown({ param($s, $e) Start-DevKitFlyoutGripDrag -Sender $s -MouseArgs $e -Kind 'Files' })
+$ui.FilesFlyoutGrip.Add_MouseMove({ param($s, $e) Update-DevKitFlyoutGripDrag -Sender $s -MouseArgs $e })
+$ui.FilesFlyoutGrip.Add_MouseLeftButtonUp({ param($s, $e) Stop-DevKitFlyoutGripDrag -Sender $s })
+$ui.FilesFlyoutGrip.Add_MouseEnter({ param($s, $e) $s.Background = Get-DevKitGitBrush '#2698C379' })
+$ui.FilesFlyoutGrip.Add_MouseLeave({ param($s, $e) if (-not $s.IsMouseCaptured) { $s.Background = [Windows.Media.Brushes]::Transparent } })
+
+$ui.OnDeckFlyoutGrip.Add_MouseLeftButtonDown({ param($s, $e) Start-DevKitFlyoutGripDrag -Sender $s -MouseArgs $e -Kind 'OnDeck' })
+$ui.OnDeckFlyoutGrip.Add_MouseMove({ param($s, $e) Update-DevKitFlyoutGripDrag -Sender $s -MouseArgs $e })
+$ui.OnDeckFlyoutGrip.Add_MouseLeftButtonUp({ param($s, $e) Stop-DevKitFlyoutGripDrag -Sender $s })
+$ui.OnDeckFlyoutGrip.Add_MouseEnter({ param($s, $e) $s.Background = Get-DevKitGitBrush '#26C678DD' })
+$ui.OnDeckFlyoutGrip.Add_MouseLeave({ param($s, $e) if (-not $s.IsMouseCaptured) { $s.Background = [Windows.Media.Brushes]::Transparent } })
+
+$ui.ProcFlyoutGrip.Add_MouseLeftButtonDown({ param($s, $e) Start-DevKitFlyoutGripDrag -Sender $s -MouseArgs $e -Kind 'Proc' })
+$ui.ProcFlyoutGrip.Add_MouseMove({ param($s, $e) Update-DevKitFlyoutGripDrag -Sender $s -MouseArgs $e })
+$ui.ProcFlyoutGrip.Add_MouseLeftButtonUp({ param($s, $e) Stop-DevKitFlyoutGripDrag -Sender $s })
+$ui.ProcFlyoutGrip.Add_MouseEnter({ param($s, $e) $s.Background = Get-DevKitGitBrush '#2694A3B8' })
+$ui.ProcFlyoutGrip.Add_MouseLeave({ param($s, $e) if (-not $s.IsMouseCaptured) { $s.Background = [Windows.Media.Brushes]::Transparent } })
+
+$ui.TermFlyoutGrip.Add_MouseLeftButtonDown({ param($s, $e) Start-DevKitFlyoutGripDrag -Sender $s -MouseArgs $e -Kind 'Terminal' })
+$ui.TermFlyoutGrip.Add_MouseMove({ param($s, $e) Update-DevKitFlyoutGripDrag -Sender $s -MouseArgs $e })
+$ui.TermFlyoutGrip.Add_MouseLeftButtonUp({ param($s, $e) Stop-DevKitFlyoutGripDrag -Sender $s })
+$ui.TermFlyoutGrip.Add_MouseEnter({ param($s, $e) $s.Background = Get-DevKitGitBrush '#2656B6C2' })
+$ui.TermFlyoutGrip.Add_MouseLeave({ param($s, $e) if (-not $s.IsMouseCaptured) { $s.Background = [Windows.Media.Brushes]::Transparent } })
 
 # "Keep on top" also has two front-ends (title-bar pin + Settings checkbox);
 # same pattern as the startup toggle.
@@ -847,13 +1216,20 @@ function Select-DevKitComboActiveProject {
 
 function Sync-DevKitWidgetActiveProject {
     $idx = $ui.ProjectCombo.SelectedIndex
+    $newPath = $null; $newName = $null
     if ($idx -gt 0 -and $idx -le $script:ComboProjects.Count) {
-        $script:ActiveProjectPath = $script:ComboProjects[$idx - 1].path
-        $script:ActiveProjectName = $script:ComboProjects[$idx - 1].name
-    } else {
-        $script:ActiveProjectPath = $null
-        $script:ActiveProjectName = $null
+        $newPath = $script:ComboProjects[$idx - 1].path
+        $newName = $script:ComboProjects[$idx - 1].name
     }
+    if ($newPath -ne $script:ActiveProjectPath) {
+        # A real project switch: the graph's expanded-commit card belongs to
+        # the OLD project's history - drop it (and any queued re-fetch).
+        $script:GitExpandedCommitHash = $null
+        $script:GitCommitDetails = $null
+        $script:GitCommitDetailsPending = $false
+    }
+    $script:ActiveProjectPath = $newPath
+    $script:ActiveProjectName = $newName
     Sync-DevKitWidgetGitState
 }
 
@@ -911,6 +1287,11 @@ $ui.ProjectCombo.Add_SelectionChanged({
 # of snapping every poll.
 
 $script:LastNodeSig = ''
+# The "+N more" footer click re-renders on demand instead of waiting for the
+# next metrics cycle, so the last snapshot is kept; NodeListShowAll is the
+# session-only expanded/collapsed state that footer toggles.
+$script:LastNodeSnapshot = $null
+$script:NodeListShowAll = $false
 # User-adjustable node-table column widths (pixels), session-only. Both the
 # header row and every data row build their ColumnDefinitions from this same
 # dictionary (see New-DevKitNodeColumnDefinitions) so a drag on the header
@@ -938,8 +1319,6 @@ function Get-DevKitNodeColumnMinWidth {
 }
 $script:GaugeStartAngle = -135.0   # 7 o'clock, sweeping clockwise
 $script:GaugeSweepMax = 270.0
-$script:GaugeHotColor = [Windows.Media.Color]::FromRgb(0xFF, 0x6B, 0x3D)
-$script:GaugeCoolColor = [Windows.Media.Color]::FromRgb(0x4F, 0xA3, 0xFF)
 
 function Get-DevKitGaugePoint {
     param([double]$Angle, [double]$Radius, [double]$Center)
@@ -965,18 +1344,38 @@ function New-DevKitGaugeGeometry {
     return $geometry
 }
 
+# Every gauge uses New-DevKitGaugeGeometry's default radius/center, so the
+# whole arc space is 101 possible shapes. They are built once, Frozen (which
+# also lets WPF share them across every gauge Path), and reused - the old
+# code allocated a fresh PathGeometry per gauge per 33ms easing-timer tick,
+# which (combined with the arcs' old DropShadowEffect and this window's
+# AllowsTransparency recomposite) was the single biggest GPU/CPU cost in the
+# widget. Dial resolution of 1% is far finer than the ~4s metrics cadence.
+$script:GaugeGeometryCache = @{}
+function Get-DevKitGaugeGeometry {
+    param([double]$Percent)
+    $key = [int][math]::Round([math]::Min(100.0, [math]::Max(0.0, $Percent)))
+    $geometry = $script:GaugeGeometryCache[$key]
+    if ($null -eq $geometry) {
+        $geometry = New-DevKitGaugeGeometry -Percent $key
+        $geometry.Freeze()
+        $script:GaugeGeometryCache[$key] = $geometry
+    }
+    return $geometry
+}
+
 $script:Gauges = [ordered]@{
-    Cpu = @{ Current = 0.0; Target = 0.0; Arc = $ui.CpuGaugeArc; Track = $ui.CpuGaugeTrack; Value = $ui.CpuGaugeValue; Sub = $ui.CpuGaugeSub }
-    Mem = @{ Current = 0.0; Target = 0.0; Arc = $ui.MemGaugeArc; Track = $ui.MemGaugeTrack; Value = $ui.MemGaugeValue; Sub = $ui.MemGaugeSub }
-    Gpu = @{ Current = 0.0; Target = 0.0; Arc = $ui.GpuGaugeArc; Track = $ui.GpuGaugeTrack; Value = $ui.GpuGaugeValue; Sub = $ui.GpuGaugeSub }
-    Junk = @{ Current = 0.0; Target = 0.0; Arc = $ui.JunkGaugeArc; Track = $ui.JunkGaugeTrack; Value = $ui.JunkGaugeValue; Sub = $ui.JunkGaugeSub }
+    Cpu = @{ Current = 0.0; Arc = $ui.CpuGaugeArc; Track = $ui.CpuGaugeTrack; Value = $ui.CpuGaugeValue; Sub = $ui.CpuGaugeSub }
+    Mem = @{ Current = 0.0; Arc = $ui.MemGaugeArc; Track = $ui.MemGaugeTrack; Value = $ui.MemGaugeValue; Sub = $ui.MemGaugeSub }
+    Gpu = @{ Current = 0.0; Arc = $ui.GpuGaugeArc; Track = $ui.GpuGaugeTrack; Value = $ui.GpuGaugeValue; Sub = $ui.GpuGaugeSub }
+    Junk = @{ Current = 0.0; Arc = $ui.JunkGaugeArc; Track = $ui.JunkGaugeTrack; Value = $ui.JunkGaugeValue; Sub = $ui.JunkGaugeSub }
     # Disk_<letter> entries (e.g. Disk_C, Disk_D) are added/removed at
     # runtime by Update-DevKitDiskGauges as drives connect/disconnect - see
     # New-DevKitDynamicGaugeControl below.
 }
 foreach ($gauge in $script:Gauges.Values) {
-    $gauge.Track.Data = New-DevKitGaugeGeometry -Percent 100
-    $gauge.Arc.Data = New-DevKitGaugeGeometry -Percent 0
+    $gauge.Track.Data = Get-DevKitGaugeGeometry -Percent 100
+    $gauge.Arc.Data = Get-DevKitGaugeGeometry -Percent 0
     $gauge.Arc.Visibility = 'Hidden'
 }
 
@@ -986,12 +1385,11 @@ function New-DevKitDynamicGaugeControl {
         Builds one drive gauge's visual tree in code: an 88x88 radial dial in
         the same CPU/MEM/GPU layout (WidgetGaugeValue inside the ring,
         WidgetGaugeSub as a sibling below it, WidgetGaugeLabel below that) and
-        the same style resources (BrushGaugeTrack/BrushGaugeArc, the cool-blue
-        DropShadowEffect) as every hardcoded gauge, so a gauge added at
-        runtime for a newly-connected drive is visually indistinguishable from
-        one that shipped in the XAML. Returns the same Arc/Track/Value/Sub
-        shape as a $script:Gauges entry so it drops straight into
-        Set-DevKitGauge and the shared easing timer once registered.
+        the same style resources (BrushGaugeTrack/BrushGaugeArc) as every
+        hardcoded gauge, so a gauge added at runtime for a newly-connected
+        drive is visually indistinguishable from one that shipped in the
+        XAML. Returns the same Arc/Track/Value/Sub shape as a $script:Gauges
+        entry so it drops straight into Set-DevKitGauge once registered.
     .OUTPUTS
         @{ Root (StackPanel - add this to a panel's Children); Arc; Track; Value; Sub }
     #>
@@ -1019,12 +1417,6 @@ function New-DevKitDynamicGaugeControl {
     $arc.StrokeThickness = 7
     $arc.StrokeStartLineCap = 'Round'
     $arc.StrokeEndLineCap = 'Round'
-    $effect = New-Object Windows.Media.Effects.DropShadowEffect
-    $effect.Color = $script:GaugeCoolColor
-    $effect.Opacity = 0.55
-    $effect.BlurRadius = 9
-    $effect.ShadowDepth = 0
-    $arc.Effect = $effect
     $grid.Children.Add($arc) | Out-Null
 
     $value = New-Object Windows.Controls.TextBlock
@@ -1047,8 +1439,8 @@ function New-DevKitDynamicGaugeControl {
     $labelBlock.Margin = '0,2,0,0'
     $root.Children.Add($labelBlock) | Out-Null
 
-    $track.Data = New-DevKitGaugeGeometry -Percent 100
-    $arc.Data = New-DevKitGaugeGeometry -Percent 0
+    $track.Data = Get-DevKitGaugeGeometry -Percent 100
+    $arc.Data = Get-DevKitGaugeGeometry -Percent 0
     $arc.Visibility = 'Hidden'
 
     return @{ Root = $root; Arc = $arc; Track = $track; Value = $value; Sub = $sub }
@@ -1081,7 +1473,7 @@ function Update-DevKitDiskGauges {
             $control = New-DevKitDynamicGaugeControl -Label $letter -ToolTipText $tip
             $ui.DiskGaugesPanel.Children.Add($control.Root) | Out-Null
             $script:DiskGaugeControls[$letter] = $control
-            $script:Gauges[$key] = @{ Current = 0.0; Target = 0.0; Arc = $control.Arc; Track = $control.Track; Value = $control.Value; Sub = $control.Sub }
+            $script:Gauges[$key] = @{ Current = 0.0; Arc = $control.Arc; Track = $control.Track; Value = $control.Value; Sub = $control.Sub }
         }
 
         $total = [double]$d.TotalBytes
@@ -1108,40 +1500,27 @@ function Update-DevKitDiskGauges {
     }
 }
 
-$script:GaugeAnimTimer = New-Object Windows.Threading.DispatcherTimer
-$script:GaugeAnimTimer.Interval = [TimeSpan]::FromMilliseconds(33)
-$script:GaugeAnimTimer.Add_Tick({
-    $settled = $true
-    foreach ($gauge in $script:Gauges.Values) {
-        $diff = $gauge.Target - $gauge.Current
-        if ([math]::Abs($diff) -lt 0.15) {
-            if ($gauge.Current -ne $gauge.Target) {
-                $gauge.Current = $gauge.Target
-                $gauge.Arc.Data = New-DevKitGaugeGeometry -Percent $gauge.Current
-            }
-        } else {
-            $gauge.Current += $diff * 0.18
-            $gauge.Arc.Data = New-DevKitGaugeGeometry -Percent $gauge.Current
-            $settled = $false
-        }
-        # A sub-1% arc with round caps renders as a stray dot; hide it instead.
-        $gauge.Arc.Visibility = if ($gauge.Current -ge 1.0) { 'Visible' } else { 'Hidden' }
-    }
-    if ($settled) { $script:GaugeAnimTimer.Stop() }
-})
-
 function Set-DevKitGauge {
+    <#
+    .SYNOPSIS
+        Applies one gauge reading immediately. There is deliberately NO
+        easing/animation timer: readings only change once per metrics cycle
+        (~4s), so a 30fps animation between two stale values was pure cost -
+        and on this AllowsTransparency window every animated frame forced a
+        full-window recomposite. The arc is assigned from the frozen cached
+        geometry table (Get-DevKitGaugeGeometry), never allocated per render.
+    #>
     # $Percent stays untyped: a typed [double] would silently coerce $null to
     # 0 and report a dead sensor as a real zero reading.
     param([string]$Key, $Percent, [string]$ValueString, [string]$SubString, [bool]$Hot, [bool]$Available)
     $gauge = $script:Gauges[$Key]
     if (-not $Available) {
-        $gauge.Target = 0.0
+        $gauge.Current = 0.0
         $gauge.Value.Text = 'n/a'
         $gauge.Value.Foreground = Get-WidgetResource 'BrushTextDim'
         $gauge.Sub.Visibility = 'Hidden'
     } else {
-        $gauge.Target = [math]::Min(100.0, [math]::Max(0.0, [double]$Percent))
+        $gauge.Current = [math]::Min(100.0, [math]::Max(0.0, [double]$Percent))
         $gauge.Value.Text = $ValueString
         $gauge.Value.Foreground = if ($Hot) { Get-WidgetResource 'BrushAccentEmber' } else { Get-WidgetResource 'BrushTextBright' }
         if ([string]::IsNullOrWhiteSpace($SubString)) {
@@ -1151,11 +1530,10 @@ function Set-DevKitGauge {
             $gauge.Sub.Visibility = 'Visible'
         }
         $gauge.Arc.Stroke = Get-WidgetResource $(if ($Hot) { 'BrushGaugeArcHot' } else { 'BrushGaugeArc' })
-        if ($gauge.Arc.Effect) { $gauge.Arc.Effect.Color = if ($Hot) { $script:GaugeHotColor } else { $script:GaugeCoolColor } }
     }
-    if (-not $script:GaugeAnimTimer.IsEnabled -and [math]::Abs($gauge.Target - $gauge.Current) -ge 0.15) {
-        $script:GaugeAnimTimer.Start()
-    }
+    $gauge.Arc.Data = Get-DevKitGaugeGeometry -Percent $gauge.Current
+    # A sub-1% arc with round caps renders as a stray dot; hide it instead.
+    $gauge.Arc.Visibility = if ($gauge.Current -ge 1.0) { 'Visible' } else { 'Hidden' }
 }
 
 function Update-DevKitWidgetMetrics {
@@ -1306,11 +1684,14 @@ function Stop-DevKitNodeColDrag {
 }
 
 function Add-DevKitNodeColSplitter {
-    # Adds a thin invisible-until-hover drag handle over the right edge of
-    # header column $ColIndex (same key used in $script:NodeColumnWidths).
-    # Overlaid via HorizontalAlignment=Right + a small negative right margin
-    # rather than a real extra GridSplitter column, so it never shifts any
-    # other column's index between the header and data rows.
+    # Adds a drag handle over the right edge of header column $ColIndex (same
+    # key used in $script:NodeColumnWidths). Overlaid via
+    # HorizontalAlignment=Right + a small negative right margin rather than a
+    # real extra GridSplitter column, so it never shifts any other column's
+    # index between the header and data rows. The transparent 6px Border is
+    # the hit area; inside it sits an always-visible 2px grip bar so the user
+    # can SEE where to grab (a purely hover-revealed splitter proved
+    # undiscoverable). The bar brightens sapphire on hover/drag.
     param($Grid, [string]$ColKey, [int]$ColIndex)
     $splitter = New-Object Windows.Controls.Border
     $splitter.Width = 6
@@ -1319,14 +1700,21 @@ function Add-DevKitNodeColSplitter {
     $splitter.Background = [Windows.Media.Brushes]::Transparent
     $splitter.Cursor = [System.Windows.Input.Cursors]::SizeWE
     $splitter.ToolTip = "Drag to resize the $ColKey column"
+    $bar = New-Object Windows.Controls.Border
+    $bar.Width = 2
+    $bar.Height = 12
+    $bar.CornerRadius = '1'
+    $bar.Background = Get-WidgetResource 'BrushScrollThumb'
+    $bar.IsHitTestVisible = $false
+    $splitter.Child = $bar
     [Windows.Controls.Grid]::SetColumn($splitter, $ColIndex)
     [Windows.Controls.Panel]::SetZIndex($splitter, 10)
     $keyCopy = $ColKey
     $splitter.Add_MouseLeftButtonDown({ param($s, $e) Start-DevKitNodeColDrag -Sender $s -MouseArgs $e -ColKey $keyCopy }.GetNewClosure())
     $splitter.Add_MouseMove({ param($s, $e) Update-DevKitNodeColDrag -Sender $s -MouseArgs $e -ColKey $keyCopy }.GetNewClosure())
     $splitter.Add_MouseLeftButtonUp({ param($s, $e) Stop-DevKitNodeColDrag -Sender $s -ColKey $keyCopy }.GetNewClosure())
-    $splitter.Add_MouseEnter({ param($s, $e) $s.Background = Get-DevKitGitBrush '#264FA3FF' }.GetNewClosure())
-    $splitter.Add_MouseLeave({ param($s, $e) if (-not $s.IsMouseCaptured) { $s.Background = [Windows.Media.Brushes]::Transparent } }.GetNewClosure())
+    $splitter.Add_MouseEnter({ param($s, $e) $s.Child.Background = Get-WidgetResource 'BrushAccentBlue' }.GetNewClosure())
+    $splitter.Add_MouseLeave({ param($s, $e) if (-not $s.IsMouseCaptured) { $s.Child.Background = Get-WidgetResource 'BrushScrollThumb' } }.GetNewClosure())
     $Grid.Children.Add($splitter) | Out-Null
 }
 
@@ -1451,6 +1839,15 @@ function New-DevKitNodeRow {
     return $grid
 }
 
+function Toggle-DevKitNodeListExpanded {
+    # The "+N more"/"Show less" footer click handler. Clearing LastNodeSig
+    # forces the re-render past the signature gate; the snapshot kept by
+    # Update-DevKitWidgetNode means no fresh (expensive) collection is needed.
+    $script:NodeListShowAll = -not $script:NodeListShowAll
+    $script:LastNodeSig = $null
+    if ($script:LastNodeSnapshot) { Update-DevKitWidgetNode -Snapshot $script:LastNodeSnapshot }
+}
+
 function Update-DevKitWidgetNode {
     # Pure render, same reason as Update-DevKitWidgetMetrics above:
     # Get-DevKitNodeSnapshot's Get-NetTCPConnection call is not free, and now
@@ -1464,7 +1861,17 @@ function Update-DevKitWidgetNode {
     # the drag ends still sees a signature change and rebuilds then.
     if ($script:NodeColDrag) { return }
     $snap = $Snapshot
-    $sig = (($snap.Processes | ForEach-Object { "$($_.Pid):$($_.Name):$($_.MemoryMB):$($_.AgeMinutes):$($_.Ports -join ',')" }) -join '|') +
+    # Kept so the "+N more"/"Show less" footer can re-render on click instead
+    # of waiting out the next metrics cycle (see Toggle-DevKitNodeListExpanded).
+    $script:LastNodeSnapshot = $Snapshot
+    # Rebuild signature. Raw MemoryMB/AgeMinutes used to be in here, which
+    # meant the whole table (header + drag splitters + ~6 rows x ~10
+    # elements + event-handler closures) was torn down and rebuilt nearly
+    # every metrics cycle - dev-server memory fluctuates constantly. The
+    # values are now bucketed (memory to 25MB, age to 5 minutes): the list
+    # only rebuilds when the process SET changes or a displayed value would
+    # actually move at the coarseness the table reads at.
+    $sig = (($snap.Processes | ForEach-Object { "$($_.Pid):$($_.Name):$([math]::Floor([double]$_.MemoryMB / 25)):$([math]::Floor([double]$_.AgeMinutes / 5)):$($_.Ports -join ',')" }) -join '|') +
            '##' + (($snap.OtherPorts | ForEach-Object { "$($_.Port):$($_.ProcessName)" }) -join '|') +
            '##' + ($snap.ReservedPorts -join ',')
     if ($sig -eq $script:LastNodeSig) { return }
@@ -1487,18 +1894,30 @@ function Update-DevKitWidgetNode {
         $header = New-DevKitNodeRow -Name 'NAME' -PidText 'PID' -MemText 'MEM' -AgeText 'AGE' -IsHeader $true
         $ui.NodeListPanel.Children.Add($header) | Out-Null
 
-        $shown = @($snap.Processes | Select-Object -First 6)
+        $shown = if ($script:NodeListShowAll) { @($snap.Processes) } else { @($snap.Processes | Select-Object -First 6) }
         foreach ($proc in $shown) {
             $row = New-DevKitNodeRow -Name ([string]$proc.Name) -PidText "$($proc.Pid)" -MemText "$($proc.MemoryMB) MB" `
                 -AgeText (Format-DevKitNodeAge $proc.AgeMinutes) -Ports $proc.Ports -ProcessId ([int]$proc.Pid)
             $ui.NodeListPanel.Children.Add($row) | Out-Null
         }
         if ($snap.Processes.Count -gt 6) {
+            # Clickable footer: collapsed shows "+N more", expanded shows
+            # "Show less" - the click toggles and re-renders immediately.
             $more = New-Object Windows.Controls.TextBlock
             $more.Style = Get-WidgetResource 'WidgetRowText'
             $more.Foreground = Get-WidgetResource 'BrushTextDim'
-            $more.Text = "+ $($snap.Processes.Count - 6) more"
+            if ($script:NodeListShowAll) {
+                $more.Text = 'Show less'
+                $more.ToolTip = 'Click to collapse back to the first 6 processes'
+            } else {
+                $more.Text = "+ $($snap.Processes.Count - 6) more"
+                $more.ToolTip = "Click to show all $($snap.Processes.Count) processes"
+            }
             $more.Margin = '0,3,0,0'
+            $more.Cursor = [System.Windows.Input.Cursors]::Hand
+            $more.Add_MouseLeftButtonDown({ Toggle-DevKitNodeListExpanded })
+            $more.Add_MouseEnter({ param($s, $e) $s.Foreground = Get-WidgetResource 'BrushAccentBlue' })
+            $more.Add_MouseLeave({ param($s, $e) $s.Foreground = Get-WidgetResource 'BrushTextDim' })
             $ui.NodeListPanel.Children.Add($more) | Out-Null
         }
     }
@@ -1561,19 +1980,53 @@ function Update-DevKitAbandonedRunspaceCleanup {
 
 # ==================== METRICS + NODE COLLECTION (ASYNC) ====================
 # A full metrics cycle costs ~1.5-3s (Win32_Processor's LoadPercentage waits
-# out its own ~1s sampling window; the thermal-zone counter and nvidia-smi
-# are cached per-runspace for 45s/10s so they don't add a second each cycle).
-# Collecting on the dispatcher-thread FastTimer tick blocked the UI for
-# longer than the timer's own interval, starving the gauge-easing timer and
+# out its own ~1s sampling window). Collecting on the dispatcher-thread
+# FastTimer tick blocked the UI for longer than the timer's own interval,
 # stalling drag/click input. Collection runs in this background runspace,
 # and the FastTimer only re-arms a refresh ~2s after the previous one
 # COMPLETED (completion-time gate) so the runspace gets idle gaps.
 # Same async-runspace-plus-poll pattern as the MCP refresh below.
 
-$script:MetricsRunspace = [runspacefactory]::CreateRunspace()
-$script:MetricsRunspace.ApartmentState = 'MTA'
-$script:MetricsRunspace.ThreadOptions = 'ReuseThread'
-$script:MetricsRunspace.Open()
+function New-DevKitWidgetRunspace {
+    <#
+    .SYNOPSIS
+        Creates, opens, and BOOTSTRAPS one background runspace: the shared
+        libraries are dot-sourced into its session state exactly once here,
+        so every later job pipeline is a bare function call.
+    .DESCRIPTION
+        This matters twice over. First, the old per-job dot-source re-read,
+        re-parsed, and re-executed ~140-150KB of PowerShell on EVERY cycle
+        (~every 4s, forever). Second, it re-ran DevKit-WidgetCore.ps1's
+        top-level `$script:*Cache = $null` initializers before every job,
+        which wiped the per-runspace sensor caches - so nvidia-smi was
+        spawned every cycle instead of every 10s, the thermal-zone counter
+        paid its ~1s PDH sample stall every cycle instead of every 45s, and
+        `netsh show excludedportrange` ran every cycle instead of every 30
+        minutes. Bootstrapping once keeps those caches alive between jobs.
+    #>
+    param([switch]$IncludeMcpList)
+    $rs = [runspacefactory]::CreateRunspace()
+    $rs.ApartmentState = 'MTA'
+    $rs.ThreadOptions = 'ReuseThread'
+    $rs.Open()
+    try {
+        $lib = (Join-Path $ToolsDir 'lib\DevKit-Common.ps1') -replace "'", "''"
+        $core = (Join-Path $GuiDir 'DevKit-WidgetCore.ps1') -replace "'", "''"
+        $scriptText = ". '$lib'; . '$core'"
+        if ($IncludeMcpList) {
+            $mcpList = (Join-Path $ToolsDir 'lib\DevKit-McpList.ps1') -replace "'", "''"
+            $scriptText = ". '$lib'; . '$mcpList'; . '$core'"
+        }
+        $bootstrap = [powershell]::Create()
+        $bootstrap.Runspace = $rs
+        [void]$bootstrap.AddScript($scriptText)
+        $bootstrap.Invoke()
+        $bootstrap.Dispose()
+    } catch { }
+    return $rs
+}
+
+$script:MetricsRunspace = New-DevKitWidgetRunspace
 $script:MetricsBusy = $false
 $script:MetricsShell = $null
 $script:MetricsAsync = $null
@@ -1586,9 +2039,9 @@ function Start-DevKitMetricsRefresh {
     try {
         $ps = [powershell]::Create()
         $ps.Runspace = $script:MetricsRunspace
-        $lib = (Join-Path $ScriptDir 'lib\DevKit-Common.ps1') -replace "'", "''"
-        $core = (Join-Path $GuiDir 'DevKit-WidgetCore.ps1') -replace "'", "''"
-        $scriptText = ". '$lib'; . '$core'; @{ Metrics = (Get-DevKitSystemMetrics); Node = (Get-DevKitNodeSnapshot) }"
+        # Libraries were dot-sourced once at runspace creation
+        # (New-DevKitWidgetRunspace) - jobs are bare collector calls.
+        $scriptText = "@{ Metrics = (Get-DevKitSystemMetrics); Node = (Get-DevKitNodeSnapshot) }"
         [void]$ps.AddScript($scriptText)
         $script:MetricsShell = $ps
         $script:MetricsAsync = $ps.BeginInvoke()
@@ -1639,11 +2092,7 @@ function Reset-DevKitMetricsRunspace {
     $script:MetricsShell = $null
     $script:MetricsAsync = $null
     try {
-        $fresh = [runspacefactory]::CreateRunspace()
-        $fresh.ApartmentState = 'MTA'
-        $fresh.ThreadOptions = 'ReuseThread'
-        $fresh.Open()
-        $script:MetricsRunspace = $fresh
+        $script:MetricsRunspace = New-DevKitWidgetRunspace
     } catch { }
 }
 
@@ -1653,10 +2102,7 @@ function Reset-DevKitMetricsRunspace {
 # completion and renders on the dispatcher thread. A hung refresh is stopped
 # after 45s and reported as timed out instead of freezing the widget.
 
-$script:McpRunspace = [runspacefactory]::CreateRunspace()
-$script:McpRunspace.ApartmentState = 'MTA'
-$script:McpRunspace.ThreadOptions = 'ReuseThread'
-$script:McpRunspace.Open()
+$script:McpRunspace = New-DevKitWidgetRunspace -IncludeMcpList
 $script:McpBusy = $false
 $script:McpShell = $null
 $script:McpAsync = $null
@@ -1677,10 +2123,7 @@ function Start-DevKitMcpRefresh {
     try {
         $ps = [powershell]::Create()
         $ps.Runspace = $script:McpRunspace
-        $lib = (Join-Path $ScriptDir 'lib\DevKit-Common.ps1') -replace "'", "''"
-        $mcpList = (Join-Path $ScriptDir 'lib\DevKit-McpList.ps1') -replace "'", "''"
-        $core = (Join-Path $GuiDir 'DevKit-WidgetCore.ps1') -replace "'", "''"
-        $scriptText = "param(`$projectPath) . '$lib'; . '$mcpList'; . '$core'; Get-DevKitMcpWidgetReport -ProjectPath `$projectPath"
+        $scriptText = "param(`$projectPath) Get-DevKitMcpWidgetReport -ProjectPath `$projectPath"
         [void]$ps.AddScript($scriptText).AddArgument([string]$script:ActiveProjectPath)
         $script:McpShell = $ps
         $script:McpAsync = $ps.BeginInvoke()
@@ -1709,11 +2152,7 @@ function Reset-DevKitMcpRunspace {
     $script:McpShell = $null
     $script:McpAsync = $null
     try {
-        $fresh = [runspacefactory]::CreateRunspace()
-        $fresh.ApartmentState = 'MTA'
-        $fresh.ThreadOptions = 'ReuseThread'
-        $fresh.Open()
-        $script:McpRunspace = $fresh
+        $script:McpRunspace = New-DevKitWidgetRunspace -IncludeMcpList
     } catch { }
 }
 
@@ -1926,10 +2365,7 @@ $ui.KimiExpander.Add_Expanded({ Set-DevKitAgentAccordion -OpenName 'Kimi' })
 # attempted while busy is declined (scans re-trigger from their own timers,
 # button handlers tell the user to retry).
 
-$script:WorkRunspace = [runspacefactory]::CreateRunspace()
-$script:WorkRunspace.ApartmentState = 'MTA'
-$script:WorkRunspace.ThreadOptions = 'ReuseThread'
-$script:WorkRunspace.Open()
+$script:WorkRunspace = New-DevKitWidgetRunspace
 $script:WorkBusy = $false
 $script:WorkShell = $null
 $script:WorkAsync = $null
@@ -1939,16 +2375,20 @@ $script:WorkKind = $null
 function Start-DevKitWorkJob {
     param(
         # 'JunkScan' | 'JunkClean' | 'GitOverview' | 'GitFetch' | 'GitPull' | 'GitPush' | 'EnvDrift' | 'GitHubPRs' | 'GitHubIssues'
+        # | 'ProcCpu' | 'ProcMem' | 'ProcGpu' | 'FreeMem' | 'ProcKill'   (gauge management panel - see GAUGE MANAGEMENT PANEL)
+        # | 'CommitDetails'   (commit graph click-to-expand - 'git show' for one hash)
         [Parameter(Mandatory = $true)][string]$Kind,
-        [string]$ProjectPath
+        [string]$ProjectPath,
+        [int]$TargetPid = 0,   # ProcKill only: the process id to stop
+        [string]$CommitHash = ''   # CommitDetails only: the commit hash to show
     )
     if ($script:WorkBusy) { return $false }
     $script:WorkBusy = $true
     try {
         $ps = [powershell]::Create()
         $ps.Runspace = $script:WorkRunspace
-        $lib = (Join-Path $ScriptDir 'lib\DevKit-Common.ps1') -replace "'", "''"
-        $core = (Join-Path $GuiDir 'DevKit-WidgetCore.ps1') -replace "'", "''"
+        # Libraries were dot-sourced once at runspace creation
+        # (New-DevKitWidgetRunspace) - job bodies are bare collector calls.
         $body = switch ($Kind) {
             'JunkScan'    { '@{ Junk = (Get-DevKitSystemJunk) }' }
             'JunkClean'   { '@{ Clean = (Clear-DevKitSystemJunk) }' }
@@ -1960,6 +2400,19 @@ function Start-DevKitWorkJob {
             'EnvDrift'    { '@{ Drift = (Get-DevKitEnvDrift -Path $path) }' }
             'GitHubPRs'    { '@{ PullRequests = (Get-DevKitGitHubPullRequests -Path $path) }' }
             'GitHubIssues' { '@{ Issues = (Get-DevKitGitHubIssues -Path $path) }' }
+            # $chash is the third script argument (hex-validated inside the
+            # collector, so quoting here is never an injection surface).
+            'CommitDetails' { '@{ CommitDetails = (Get-DevKitCommitDetails -Path $path -Hash $chash) }' }
+            # Gauge panel collectors. ProcCpu wraps in @() so a single-row
+            # result still survives the runspace trip as an array; the others
+            # return a single shaped object either way. $tpid (not $pid - that
+            # name collides with the read-only automatic $PID variable) is the
+            # second script argument, only meaningful for ProcKill.
+            'ProcCpu'  { '@{ ProcCpu = @(Get-DevKitTopCpuProcesses -Count 15) }' }
+            'ProcMem'  { '@{ ProcMem = (Get-DevKitTopMemoryProcesses -Count 15) }' }
+            'ProcGpu'  { '@{ ProcGpu = (Get-DevKitGpuProcessUsage -Count 15) }' }
+            'FreeMem'  { '@{ FreeMem = (Invoke-DevKitFreeMemory) }' }
+            'ProcKill' { '@{ ProcKill = (Stop-DevKitProcessById -Pid $tpid) }' }
             default {
                 # GitFetch/GitPull/GitPush: run the action, then immediately
                 # re-read the overview so the graph reflects the result.
@@ -1967,8 +2420,8 @@ function Start-DevKitWorkJob {
                 "@{ GitAction = (Invoke-DevKitGitAction -Path `$path -Action '$action'); Git = (Get-DevKitRepoOverview -Path `$path -IncludeGraph `$$script:GitFlyoutOpen) }"
             }
         }
-        $scriptText = "param(`$path) . '$lib'; . '$core'; $body"
-        [void]$ps.AddScript($scriptText).AddArgument([string]$ProjectPath)
+        $scriptText = "param(`$path, `$tpid, `$chash) $body"
+        [void]$ps.AddScript($scriptText).AddArgument([string]$ProjectPath).AddArgument($TargetPid).AddArgument($CommitHash)
         $script:WorkKind = $Kind
         $script:WorkProjectPath = $ProjectPath   # stale-result guard for project switches mid-flight
         $script:WorkShell = $ps
@@ -1996,11 +2449,7 @@ function Reset-DevKitWorkRunspace {
     $script:WorkShell = $null
     $script:WorkAsync = $null
     try {
-        $fresh = [runspacefactory]::CreateRunspace()
-        $fresh.ApartmentState = 'MTA'
-        $fresh.ThreadOptions = 'ReuseThread'
-        $fresh.Open()
-        $script:WorkRunspace = $fresh
+        $script:WorkRunspace = New-DevKitWidgetRunspace
     } catch { }
 }
 
@@ -2060,6 +2509,22 @@ function Update-DevKitWorkAsyncPoll {
                         Update-DevKitWidgetIssues -Result $result.Issues
                     }
                 }
+                'CommitDetails' {
+                    # Same stale-project guard as GitHubPRs above; the
+                    # hash-still-selected check lives in Update-DevKitCommitDetails.
+                    if (-not $script:WorkProjectPath -or -not $script:ActiveProjectPath -or $script:WorkProjectPath -eq $script:ActiveProjectPath) {
+                        Update-DevKitCommitDetails -Result $result.CommitDetails
+                    }
+                }
+                # Gauge management panel results. Each render/completion
+                # function no-ops when its kind has since been unregistered
+                # (panel closed or metric switched), so a late result is
+                # dropped, never rendered into a panel showing another metric.
+                'ProcCpu'  { Update-DevKitProcDialog -Kind 'Cpu' -Result $result.ProcCpu }
+                'ProcMem'  { Update-DevKitProcDialog -Kind 'Mem' -Result $result.ProcMem }
+                'ProcGpu'  { Update-DevKitProcDialog -Kind 'Gpu' -Result $result.ProcGpu }
+                'FreeMem'  { Complete-DevKitFreeMemory -Result $result.FreeMem }
+                'ProcKill' { Complete-DevKitProcKill -Result $result.ProcKill }
                 default {
                     # GitFetch/GitPull/GitPush: last output line to the status
                     # line, fresh overview to the graph - but only if the
@@ -2093,6 +2558,15 @@ function Update-DevKitWorkAsyncPoll {
         } else {
             $script:EnvDriftRefreshPending = $false
         }
+        # Same re-fire for a commit-details fetch declined while this job held
+        # the slot (user clicked a commit row while another job was running).
+        # No selection + pending means the user collapsed the card meanwhile.
+        if ($script:GitCommitDetailsPending -and $script:ActiveProjectPath -and $script:GitExpandedCommitHash) {
+            $script:GitCommitDetailsPending = $false
+            [void](Start-DevKitWorkJob -Kind 'CommitDetails' -ProjectPath $script:ActiveProjectPath -CommitHash $script:GitExpandedCommitHash)
+        } else {
+            $script:GitCommitDetailsPending = $false
+        }
     } elseif (((Get-Date) - $script:WorkStarted).TotalSeconds -gt 30) {
         $kind = $script:WorkKind
         $script:WorkKind = $null
@@ -2102,6 +2576,13 @@ function Update-DevKitWorkAsyncPoll {
             $ui.BtnJunkClean.IsEnabled = $true
             $ui.JunkStatusText.Text = 'Operation timed out - try again.'
             $ui.JunkStatusText.Visibility = 'Visible'
+        } elseif ($kind -like 'Proc*' -or $kind -eq 'FreeMem') {
+            # A gauge panel's job hit the 30s timeout (checked before the
+            # 'Git*' wildcard below only for clarity - no overlap). The
+            # panel's own 3s timer retries plain refreshes on its own, but
+            # a timed-out kill/free-mem needs its button re-enabled and a
+            # message stamped or the panel would look stuck forever.
+            Update-DevKitProcDialogTimeout -Kind $kind
         } elseif ($kind -eq 'GitHubPRs' -or $kind -eq 'GitHubIssues') {
             # Checked ahead of the 'Git*' wildcard below - GitHubPRs/
             # GitHubIssues would otherwise match it and wrongly stamp the git
@@ -2118,6 +2599,22 @@ function Update-DevKitWorkAsyncPoll {
             } else {
                 $script:GitIssuesLastFetch = [datetime]::MinValue
                 Update-DevKitWidgetIssues -Result $timeoutResult
+            }
+        } elseif ($kind -eq 'CommitDetails') {
+            # Checked ahead of the 'Git*' wildcard for clarity (no overlap).
+            # Un-stick the inline "Loading commit details..." card: stamp an
+            # honest timeout error into the details cache (keyed to the still-
+            # expanded hash, if any) and re-render so it shows in place.
+            if ($script:GitExpandedCommitHash) {
+                $script:GitCommitDetails = [pscustomobject]@{
+                    Found = $false; Hash = $script:GitExpandedCommitHash
+                    Error = 'git show did not answer (timed out) - click the commit to retry.'
+                    Author = ''; Email = ''; Date = ''; Message = ''
+                    Files = @(); FilesChanged = 0; Insertions = 0; Deletions = 0
+                }
+                if ($script:GitFlyoutOpen -and $script:GitOverview -and $script:GitOverview.Graph) {
+                    Render-DevKitGitGraph -Graph $script:GitOverview.Graph
+                }
             }
         } elseif ($kind -like 'Git*') {
             $ui.GitFlyoutStatus.Text = 'git did not answer (timed out).'
@@ -2140,6 +2637,14 @@ function Update-DevKitWorkAsyncPoll {
         } else {
             $script:EnvDriftRefreshPending = $false
         }
+        # Same re-fire as in the completion path above: a commit-details fetch
+        # declined while the timed-out job held the slot gets its turn now.
+        if ($script:GitCommitDetailsPending -and $script:ActiveProjectPath -and $script:GitExpandedCommitHash) {
+            $script:GitCommitDetailsPending = $false
+            [void](Start-DevKitWorkJob -Kind 'CommitDetails' -ProjectPath $script:ActiveProjectPath -CommitHash $script:GitExpandedCommitHash)
+        } else {
+            $script:GitCommitDetailsPending = $false
+        }
     }
 }
 
@@ -2150,6 +2655,7 @@ function Update-DevKitWorkAsyncPoll {
 # from the slow timer - all in the shared work runspace above.
 $script:JunkCapBytes = 10GB
 $script:JunkLastScan = Get-Date
+$script:LastJunkScanResult = $null   # last Get-DevKitSystemJunk result, for the Details... dialog
 $script:GitBadgeLastRefresh = Get-Date   # ambient badge re-polls every 2 min via the slow timer
 $script:EnvDriftLastCheck = [datetime]::MinValue
 
@@ -2160,6 +2666,23 @@ function Format-DevKitJunkSize {
     if ($Bytes -ge 1MB) { return '{0:N0} MB' -f ($Bytes / 1MB) }
     if ($Bytes -ge 1KB) { return '{0:N0} KB' -f ($Bytes / 1KB) }
     return "$([int]$Bytes) B"
+}
+
+function Get-DevKitWidgetField {
+    # Shape-tolerant reader for collector results crossing the runspace
+    # boundary: they arrive as deserialized PSObjects, a couple of call sites
+    # also see raw hashtables, and fields added by a newer WidgetCore build
+    # may simply be absent on an older one. Returns $Default instead of
+    # throwing on any of those.
+    param($Obj, [Parameter(Mandatory = $true)][string]$Name, $Default = $null)
+    if ($null -eq $Obj) { return $Default }
+    if ($Obj -is [System.Collections.IDictionary]) {
+        if ($Obj.Contains($Name)) { return $Obj[$Name] }
+        return $Default
+    }
+    $prop = $Obj.PSObject.Properties[$Name]
+    if ($null -ne $prop) { return $prop.Value }
+    return $Default
 }
 
 function Start-DevKitJunkScan {
@@ -2176,6 +2699,7 @@ function Start-DevKitJunkScan {
 function Update-DevKitWidgetJunk {
     # Pure render of an already-collected scan, on the dispatcher thread.
     param($Junk)
+    $script:LastJunkScanResult = $Junk   # kept for the Details... dialog's per-category breakdown
     if (-not $Junk) {
         Set-DevKitGauge -Key 'Junk' -Percent 0 -Available $false -Hot $false -ValueString '' -SubString ''
         return
@@ -2189,13 +2713,141 @@ function Update-DevKitWidgetJunk {
 function Complete-DevKitJunkClean {
     param($Clean)
     $ui.BtnJunkClean.IsEnabled = $true
-    $ui.JunkStatusText.Text = if ($Clean) { "Freed $(Format-DevKitJunkSize ([double]$Clean.FreedBytes))" } else { 'Clean finished.' }
-    $ui.JunkStatusText.Foreground = Get-DevKitGitBrush '#3EDD8F'   # BrushSuccess hex (kept theme-independent)
+    $successBrush = Get-DevKitGitBrush '#3EDD8F'   # BrushSuccess hex (kept theme-independent)
+    # Reset any inline runs a previous clean left behind before stamping plain
+    # text (Text and Inlines share the same content store on a TextBlock).
+    $ui.JunkStatusText.Inlines.Clear()
+    if (-not $Clean) {
+        $ui.JunkStatusText.Text = 'Clean finished.'
+        $ui.JunkStatusText.Foreground = $successBrush
+    } else {
+        # Per-category breakdown from the extended Clear-DevKitSystemJunk:
+        # only categories that actually freed anything are named, so a routine
+        # clean keeps the line short. Missing fields (older WidgetCore) read
+        # as 0 via Get-DevKitWidgetField and simply drop out of the list.
+        $parts = @()
+        foreach ($pair in @(@('TempUserFreed', 'temp'), @('TempWindowsFreed', 'Windows temp'), @('WuCacheFreed', 'update cache'), @('RecycleFreed', 'recycle bin'))) {
+            $bytes = [double](Get-DevKitWidgetField $Clean $pair[0] 0)
+            if ($bytes -gt 0) { $parts += "$($pair[1]) $(Format-DevKitJunkSize $bytes)" }
+        }
+        $main = "Freed $(Format-DevKitJunkSize ([double](Get-DevKitWidgetField $Clean 'FreedBytes' 0)))"
+        if ($parts.Count -gt 0) { $main += " - $($parts -join ', ')" }
+        $ui.JunkStatusText.Text = $main
+        $ui.JunkStatusText.Foreground = $successBrush
+        $skipped = @(@(Get-DevKitWidgetField $Clean 'SkippedNeedsAdmin' @()) | Where-Object { $_ })
+        if ($skipped.Count -gt 0) {
+            # The hint goes in as its own Run so it can carry the ember
+            # warning color without recoloring the (successful) result line.
+            $pretty = @($skipped | ForEach-Object { ([string]$_) -replace '(?<=[a-z])(?=[A-Z])', ' ' })
+            $ui.JunkStatusText.Inlines.Add((New-Object Windows.Documents.LineBreak)) | Out-Null
+            $hintRun = New-Object Windows.Documents.Run
+            $hintRun.Text = "Skipped admin-only areas ($($pretty -join ', ')) - restart the widget as administrator to reach them."
+            $hintRun.Foreground = Get-WidgetResource 'BrushAccentEmber'
+            $ui.JunkStatusText.Inlines.Add($hintRun) | Out-Null
+        }
+    }
     $ui.JunkStatusText.Visibility = 'Visible'
     Start-DevKitJunkScan   # re-scan so the gauge reflects the clean
 }
 
-$ui.BtnJunkTool.Add_Click({ Start-DevKitWidgetTool -RelativeScript 'maintenance\Clear-DiskJunk.ps1' -Title 'Clear Disk Junk' })
+function Show-DevKitJunkDetails {
+    # Per-category breakdown of the last junk scan - the in-GUI replacement
+    # for the old "Cleanup Tool..." button, which launched Clear-DiskJunk.ps1
+    # in a terminal and made the user type CLEAN. Cleanup in the widget is
+    # now 100% GUI-side (styled confirms only, no terminal anywhere). Modal
+    # (ShowDialog) like the Manage... dialogs: a point-in-time snapshot has
+    # nothing to refresh, so there is no timer to manage.
+    $dlg = New-Object Windows.Window
+    $dlg.Title = 'System Junk - Details'
+    $dlg.Width = 320
+    $dlg.SizeToContent = [Windows.SizeToContent]::Height
+    $dlg.WindowStyle = [Windows.WindowStyle]::None
+    $dlg.AllowsTransparency = $true
+    $dlg.Background = [Windows.Media.Brushes]::Transparent
+    $dlg.WindowStartupLocation = [Windows.WindowStartupLocation]::CenterOwner
+    $dlg.Owner = $window
+    $dlg.Icon = $window.Icon
+    $dlg.FontFamily = $window.FontFamily
+    $dlg.Topmost = $true
+
+    $root = New-Object Windows.Controls.Border
+    $root.Style = Get-WidgetResource 'RootWindow'
+    $stack = New-Object Windows.Controls.StackPanel
+    $stack.Margin = '16,14,16,14'
+
+    $titleText = New-Object Windows.Controls.TextBlock
+    $titleText.Style = Get-WidgetResource 'GroupTitle'
+    $titleText.Text = 'System Junk - Details'
+    $stack.Children.Add($titleText) | Out-Null
+
+    $scan = $script:LastJunkScanResult
+    if (-not $scan) {
+        $none = New-Object Windows.Controls.TextBlock
+        $none.Style = Get-WidgetResource 'WidgetRowText'
+        $none.TextWrapping = 'Wrap'
+        $none.Margin = '0,8,0,0'
+        $none.Text = 'No scan has finished yet - one has been kicked off now; reopen this in a few seconds.'
+        $stack.Children.Add($none) | Out-Null
+        Start-DevKitJunkScan
+    } else {
+        $addRow = {
+            param([string]$Label, [string]$Value, [bool]$Total = $false)
+            $g = New-Object Windows.Controls.Grid
+            $g.Margin = $(if ($Total) { '0,8,0,0' } else { '0,3,0,0' })
+            $colLeft = New-Object Windows.Controls.ColumnDefinition
+            $colLeft.Width = [Windows.GridLength]::new(1, [Windows.GridUnitType]::Star)
+            $g.ColumnDefinitions.Add($colLeft) | Out-Null
+            $colRight = New-Object Windows.Controls.ColumnDefinition
+            $colRight.Width = [Windows.GridLength]::Auto
+            $g.ColumnDefinitions.Add($colRight) | Out-Null
+            $l = New-Object Windows.Controls.TextBlock
+            $l.Style = Get-WidgetResource 'WidgetRowText'
+            $l.Text = $Label
+            $v = New-Object Windows.Controls.TextBlock
+            $v.Style = Get-WidgetResource 'WidgetRowText'
+            $v.Foreground = Get-WidgetResource 'BrushTextBright'
+            $v.HorizontalAlignment = 'Right'
+            $v.Text = $Value
+            if ($Total) { $l.FontWeight = 'SemiBold'; $v.FontWeight = 'SemiBold' }
+            [Windows.Controls.Grid]::SetColumn($v, 1)
+            $g.Children.Add($l) | Out-Null
+            $g.Children.Add($v) | Out-Null
+            $stack.Children.Add($g) | Out-Null
+        }.GetNewClosure()
+        # Field names follow Get-DevKitSystemJunk's documented shape; a missing
+        # field reads as 0 rather than breaking the dialog.
+        & $addRow 'Temp files' (Format-DevKitJunkSize ([double](Get-DevKitWidgetField $scan 'TempBytes' 0)))
+        & $addRow 'Windows Update cache' (Format-DevKitJunkSize ([double](Get-DevKitWidgetField $scan 'WuBytes' 0)))
+        & $addRow 'Recycle Bin' (Format-DevKitJunkSize ([double](Get-DevKitWidgetField $scan 'RecycleBytes' 0)))
+        & $addRow 'Total' (Format-DevKitJunkSize ([double](Get-DevKitWidgetField $scan 'TotalBytes' 0))) $true
+        $note = New-Object Windows.Controls.TextBlock
+        $note.Style = Get-WidgetResource 'StatusText'
+        $note.FontSize = 9.5
+        $note.TextWrapping = 'Wrap'
+        $note.Margin = '0,8,0,0'
+        $note.Text = 'Admin-only areas (Windows temp, update cache) can read lower than reality when the widget is not running as administrator.'
+        $stack.Children.Add($note) | Out-Null
+    }
+
+    $row = New-Object Windows.Controls.StackPanel
+    $row.Orientation = 'Horizontal'
+    $row.HorizontalAlignment = 'Right'
+    $row.Margin = '0,12,0,0'
+    $closeBtn = New-Object Windows.Controls.Button
+    $closeBtn.Style = Get-WidgetResource 'GhostButton'
+    $closeBtn.Content = 'Close'
+    $row.Children.Add($closeBtn) | Out-Null
+    $stack.Children.Add($row) | Out-Null
+    $root.Child = $stack
+    $dlg.Content = $root
+
+    $closeBtn.Add_Click({ $dlg.Close() }.GetNewClosure())
+    $dlg.Add_KeyDown({ param($s, $e) if ($e.Key -eq 'Escape') { $s.Close() } })
+    $dlg.Add_ContentRendered({ $closeBtn.Focus() | Out-Null }.GetNewClosure())
+    $dlg.ShowDialog() | Out-Null
+}
+
+$ui.BtnJunkDetails.Add_Click({ Show-DevKitJunkDetails })
 $ui.BtnJunkClean.Add_Click({
     if ($script:WorkBusy) {
         $ui.JunkStatusText.Text = 'Busy - try again in a moment.'
@@ -2203,7 +2855,7 @@ $ui.BtnJunkClean.Add_Click({
         return
     }
     $yes = Show-DevKitWidgetConfirm -Title 'Clean System Junk' `
-        -Message "This permanently deletes the contents of your user temp folder and empties the Recycle Bin.`n`nThis cannot be undone. Continue?"
+        -Message "This permanently deletes the contents of your temp folders (plus Windows temp and the update cache when running as administrator) and empties the Recycle Bin.`n`nThis cannot be undone. Continue?"
     if (-not $yes) { return }
     $ui.BtnJunkClean.IsEnabled = $false
     $ui.JunkStatusText.Text = 'Cleaning...'
@@ -2214,12 +2866,554 @@ $ui.BtnJunkClean.Add_Click({
     }
 })
 
+# ==================== GAUGE MANAGEMENT PANEL ====================
+# Clicking a CPU/MEM/GPU gauge toggles a Task Manager-style slide-out PANEL
+# (a member of the flyout carousel, NOT a separate window anymore) listing
+# the processes behind that metric, with SAFE TO CLOSE / CAUTION / LEAVE
+# ALONE classification badges and confirmed per-row kills (System rows get no
+# kill button; Stop-DevKitProcessById refuses them server-side too). The
+# panel joins the single-flyout carousel: opening one closes whichever
+# carousel flyout is open (and vice versa), while coexisting with the
+# independent terminal panel. It refreshes every 3 seconds WHILE OPEN via
+# the shared work runspace (the ProcCpu/ProcMem/ProcGpu/FreeMem/ProcKill
+# Kinds in Start-DevKitWorkJob above). All collection happens in the
+# runspace; the UI thread only renders completed results routed through
+# Update-DevKitWorkAsyncPoll.
+#
+# Timer discipline (the "no always-on timers" rule): the 3s DispatcherTimer
+# is created when the panel opens and Stopped the moment it closes (the
+# close path also unregisters the kind from $script:ProcDialogs - a result
+# arriving for a closed panel is then dropped by the render functions instead
+# of touching stale elements). A refresh declined because the work runspace
+# is busy (junk scan, git action) is not an error: the next timer tick simply
+# retries. Hide-DevKitWidget closes an open panel via
+# Close-DevKitProcessDialogs, since the work-runspace poll lives on the
+# FastTimer, which stops while the widget is hidden.
+$script:ProcDialogs = @{}          # 'Cpu'/'Mem'/'Gpu' -> open panel kind's render-state hashtable
+$script:ProcKillContext = $null    # @{ Kind; Name; Pid } of the in-flight ProcKill job
+
+function Set-DevKitProcKillContext {
+    # Assignment helper for the GetNewClosure()'d click handlers below: inside
+    # such a closure, a $script: name binds to the closure's COPIED scope -
+    # where ProcKillContext does not exist - so the write would be lost. A
+    # hashtable like $script:ProcDialogs can instead be captured by REFERENCE
+    # in a local (mutating the same live object stays visible), but
+    # ProcKillContext is REASSIGNED, so it goes through this script-level
+    # setter whose own $script: resolves correctly.
+    param($Ctx)
+    $script:ProcKillContext = $Ctx
+}
+
+function Close-DevKitProcessDialogs {
+    # Panel model: at most one gauge panel exists (it is one shared Border in
+    # the XAML whose content is re-titled per kind). Instant close - this
+    # usually runs mid-hide-to-tray or mid-dock-flip, where an animation
+    # would never be seen anyway. The close path stops the panel's 3s refresh
+    # timer and unregisters its render state.
+    if ($script:ProcPanelKind) { Set-DevKitProcPanel -Open $false -Instant }
+}
+
+function Request-DevKitProcRefresh {
+    # Fire-and-forget refresh for the open gauge panel. A declined start
+    # ($false = work runspace busy) needs no handling: the panel's own 3s
+    # timer fires Request- again shortly.
+    param([Parameter(Mandatory = $true)][string]$Kind)
+    if (-not $script:ProcDialogs.Contains($Kind)) { return }
+    [void](Start-DevKitWorkJob -Kind ('Proc' + $Kind))
+}
+
+function New-DevKitClassificationBadge {
+    # SAFE TO CLOSE (green) / CAUTION (ember) / LEAVE ALONE (grey), built on
+    # the theme's existing badge style pairs.
+    param([Parameter(Mandatory = $true)][string]$Classification)
+    $spec = switch ($Classification) {
+        'Safe'   { @{ Text = 'SAFE TO CLOSE'; Border = 'BadgeSuccess'; TextStyle = 'BadgeSuccessText' } }
+        'System' { @{ Text = 'LEAVE ALONE';   Border = 'BadgeNeutral'; TextStyle = 'BadgeNeutralText' } }
+        default  { @{ Text = 'CAUTION';       Border = 'BadgeAuth';    TextStyle = 'BadgeAuthText' } }
+    }
+    $badge = New-Object Windows.Controls.Border
+    $badge.Style = Get-WidgetResource $spec.Border
+    $badge.VerticalAlignment = 'Center'
+    $text = New-Object Windows.Controls.TextBlock
+    $text.Style = Get-WidgetResource $spec.TextStyle
+    $text.Text = $spec.Text
+    $badge.Child = $text
+    return $badge
+}
+
+function New-DevKitProcRow {
+    # One row of the gauge panel: NAME | PID | metric cell(s) | badge | Kill.
+    # The name column is a star so long process names ellipsize instead of
+    # pushing the value columns around; everything else is Auto.
+    param(
+        [Parameter(Mandatory = $true)][string]$Kind,          # owning metric (kill completion routes back to it)
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][int]$ProcessId,
+        [Parameter(Mandatory = $true)][string[]]$MetricTexts, # right-aligned value cells, e.g. @('12.3 %', '456 MB')
+        [Parameter(Mandatory = $true)][string]$Classification # 'System' | 'Safe' | 'Caution'
+    )
+    $grid = New-Object Windows.Controls.Grid
+    $grid.Margin = '0,2,0,2'
+    $nameCol = New-Object Windows.Controls.ColumnDefinition
+    $nameCol.Width = [Windows.GridLength]::new(1, [Windows.GridUnitType]::Star)
+    $nameCol.MinWidth = 80
+    $grid.ColumnDefinitions.Add($nameCol) | Out-Null
+    for ($i = 0; $i -lt (2 + $MetricTexts.Count + 1); $i++) {   # pid + metrics + badge + kill
+        $autoCol = New-Object Windows.Controls.ColumnDefinition
+        $autoCol.Width = [Windows.GridLength]::Auto
+        $grid.ColumnDefinitions.Add($autoCol) | Out-Null
+    }
+
+    $nameText = New-Object Windows.Controls.TextBlock
+    $nameText.Style = Get-WidgetResource 'WidgetRowText'
+    $nameText.Foreground = Get-WidgetResource 'BrushTextBright'
+    $nameText.Text = $Name
+    $nameText.TextTrimming = 'CharacterEllipsis'
+    [Windows.Controls.Grid]::SetColumn($nameText, 0)
+    $grid.Children.Add($nameText) | Out-Null
+
+    $col = 1
+    $pidText = New-Object Windows.Controls.TextBlock
+    $pidText.Style = Get-WidgetResource 'WidgetRowText'
+    $pidText.Foreground = Get-WidgetResource 'BrushTextDim'
+    $pidText.Text = "$ProcessId"
+    $pidText.Margin = '10,0,0,0'
+    [Windows.Controls.Grid]::SetColumn($pidText, $col)
+    $grid.Children.Add($pidText) | Out-Null
+    $col++
+
+    foreach ($metric in $MetricTexts) {
+        $metricText = New-Object Windows.Controls.TextBlock
+        $metricText.Style = Get-WidgetResource 'WidgetRowText'
+        $metricText.Foreground = Get-WidgetResource 'BrushTextBright'
+        $metricText.Text = $metric
+        $metricText.Margin = '12,0,0,0'
+        [Windows.Controls.Grid]::SetColumn($metricText, $col)
+        $grid.Children.Add($metricText) | Out-Null
+        $col++
+    }
+
+    $badge = New-DevKitClassificationBadge -Classification $Classification
+    $badge.Margin = '10,0,0,0'
+    [Windows.Controls.Grid]::SetColumn($badge, $col)
+    $grid.Children.Add($badge) | Out-Null
+    $col++
+
+    if ($Classification -ne 'System') {
+        $killBtn = New-Object Windows.Controls.Button
+        $killBtn.Style = Get-WidgetResource 'GhostButton'
+        $killBtn.Content = 'Kill'
+        $killBtn.FontSize = 9.5
+        $killBtn.Padding = '7,1'
+        $killBtn.Margin = '10,0,0,0'
+        $killBtn.Cursor = [System.Windows.Input.Cursors]::Hand
+        $killBtn.ToolTip = "Stop $Name (pid $ProcessId) - asks first"
+        $procName = $Name
+        $kindCopy = $Kind
+        # Captured by REFERENCE for the closure below: $script: names inside a
+        # GetNewClosure()'d handler bind to the closure's copied scope (where
+        # this hashtable doesn't exist), but a local holding the same live
+        # hashtable mutates the real registry. See Set-DevKitProcKillContext.
+        $procDialogs = $script:ProcDialogs
+        $killBtn.Add_Click({
+            # Same TOCTOU guard as the node table's per-pid kill, in miniature:
+            # re-verify the pid still belongs to the same process before AND
+            # after the confirm dialog (which can stay open indefinitely), so
+            # a pid recycled while the user was deciding never takes the hit.
+            # Names are compared with any ".exe" suffix stripped on BOTH sides
+            # - collectors report Name without a documented suffix convention,
+            # while Get-Process's ProcessName never carries one.
+            $normName = { param($n) ([string]$n) -replace '\.exe$', '' }
+            $preProc = $null
+            try { $preProc = Get-Process -Id $ProcessId -ErrorAction Stop } catch { }
+            if (-not $preProc -or ((& $normName $preProc.ProcessName) -ine (& $normName $procName))) { return }
+            $preStart = try { $preProc.StartTime } catch { $null }
+            $yes = Show-DevKitWidgetConfirm -Title 'End Process' -Message "Stop $procName (pid $ProcessId)?`n`nUnsaved work in that process is lost."
+            if (-not $yes) { return }
+            $postProc = $null
+            try { $postProc = Get-Process -Id $ProcessId -ErrorAction Stop } catch { }
+            if (-not $postProc -or ((& $normName $postProc.ProcessName) -ine (& $normName $procName))) { return }
+            $postStart = try { $postProc.StartTime } catch { $null }
+            if ($postStart -ne $preStart) { return }
+            # The actual Stop-Process runs in the work runspace like every
+            # other mutating job; the panel's status line reports the Note
+            # (kills on elevated processes legitimately fail from an
+            # unelevated widget - shown, never thrown).
+            if ($procDialogs.Contains($kindCopy)) {
+                $dlgState = $procDialogs[$kindCopy]
+                $dlgState.Status.Text = "Stopping $procName (pid $ProcessId)..."
+                $dlgState.Status.Foreground = Get-WidgetResource 'BrushTextDim'
+                $dlgState.Status.Visibility = 'Visible'
+            }
+            Set-DevKitProcKillContext -Ctx @{ Kind = $kindCopy; Name = $procName; Pid = $ProcessId }
+            if (-not (Start-DevKitWorkJob -Kind 'ProcKill' -TargetPid $ProcessId)) {
+                Set-DevKitProcKillContext -Ctx $null
+                if ($procDialogs.Contains($kindCopy)) {
+                    $dlgState = $procDialogs[$kindCopy]
+                    $dlgState.Status.Text = 'Busy - try again in a moment.'
+                    $dlgState.Status.Visibility = 'Visible'
+                }
+            }
+        }.GetNewClosure())
+        [Windows.Controls.Grid]::SetColumn($killBtn, $col)
+        $grid.Children.Add($killBtn) | Out-Null
+    }
+
+    $grid.ToolTip = "$Name (pid $ProcessId)"
+    return $grid
+}
+
+function Update-DevKitProcDialog {
+    # Pure render of an already-collected snapshot, on the dispatcher thread.
+    param([Parameter(Mandatory = $true)][string]$Kind, $Result)
+    # The panel may have closed (or switched metric) while its job was in
+    # flight - closing/switching unregisters the kind - so drop the result
+    # rather than render into elements the user is no longer looking at.
+    if (-not $script:ProcDialogs.Contains($Kind)) { return }
+    $dlgState = $script:ProcDialogs[$Kind]
+    $rows = @()
+
+    if ($Kind -eq 'Mem') {
+        if ($Result) {
+            $dlgState.Summary.Text = ('{0:N1} GB used of {1:N1} GB ({2:N1} GB free)' -f `
+                [double](Get-DevKitWidgetField $Result 'UsedGB' 0), `
+                [double](Get-DevKitWidgetField $Result 'TotalGB' 0), `
+                [double](Get-DevKitWidgetField $Result 'FreeGB' 0))
+        }
+        $procList = Get-DevKitWidgetField $Result 'Processes' $null
+        if ($procList) {
+            $rows = @($procList | Sort-Object { [double](Get-DevKitWidgetField $_ 'MemoryMB' 0) } -Descending)
+        }
+    } elseif ($Kind -eq 'Gpu') {
+        $dlgState.Adapter.Children.Clear()
+        $adapter = Get-DevKitWidgetField $Result 'Adapter' $null
+        $adapterName = [string](Get-DevKitWidgetField $adapter 'Name' '')
+        $util = Get-DevKitWidgetField $adapter 'UtilPercent' $null
+        $temp = Get-DevKitWidgetField $adapter 'TempC' $null
+        $memUsed = Get-DevKitWidgetField $adapter 'MemUsedMB' $null
+        $memTotal = Get-DevKitWidgetField $adapter 'MemTotalMB' $null
+        # Honest-empty rule, same as the gauges' "n/a": only when NOTHING
+        # came back. Utilization alone (the no-nvidia-smi counter path) is
+        # still real telemetry, shown under a generic adapter label.
+        if (-not $adapter -or (-not $adapterName -and $null -eq $util -and $null -eq $temp -and $null -eq $memUsed)) {
+            $noGpu = New-Object Windows.Controls.TextBlock
+            $noGpu.Style = Get-WidgetResource 'WidgetRowText'
+            $noGpu.Foreground = Get-WidgetResource 'BrushTextDim'
+            $noGpu.TextWrapping = 'Wrap'
+            $noGpu.Text = 'No GPU telemetry available on this machine.'
+            $dlgState.Adapter.Children.Add($noGpu) | Out-Null
+        } else {
+            $nameBlock = New-Object Windows.Controls.TextBlock
+            $nameBlock.Style = Get-WidgetResource 'WidgetRowText'
+            $nameBlock.Foreground = Get-WidgetResource 'BrushTextBright'
+            $nameBlock.FontWeight = 'SemiBold'
+            $nameBlock.TextWrapping = 'Wrap'
+            $nameBlock.Text = if ($adapterName) { $adapterName } else { 'GPU (adapter name unavailable)' }
+            $dlgState.Adapter.Children.Add($nameBlock) | Out-Null
+            $stats = @()
+            if ($null -ne $util) { $stats += ('{0:N0}% util' -f [double]$util) }
+            if ($null -ne $temp) { $stats += ('{0:N0} ' -f [double]$temp) + [char]0x00B0 + 'C' }
+            if ($null -ne $memUsed) {
+                $stats += if ($null -ne $memTotal -and [double]$memTotal -gt 0) {
+                    ('{0:N1} / {1:N1} GB VRAM' -f ([double]$memUsed / 1024), ([double]$memTotal / 1024))
+                } else {
+                    ('{0:N0} MB VRAM' -f [double]$memUsed)
+                }
+            }
+            if ($stats.Count -gt 0) {
+                $statsBlock = New-Object Windows.Controls.TextBlock
+                $statsBlock.Style = Get-WidgetResource 'WidgetRowText'
+                $statsBlock.Text = $stats -join '  |  '
+                $dlgState.Adapter.Children.Add($statsBlock) | Out-Null
+            }
+            $source = [string](Get-DevKitWidgetField $adapter 'Source' '')
+            if ($source) {
+                $sourceBlock = New-Object Windows.Controls.TextBlock
+                $sourceBlock.Style = Get-WidgetResource 'StatusText'
+                $sourceBlock.FontSize = 9
+                $sourceBlock.Text = "telemetry via $source"
+                $dlgState.Adapter.Children.Add($sourceBlock) | Out-Null
+            }
+        }
+        $procList = Get-DevKitWidgetField $Result 'Processes' $null
+        if ($procList) {
+            $rows = @($procList | Sort-Object { [double](Get-DevKitWidgetField $_ 'GpuPercent' 0) } -Descending)
+        }
+    } else {
+        # Cpu: ProcCpu returns the row array directly. Safe-to-close
+        # candidates sort first, then caution, then system - in a 15-row list
+        # the badge alone is too easy to skim past.
+        if ($Result) {
+            $rank = @{ Safe = 0; Caution = 1; System = 2 }
+            $rows = @($Result | Sort-Object {
+                    $r = $rank[[string](Get-DevKitWidgetField $_ 'Classification' 'Caution')]
+                    if ($null -eq $r) { 1 } else { $r }
+                }, { -[double](Get-DevKitWidgetField $_ 'CpuPercent' 0) })
+        }
+    }
+
+    $dlgState.Rows.Children.Clear()
+    if ($rows.Count -eq 0) {
+        $none = New-Object Windows.Controls.TextBlock
+        $none.Style = Get-WidgetResource 'WidgetRowText'
+        $none.Foreground = Get-WidgetResource 'BrushTextDim'
+        $none.TextWrapping = 'Wrap'
+        $none.Text = 'No process data reported.'
+        $dlgState.Rows.Children.Add($none) | Out-Null
+    } else {
+        foreach ($procRow in $rows) {
+            $rowName = [string](Get-DevKitWidgetField $procRow 'Name' '?')
+            $rowPid = [int](Get-DevKitWidgetField $procRow 'Pid' 0)
+            $class = [string](Get-DevKitWidgetField $procRow 'Classification' '')
+            if (-not $class) {
+                # Rows are documented to carry Classification already; this is
+                # the fallback for a partial/older collector. Pure name-based
+                # classification - cheap enough to run on the UI thread.
+                try { $class = [string](Get-DevKitProcessClassification -Name $rowName) } catch { $class = '' }
+                if (-not $class) { $class = 'Caution' }
+            }
+            $metrics = switch ($Kind) {
+                'Cpu' { @(('{0:N1} %' -f [double](Get-DevKitWidgetField $procRow 'CpuPercent' 0)), ('{0:N0} MB' -f [double](Get-DevKitWidgetField $procRow 'MemoryMB' 0))) }
+                'Gpu' { @('{0:N1} %' -f [double](Get-DevKitWidgetField $procRow 'GpuPercent' 0)) }
+                default { @('{0:N0} MB' -f [double](Get-DevKitWidgetField $procRow 'MemoryMB' 0)) }
+            }
+            $dlgState.Rows.Children.Add((New-DevKitProcRow -Kind $Kind -Name $rowName -ProcessId $rowPid -MetricTexts $metrics -Classification $class)) | Out-Null
+        }
+    }
+    # The "Loading..." line only applies until the first real render.
+    if ($dlgState.Status.Text -eq 'Loading...') { $dlgState.Status.Visibility = 'Collapsed' }
+}
+
+function Complete-DevKitProcKill {
+    param($Result)
+    $ctx = $script:ProcKillContext
+    $script:ProcKillContext = $null
+    if (-not $ctx) { return }
+    if (-not $script:ProcDialogs.Contains($ctx.Kind)) { return }   # panel closed mid-kill: drop
+    $dlgState = $script:ProcDialogs[$ctx.Kind]
+    $stopped = [bool](Get-DevKitWidgetField $Result 'Stopped' $false)
+    $note = [string](Get-DevKitWidgetField $Result 'Note' '')
+    if (-not $note) { $note = if ($stopped) { "Stopped $($ctx.Name)." } else { "Could not stop $($ctx.Name) - it may be elevated; restart the widget as administrator." } }
+    $dlgState.Status.Text = $note
+    $dlgState.Status.Foreground = Get-WidgetResource $(if ($stopped) { 'BrushTextDim' } else { 'BrushAccentEmber' })
+    $dlgState.Status.Visibility = 'Visible'
+    Request-DevKitProcRefresh -Kind $ctx.Kind   # re-render without the dead process
+}
+
+function Complete-DevKitFreeMemory {
+    param($Result)
+    if (-not $script:ProcDialogs.Contains('Mem')) { return }   # panel closed mid-job: drop
+    $dlgState = $script:ProcDialogs['Mem']
+    $dlgState.FreeBtn.IsEnabled = $true
+    $freed = Get-DevKitWidgetField $Result 'FreedMB' $null
+    $trimmed = Get-DevKitWidgetField $Result 'TrimmedProcesses' $null
+    if ($null -ne $freed -and $null -ne $trimmed) {
+        $dlgState.Status.Text = "Freed $([int][double]$freed) MB across $([int]$trimmed) processes."
+    } else {
+        $dlgState.Status.Text = [string](Get-DevKitWidgetField $Result 'Note' 'Memory trim finished.')
+    }
+    $dlgState.Status.Foreground = Get-WidgetResource 'BrushTextDim'
+    $dlgState.Status.Visibility = 'Visible'
+    Request-DevKitProcRefresh -Kind 'Mem'   # the list's MEM MB column moved
+}
+
+function Update-DevKitProcDialogTimeout {
+    # Called from Update-DevKitWorkAsyncPoll's 30s timeout branch. Plain
+    # refreshes (ProcCpu/ProcMem/ProcGpu) just note it - the panel's timer
+    # retries - but a timed-out kill/free-mem must also re-enable its button
+    # and clear the kill context, or the panel would look stuck forever.
+    param([Parameter(Mandatory = $true)][string]$Kind)
+    if ($Kind -eq 'FreeMem') {
+        if ($script:ProcDialogs.Contains('Mem')) {
+            $dlgState = $script:ProcDialogs['Mem']
+            $dlgState.FreeBtn.IsEnabled = $true
+            $dlgState.Status.Text = 'Freeing memory timed out - try again.'
+            $dlgState.Status.Foreground = Get-WidgetResource 'BrushAccentEmber'
+            $dlgState.Status.Visibility = 'Visible'
+        }
+        return
+    }
+    if ($Kind -eq 'ProcKill') {
+        $ctx = $script:ProcKillContext
+        $script:ProcKillContext = $null
+        if ($ctx -and $script:ProcDialogs.Contains($ctx.Kind)) {
+            $dlgState = $script:ProcDialogs[$ctx.Kind]
+            $dlgState.Status.Text = 'Kill timed out - the process may still be running.'
+            $dlgState.Status.Foreground = Get-WidgetResource 'BrushAccentEmber'
+            $dlgState.Status.Visibility = 'Visible'
+        }
+        return
+    }
+    $dlgKind = $Kind.Replace('Proc', '')
+    if ($script:ProcDialogs.Contains($dlgKind)) {
+        $dlgState = $script:ProcDialogs[$dlgKind]
+        $dlgState.Status.Text = 'Collection timed out - retrying...'
+        $dlgState.Status.Foreground = Get-WidgetResource 'BrushTextDim'
+        $dlgState.Status.Visibility = 'Visible'
+    }
+}
+
+function Show-DevKitProcessDialog {
+    # Gauge-click entry (the name predates the panel model). Toggles that
+    # metric's management PANEL: clicking the gauge whose panel is open
+    # closes it - the same toggle convention as the side tabs.
+    param([Parameter(Mandatory = $true)][ValidateSet('Cpu', 'Mem', 'Gpu')][string]$Kind)
+    if ($script:ProcPanelKind -eq $Kind) { Set-DevKitProcPanel -Open $false }
+    else { Set-DevKitProcPanel -Kind $Kind -Open $true }
+}
+
+function Unregister-DevKitProcPanelState {
+    # Stops the panel's 3s refresh timer and drops the kind's render-state
+    # registration, so a result arriving afterward is dropped by the render
+    # functions (they all no-op when $script:ProcDialogs lacks the kind).
+    # Never touches geometry - this is the state/teardown half of closing,
+    # shared by Set-DevKitProcPanel's close path and its kind-switch path.
+    if (-not $script:ProcPanelKind) { return }
+    $kind = $script:ProcPanelKind
+    if ($script:ProcDialogs.Contains($kind)) {
+        try { $script:ProcDialogs[$kind].Timer.Stop() } catch { }
+        $script:ProcDialogs.Remove($kind)
+    }
+}
+
+function Set-DevKitProcPanel {
+    # The CPU/MEM/GPU management panel: one shared carousel flyout (ProcFlyout
+    # in the XAML) re-titled and re-populated per metric. Same slide/geometry
+    # contract as Set-DevKitGitFlyout (see the long comment there: flag set
+    # BEFORE targets are computed, every window target derived from the
+    # flag-based target layout), and the same carousel exclusivity - opening
+    # it instant-closes whichever carousel flyout is open, but never the
+    # independent terminal panel.
+    param([ValidateSet('Cpu', 'Mem', 'Gpu')][string]$Kind, [bool]$Open, [switch]$Instant)
+
+    if ($Open) {
+        if ($script:ProcPanelKind -eq $Kind) { return }   # already showing this metric
+        if ($script:GitFlyoutOpen) { Set-DevKitGitFlyout -Open $false -Instant }
+        if ($script:NotesFlyoutOpen) { Set-DevKitNotesFlyout -Open $false -Instant }
+        if ($script:FilesFlyoutOpen) { Set-DevKitFilesFlyout -Open $false -Instant }
+        if ($script:OnDeckFlyoutOpen) { Set-DevKitOnDeckFlyout -Open $false -Instant }
+        # Switching metrics with the panel already open: tear down the old
+        # kind's timer/registration first; the panel itself stays put (the
+        # width is kind-independent, so the geometry targets don't change).
+        if ($script:ProcPanelKind) { Unregister-DevKitProcPanelState }
+
+        $titles = @{ Cpu = 'CPU - TOP PROCESSES'; Mem = 'MEMORY - TOP PROCESSES'; Gpu = 'GPU - USAGE BY PROCESS' }
+        $ui.ProcFlyoutTitle.Text = $titles[$Kind]
+        $memVisible = if ($Kind -eq 'Mem') { 'Visible' } else { 'Collapsed' }
+        $ui.ProcSummaryText.Visibility = $memVisible
+        $ui.BtnProcFreeMem.Visibility = $memVisible
+        $ui.ProcAdapterPanel.Visibility = if ($Kind -eq 'Gpu') { 'Visible' } else { 'Collapsed' }
+        $ui.ProcAdapterPanel.Children.Clear()
+        $ui.ProcRowsPanel.Children.Clear()
+        $ui.ProcFlyoutStatus.Text = 'Loading...'
+        $ui.ProcFlyoutStatus.Foreground = Get-WidgetResource 'BrushTextDim'
+        $ui.ProcFlyoutStatus.Visibility = 'Visible'
+
+        $script:GitFlyoutAnimToken++
+        $token = $script:GitFlyoutAnimToken
+        $script:ProcPanelKind = $Kind   # flag-first, before target computation
+        $targetFlyoutWidth = $script:ProcFlyoutWidth
+        $targetWindowWidth = $script:WidgetChromeWidth + $script:WidgetContentWidth + (Get-DevKitWidgetPanelExtra)
+        $pinnedRight = $window.Left + $window.Width
+        $targetLeft = $pinnedRight - $targetWindowWidth
+
+        if ($Instant) {
+            $window.BeginAnimation([Windows.Window]::WidthProperty, $null)
+            $window.BeginAnimation([Windows.Window]::LeftProperty, $null)
+            $ui.ProcFlyout.BeginAnimation([Windows.Controls.Border]::WidthProperty, $null)
+            $ui.ProcFlyout.Width = $targetFlyoutWidth
+            $window.Width = $targetWindowWidth
+            if ($script:DockMode -eq 'Right') { $window.Left = $targetLeft }
+        } else {
+            Start-DevKitFlyoutSlide -Target $ui.ProcFlyout -Property ([Windows.Controls.Border]::WidthProperty) -To $targetFlyoutWidth -Opening $true -Token $token
+            Start-DevKitFlyoutSlide -Target $window -Property ([Windows.Window]::WidthProperty) -To $targetWindowWidth -Opening $true -Token $token
+            if ($script:DockMode -eq 'Right') {
+                Start-DevKitFlyoutSlide -Target $window -Property ([Windows.Window]::LeftProperty) -To $targetLeft -Opening $true -Token $token
+            }
+        }
+        $ui.ProcFlyoutInner.Width = $script:ProcFlyoutWidth
+
+        # Created WITH the open panel and stopped on close - never an
+        # always-on timer. The tick only ASKS for a refresh; collection runs
+        # in the work runspace and the result comes back via
+        # Update-DevKitWorkAsyncPoll.
+        $timer = New-Object Windows.Threading.DispatcherTimer
+        $timer.Interval = [TimeSpan]::FromSeconds(3)
+        $kindCopy = $Kind
+        $timer.Add_Tick({ Request-DevKitProcRefresh -Kind $kindCopy }.GetNewClosure())
+        # The render-state registry the render/completion functions read. Rows/
+        # Status/Summary/Adapter/FreeBtn point at the panel's SHARED XAML
+        # elements (Visibility-gated per kind above); there is no per-kind
+        # window anymore.
+        $script:ProcDialogs[$Kind] = @{
+            Rows    = $ui.ProcRowsPanel
+            Status  = $ui.ProcFlyoutStatus
+            Summary = $ui.ProcSummaryText
+            Adapter = $ui.ProcAdapterPanel
+            FreeBtn = $ui.BtnProcFreeMem
+            Timer   = $timer
+        }
+        Request-DevKitProcRefresh -Kind $Kind   # first fill right away, not 3s in
+        $timer.Start()
+        return
+    }
+
+    if (-not $script:ProcPanelKind) { return }   # already closed
+    Unregister-DevKitProcPanelState
+
+    $script:GitFlyoutAnimToken++
+    $token = $script:GitFlyoutAnimToken
+    $script:ProcPanelKind = $null   # flag-first, before target computation
+    $targetWindowWidth = $script:WidgetChromeWidth + $script:WidgetContentWidth + (Get-DevKitWidgetPanelExtra)
+    $pinnedRight = $window.Left + $window.Width
+    $targetLeft = $pinnedRight - $targetWindowWidth
+
+    if ($Instant) {
+        $window.BeginAnimation([Windows.Window]::WidthProperty, $null)
+        $window.BeginAnimation([Windows.Window]::LeftProperty, $null)
+        $ui.ProcFlyout.BeginAnimation([Windows.Controls.Border]::WidthProperty, $null)
+        $ui.ProcFlyout.Width = 0
+        $window.Width = $targetWindowWidth
+        if ($script:DockMode -eq 'Right') { $window.Left = $targetLeft }
+    } else {
+        Start-DevKitFlyoutSlide -Target $ui.ProcFlyout -Property ([Windows.Controls.Border]::WidthProperty) -To 0 -Opening $false -Token $token
+        Start-DevKitFlyoutSlide -Target $window -Property ([Windows.Window]::WidthProperty) -To $targetWindowWidth -Opening $false -Token $token
+        if ($script:DockMode -eq 'Right') {
+            Start-DevKitFlyoutSlide -Target $window -Property ([Windows.Window]::LeftProperty) -To $targetLeft -Opening $false -Token $token
+        }
+    }
+}
+
+$ui.BtnProcClose.Add_Click({ Set-DevKitProcPanel -Open $false })
+$ui.BtnProcFreeMem.Add_Click({
+    $yes = Show-DevKitWidgetConfirm -Title 'Free Memory' `
+        -Message "This trims the working sets of running applications, returning unused memory to Windows.`n`nNo processes are closed - this is safe. Continue?"
+    if (-not $yes) { return }
+    $ui.BtnProcFreeMem.IsEnabled = $false
+    $ui.ProcFlyoutStatus.Text = 'Freeing memory...'
+    $ui.ProcFlyoutStatus.Foreground = Get-WidgetResource 'BrushTextDim'
+    $ui.ProcFlyoutStatus.Visibility = 'Visible'
+    if (-not (Start-DevKitWorkJob -Kind 'FreeMem')) {
+        $ui.BtnProcFreeMem.IsEnabled = $true
+        $ui.ProcFlyoutStatus.Text = 'Busy - try again in a moment.'
+    }
+})
+
+# The gauge stacks are clickable (hand cursor + "Click to manage" tooltip set
+# in the XAML); children (Path/TextBlock) don't handle clicks, so the press
+# bubbles up to the stack. MouseLeftButtonUp (not Down) so a mis-click that
+# turns into a drag doesn't fire. Each click TOGGLES that metric's panel.
+$ui.CpuGaugeStack.Add_MouseLeftButtonUp({ Show-DevKitProcessDialog -Kind 'Cpu' })
+$ui.MemGaugeStack.Add_MouseLeftButtonUp({ Show-DevKitProcessDialog -Kind 'Mem' })
+$ui.GpuGaugeStack.Add_MouseLeftButtonUp({ Show-DevKitProcessDialog -Kind 'Gpu' })
+
 # ==================== GITHUB FLYOUT ====================
 # Side panel for the active project: branch + ahead/behind, the drawn commit
 # graph (lanes + gradient S-curves + ref pills - see Render-DevKitGitGraph),
 # fetch/pull/push, open-on-GitHub links, and a shortcut to the real Git
-# Cleanup tool. Lives in whichever root-Grid column (0/west or 2/east) faces
-# INTO the screen - the opposite of the docked edge - toggled alongside
+# Cleanup tool. Lives in the shared CAROUSEL root-Grid column (2/west or
+# 4/east - the terminal panel has its own outer column) on whichever side
+# faces INTO the screen - the opposite of the docked edge - toggled alongside
 # $script:DockMode in Set-DevKitWidgetDock. Opening grows the window by
 # FlyoutWidth px on that side; closing restores the geometry. The GIT
 # pull-tab (BtnGitTab) that opens/closes it is always visible regardless of
@@ -2268,19 +3462,106 @@ function Save-DevKitNotesFlyoutWidthSetting {
     } catch { }
 }
 
+function Get-DevKitFilesFlyoutWidthSetting {
+    # preferences.filesFlyoutWidth - same clamp/fallback contract as the Git
+    # and Notes flyout widths above, persisted independently so each panel
+    # keeps the width the user actually gave it.
+    try {
+        $w = [double](Get-DevKitSettings).preferences.filesFlyoutWidth
+        if ($w -gt 0) { return [math]::Min($script:MaxFlyoutWidth, [math]::Max($script:MinFlyoutWidth, $w)) }
+    } catch { }
+    return 300
+}
+
+function Save-DevKitFilesFlyoutWidthSetting {
+    try {
+        $settings = Get-DevKitSettings
+        $settings.preferences.filesFlyoutWidth = [int][math]::Round($script:FilesFlyoutWidth)
+        Set-DevKitSettings -Settings $settings
+    } catch { }
+}
+
+function Get-DevKitOnDeckFlyoutWidthSetting {
+    # preferences.onDeckFlyoutWidth - same clamp/fallback contract as the
+    # Git, Notes and Files flyout widths above, persisted independently so
+    # each panel keeps the width the user actually gave it.
+    try {
+        $w = [double](Get-DevKitSettings).preferences.onDeckFlyoutWidth
+        if ($w -gt 0) { return [math]::Min($script:MaxFlyoutWidth, [math]::Max($script:MinFlyoutWidth, $w)) }
+    } catch { }
+    return 300
+}
+
+function Save-DevKitOnDeckFlyoutWidthSetting {
+    try {
+        $settings = Get-DevKitSettings
+        $settings.preferences.onDeckFlyoutWidth = [int][math]::Round($script:OnDeckFlyoutWidth)
+        Set-DevKitSettings -Settings $settings
+    } catch { }
+}
+
+function Get-DevKitProcFlyoutWidthSetting {
+    # preferences.procFlyoutWidth - the gauge management panel's width; same
+    # clamp/fallback contract as the carousel flyout widths above.
+    try {
+        $w = [double](Get-DevKitSettings).preferences.procFlyoutWidth
+        if ($w -gt 0) { return [math]::Min($script:MaxFlyoutWidth, [math]::Max($script:MinFlyoutWidth, $w)) }
+    } catch { }
+    return 340
+}
+
+function Save-DevKitProcFlyoutWidthSetting {
+    try {
+        $settings = Get-DevKitSettings
+        $settings.preferences.procFlyoutWidth = [int][math]::Round($script:ProcFlyoutWidth)
+        Set-DevKitSettings -Settings $settings
+    } catch { }
+}
+
+function Get-DevKitTerminalFlyoutWidthSetting {
+    # preferences.terminalFlyoutWidth - the terminal panel's width; same
+    # clamp/fallback contract, just a wider default (console output wants
+    # more columns than a notes list does).
+    try {
+        $w = [double](Get-DevKitSettings).preferences.terminalFlyoutWidth
+        if ($w -gt 0) { return [math]::Min($script:MaxFlyoutWidth, [math]::Max($script:MinFlyoutWidth, $w)) }
+    } catch { }
+    return 420
+}
+
+function Save-DevKitTerminalFlyoutWidthSetting {
+    try {
+        $settings = Get-DevKitSettings
+        $settings.preferences.terminalFlyoutWidth = [int][math]::Round($script:TermFlyoutWidth)
+        Set-DevKitSettings -Settings $settings
+    } catch { }
+}
+
 $script:FlyoutWidth = Get-DevKitGitFlyoutWidthSetting
 $script:GitFlyoutOpen = $false
 $script:NotesFlyoutWidth = Get-DevKitNotesFlyoutWidthSetting
 $script:NotesFlyoutOpen = $false
+$script:FilesFlyoutWidth = Get-DevKitFilesFlyoutWidthSetting
+$script:FilesFlyoutOpen = $false
+$script:OnDeckFlyoutWidth = Get-DevKitOnDeckFlyoutWidthSetting
+$script:OnDeckFlyoutOpen = $false
+$script:ProcFlyoutWidth = Get-DevKitProcFlyoutWidthSetting
+# Which gauge metric the management panel is currently showing - $null when
+# the panel is closed. Doubles as the panel's open flag (it is always set/
+# cleared BEFORE window geometry targets are computed - see
+# Get-DevKitWidgetPanelExtra for why the target layout is flag-derived).
+$script:ProcPanelKind = $null
+$script:TermFlyoutWidth = Get-DevKitTerminalFlyoutWidthSetting
+$script:TermFlyoutOpen = $false
 $script:GitOverview = $null     # last Get-DevKitRepoOverview result
 $script:GitRefreshPending = $false   # a GitOverview was declined while the work runspace was busy
 $script:EnvDriftRefreshPending = $false   # an EnvDrift check was declined while the work runspace was busy
-
-function Get-DevKitWidgetFlyoutExtra {
-    if ($script:GitFlyoutOpen) { return $script:FlyoutWidth }
-    if ($script:NotesFlyoutOpen) { return $script:NotesFlyoutWidth }
-    return 0
-}
+# Commit graph click-to-expand: the hash whose inline details card is open,
+# the last Get-DevKitCommitDetails result (keyed by .Hash), and the re-fire
+# flag for a CommitDetails job declined while the work runspace was busy.
+$script:GitExpandedCommitHash = $null
+$script:GitCommitDetails = $null
+$script:GitCommitDetailsPending = $false
 
 function Test-DevKitEnvDriftSilenced {
     # True when the given project path is on the user's dismissed list
@@ -2365,23 +3646,40 @@ function Set-DevKitWidgetEnvDriftResult {
 }
 
 function Sync-DevKitWidgetGitState {
-    # The flyout toggle and the project-scoped quick actions only work with
-    # an active project; losing the active project while the flyout is open
-    # closes it (and hides the ambient badge / env hint).
+    # The flyout toggles and the project-scoped quick actions only work with
+    # an active project; losing the active project while a carousel flyout is
+    # open closes it (and hides the ambient badge / env hint). The TERMINAL
+    # tab is deliberately NOT in the disabled set: its panel stays available
+    # without a project (commands fall back to the DevKit root, with a note).
     $hasProject = $null -ne $script:ActiveProjectPath
     $ui.BtnGitTab.IsEnabled = $hasProject
     $ui.BtnGitTab.Opacity = if ($hasProject) { 1.0 } else { 0.45 }
     $ui.BtnNotesTab.IsEnabled = $hasProject
     $ui.BtnNotesTab.Opacity = if ($hasProject) { 1.0 } else { 0.45 }
+    $ui.BtnFilesTab.IsEnabled = $hasProject
+    $ui.BtnFilesTab.Opacity = if ($hasProject) { 1.0 } else { 0.45 }
+    $ui.BtnOnDeckTab.IsEnabled = $hasProject
+    $ui.BtnOnDeckTab.Opacity = if ($hasProject) { 1.0 } else { 0.45 }
     foreach ($b in @($ui.BtnOpenEditor, $ui.BtnOpenExplorer, $ui.BtnOpenTerminal, $ui.BtnRunScript)) {
         $b.IsEnabled = $hasProject
         $b.Opacity = if ($hasProject) { 1.0 } else { 0.45 }
+    }
+    # Project changed (or was lost) while the terminal panel is open: re-home
+    # it. The terminal never closes on project loss - it is independent of
+    # the flyout carousel - it just re-roots to the DevKit root and shows the
+    # no-project note. Placed ahead of the no-project early-return below so
+    # BOTH paths re-home it.
+    if ($script:TermFlyoutOpen) {
+        $termRoot = if ($hasProject) { $script:ActiveProjectPath } else { $ScriptDir }
+        if ($script:TermCwd -ne $termRoot) { Set-DevKitTermLocation -Note }
     }
     if (-not $hasProject) {
         $ui.GitBadgeText.Visibility = 'Collapsed'
         $ui.EnvDriftRow.Visibility = 'Collapsed'
         if ($script:GitFlyoutOpen) { Set-DevKitGitFlyout -Open $false }
         if ($script:NotesFlyoutOpen) { Set-DevKitNotesFlyout -Open $false }
+        if ($script:FilesFlyoutOpen) { Set-DevKitFilesFlyout -Open $false }
+        if ($script:OnDeckFlyoutOpen) { Set-DevKitOnDeckFlyout -Open $false }
         return
     }
     # Project changed while the Notes panel is open: flush the old project's
@@ -2389,6 +3687,16 @@ function Sync-DevKitWidgetGitState {
     # lazily on their next open).
     if ($script:NotesFlyoutOpen -and $script:NotesProjectPath -ne $script:ActiveProjectPath) {
         Open-DevKitWidgetNotesProject
+    }
+    # Project changed while the Files panel is open: re-root the tree (and
+    # drop the old project's clipboard/expansion state) for the new one.
+    if ($script:FilesFlyoutOpen -and $script:FilesProjectPath -ne $script:ActiveProjectPath) {
+        Open-DevKitWidgetFilesProject
+    }
+    # Project changed while the On-Deck panel is open: load the new project's
+    # list (closed panels just reload lazily on their next open).
+    if ($script:OnDeckFlyoutOpen -and $script:OnDeckProjectPath -ne $script:ActiveProjectPath) {
+        Open-DevKitWidgetOnDeckProject
     }
     Start-DevKitGitRefresh   # keeps the ambient badge (and open flyout) current
     # Active project changed under us - never leave the PR/Issues tabs (if
@@ -2449,27 +3757,38 @@ function Set-DevKitGitFlyout {
     param([bool]$Open, [switch]$Instant)
     if ($Open -eq $script:GitFlyoutOpen) { return }
     if ($Open -and -not $script:ActiveProjectPath) { return }
-    # Only one flyout at a time. Close-the-other INSTANTLY (not animated):
-    # both panels animate window.Width/Left, and two slides in flight would
-    # fight over them; the instant close settles the window synchronously
-    # before this open computes its own targets from the current geometry.
+    # Only one CAROUSEL flyout at a time (the terminal panel is independent
+    # and never closed by this - see Set-DevKitTerminalFlyout). Close-the-other
+    # INSTANTLY (not animated): both panels animate window.Width/Left, and two
+    # slides in flight would fight over them; the instant close settles the
+    # window synchronously before this open computes its own targets.
     if ($Open -and $script:NotesFlyoutOpen) { Set-DevKitNotesFlyout -Open $false -Instant }
+    if ($Open -and $script:FilesFlyoutOpen) { Set-DevKitFilesFlyout -Open $false -Instant }
+    if ($Open -and $script:OnDeckFlyoutOpen) { Set-DevKitOnDeckFlyout -Open $false -Instant }
+    if ($Open -and $script:ProcPanelKind) { Set-DevKitProcPanel -Open $false -Instant }
 
-    # window.Width/Left and GitFlyout.Width are always animated together, in
-    # lockstep (same target delta, same Duration/Easing), by this function -
-    # so "content-only width/left" (the geometry the flyout ADDS on top of) is
-    # invariant at any instant, mid-animation or fully at rest: reading it back
-    # out via subtraction below always recovers the same value, whether or not
-    # a previous slide is still finishing. That is what makes it safe to
-    # recompute fresh targets on every call (including a rapid re-toggle)
-    # without tracking a separate "logical base width" anywhere.
+    # window.Width/Left and the panel's Border.Width are always animated
+    # together, in lockstep (same Duration/Easing). The open flag is set
+    # BEFORE targets are computed, and every window target is derived from the
+    # state flags + width variables (the TARGET layout, via
+    # Get-DevKitWidgetPanelExtra), never from live animated values - so a
+    # slide that supersedes a still-finishing one (possible now that the
+    # independent terminal panel can animate at the same time as a carousel
+    # panel) still lands on the correct final geometry: WPF lets the newer
+    # BeginAnimation replace the older one per property, and because both
+    # chase flag-derived totals, whichever animation wins converges to the
+    # same end state.
     $script:GitFlyoutAnimToken++
     $token = $script:GitFlyoutAnimToken
-    $curFlyoutWidth = $ui.GitFlyout.Width
-    $curLeft = $window.Left
-    $contentWidth = $window.Width - $curFlyoutWidth
+    $script:GitFlyoutOpen = $Open
     $targetFlyoutWidth = if ($Open) { $script:FlyoutWidth } else { 0 }
-    $targetWindowWidth = $contentWidth + $targetFlyoutWidth
+    $targetWindowWidth = $script:WidgetChromeWidth + $script:WidgetContentWidth + (Get-DevKitWidgetPanelExtra)
+    # The window's live RIGHT edge (read BEFORE any BeginAnimation cancel
+    # below - canceling reverts to pre-animation base values, so never re-read
+    # afterward). Docked right, that edge is pinned to the screen edge: the
+    # target Left is whatever keeps Left+Width fixed at it.
+    $pinnedRight = $window.Left + $window.Width
+    $targetLeft = $pinnedRight - $targetWindowWidth
 
     if ($Instant) {
         # Snap straight to the final values instead of animating - used by a
@@ -2479,26 +3798,27 @@ function Set-DevKitGitFlyout {
         # OLD side's target. Cancel first: the token bump above already makes
         # any in-flight animation's Completed handler a no-op, but the
         # animation itself is still driving these properties every frame
-        # until BeginAnimation(..., $null) detaches it. Note BeginAnimation(
-        # ..., $null) reverts to the PRE-animation base value, not the live
-        # mid-flight one - so $curLeft/$curFlyoutWidth (captured above, before
-        # any cancel) are used for the math below, never a post-cancel re-read.
+        # until BeginAnimation(..., $null) detaches it.
         $window.BeginAnimation([Windows.Window]::WidthProperty, $null)
         $window.BeginAnimation([Windows.Window]::LeftProperty, $null)
         $ui.GitFlyout.BeginAnimation([Windows.Controls.Border]::WidthProperty, $null)
         $ui.GitFlyout.Width = $targetFlyoutWidth
         $window.Width = $targetWindowWidth
-        if ($script:DockMode -eq 'Right') {
-            $contentLeft = $curLeft + $curFlyoutWidth
-            $window.Left = if ($Open) { $contentLeft - $targetFlyoutWidth } else { $contentLeft }
-        }
-        $script:GitFlyoutOpen = $Open
+        if ($script:DockMode -eq 'Right') { $window.Left = $targetLeft }
         if ($Open) {
             $ui.GitFlyoutInner.Width = $script:FlyoutWidth
             $ui.BtnGitTab.Foreground = Get-WidgetResource 'BrushAccentBlue'
             $ui.GitFlyoutTitle.Text = [string]$script:ActiveProjectName
             $ui.GitFlyoutStatus.Text = ''
             Set-DevKitGitActiveTab -Tab 'Commits'   # never reopen mid-way through a stale PR/Issues tab
+            # Both Commits-tab sections default to EXPANDED on every open. In
+            # code, not markup: the theme's Expander template reveals content
+            # via the Expanded EVENT's storyboard (ExpandSite starts Collapsed/
+            # ScaleY 0), so a markup-initial IsExpanded=True never fires the
+            # event and the content stays hidden forever. The flyout's template
+            # is long applied by the time it opens, so the toggle works here.
+            $ui.UncommittedExpander.IsExpanded = $true
+            $ui.CommitGraphExpander.IsExpanded = $true
             Start-DevKitGitRefresh
         } else {
             $ui.BtnGitTab.Foreground = Get-WidgetResource 'BrushTextMuted'
@@ -2507,37 +3827,39 @@ function Set-DevKitGitFlyout {
     }
 
     if ($Open) {
-        $script:GitFlyoutOpen = $true
         $ui.GitFlyoutInner.Width = $script:FlyoutWidth
         Start-DevKitFlyoutSlide -Target $ui.GitFlyout -Property ([Windows.Controls.Border]::WidthProperty) -To $targetFlyoutWidth -Opening $true -Token $token
         Start-DevKitFlyoutSlide -Target $window -Property ([Windows.Window]::WidthProperty) -To $targetWindowWidth -Opening $true -Token $token
         if ($script:DockMode -eq 'Right') {
             # Right-docked: the main widget's RIGHT edge is the pinned,
-            # docked edge, so the flyout (west slot, column 0) must grow the
+            # docked edge, so the flyout (west carousel slot) must grow the
             # window LEFTWARD - Left slides left as Width grows, keeping
-            # Left+Width (the right edge) fixed. Same lockstep invariant as
-            # contentWidth above applies to window.Left + GitFlyout.Width.
-            $contentLeft = $window.Left + $curFlyoutWidth
-            $targetLeft = $contentLeft - $targetFlyoutWidth
+            # Left+Width (the right edge) fixed.
             Start-DevKitFlyoutSlide -Target $window -Property ([Windows.Window]::LeftProperty) -To $targetLeft -Opening $true -Token $token
         }
         # Left-docked: the main widget's LEFT edge is the pinned edge (stays
-        # at wa.Left), so the flyout (east slot, column 2) just grows the
+        # at wa.Left), so the flyout (east carousel slot) just grows the
         # window RIGHTWARD - Width grows, Left is untouched.
         $ui.BtnGitTab.Foreground = Get-WidgetResource 'BrushAccentBlue'
         $ui.GitFlyoutTitle.Text = [string]$script:ActiveProjectName
         $ui.GitFlyoutStatus.Text = ''
         Set-DevKitGitActiveTab -Tab 'Commits'   # never reopen mid-way through a stale PR/Issues tab
+        # Both Commits-tab sections default to EXPANDED on every open. In
+        # code, not markup: the theme's Expander template reveals content via
+        # the Expanded EVENT's storyboard (ExpandSite starts Collapsed/ScaleY
+        # 0), so a markup-initial IsExpanded=True never fires the event and
+        # the content stays hidden forever. The flyout's template is long
+        # applied by the time it opens, so the toggle works here.
+        $ui.UncommittedExpander.IsExpanded = $true
+        $ui.CommitGraphExpander.IsExpanded = $true
         Start-DevKitGitRefresh
     } else {
-        $script:GitFlyoutOpen = $false
         Start-DevKitFlyoutSlide -Target $ui.GitFlyout -Property ([Windows.Controls.Border]::WidthProperty) -To 0 -Opening $false -Token $token
         Start-DevKitFlyoutSlide -Target $window -Property ([Windows.Window]::WidthProperty) -To $targetWindowWidth -Opening $false -Token $token
         if ($script:DockMode -eq 'Right') {
             # Mirror the open-side math: restore the right edge by sliding
             # Left back out by the same amount Width shrinks by.
-            $contentLeft = $window.Left + $curFlyoutWidth
-            Start-DevKitFlyoutSlide -Target $window -Property ([Windows.Window]::LeftProperty) -To $contentLeft -Opening $false -Token $token
+            Start-DevKitFlyoutSlide -Target $window -Property ([Windows.Window]::LeftProperty) -To $targetLeft -Opening $false -Token $token
         }
         $ui.BtnGitTab.Foreground = Get-WidgetResource 'BrushTextMuted'
     }
@@ -2585,11 +3907,122 @@ function Get-DevKitGitLinkBrush {
     return $script:GitBrushCache[$key]
 }
 
+function Show-DevKitCommitDetails {
+    # Commit-row click handler (the graph canvas's per-row hit areas call
+    # this): click a commit -> expand its details card inline under the row;
+    # click the SAME commit -> collapse; click another -> switch. The fetch
+    # ('git show') runs in the shared work runspace as a CommitDetails job;
+    # declined-while-busy re-fires from the completion poll via
+    # $script:GitCommitDetailsPending, mirroring GitRefreshPending.
+    param([Parameter(Mandatory = $true)][string]$Hash)
+
+    if ($script:GitExpandedCommitHash -eq $Hash) {
+        $script:GitExpandedCommitHash = $null
+        $script:GitCommitDetails = $null
+    } else {
+        $script:GitExpandedCommitHash = $Hash
+        $script:GitCommitDetails = $null   # a stale card for another hash never shows
+        if (-not (Start-DevKitWorkJob -Kind 'CommitDetails' -ProjectPath $script:ActiveProjectPath -CommitHash $Hash)) {
+            $script:GitCommitDetailsPending = $true
+        }
+    }
+    # Immediate re-render: an expanding row shows its card with a Loading
+    # line until the job result lands (Update-DevKitCommitDetails).
+    if ($script:GitOverview -and $script:GitOverview.Graph) {
+        Render-DevKitGitGraph -Graph $script:GitOverview.Graph
+    }
+}
+
+function Update-DevKitCommitDetails {
+    # CommitDetails job completed (work-poll, UI thread): cache the result
+    # and re-render so the expanded row's card swaps Loading -> content.
+    # A result whose hash no longer matches the selection (user collapsed or
+    # clicked another commit mid-flight) is kept cached but renders nothing.
+    param($Result)
+    if (-not $Result) { return }
+    $script:GitCommitDetails = $Result
+    if ($script:GitFlyoutOpen -and $script:GitExpandedCommitHash -and $script:GitOverview -and $script:GitOverview.Graph) {
+        Render-DevKitGitGraph -Graph $script:GitOverview.Graph
+    }
+}
+
+function New-DevKitCommitDetailsCard {
+    # Builds the inline card injected under the expanded commit row: full
+    # hash, author + commit date, the FULL commit message, and the changed-
+    # files summary from the cached Get-DevKitCommitDetails result - or a
+    # Loading line while its work-runspace job is still out, or the honest
+    # Error line when the commit couldn't be read (e.g. rebased away).
+    param([Parameter(Mandatory = $true)][string]$Hash, [double]$Width)
+
+    $card = New-Object Windows.Controls.Border
+    $card.Background = Get-WidgetResource 'BrushInputBg'
+    $card.BorderBrush = Get-WidgetResource 'BrushCardBorder'
+    $card.BorderThickness = [Windows.Thickness]::new(1)
+    $card.CornerRadius = [Windows.CornerRadius]::new(6)
+    $card.Padding = [Windows.Thickness]::new(10, 7, 10, 8)
+    $card.Width = $Width
+    $stack = New-Object Windows.Controls.StackPanel
+    $card.Child = $stack
+
+    $addLine = {
+        param([string]$Text, [double]$Size, $Brush, [bool]$Wrap = $false, [bool]$Mono = $false, [double]$TopMargin = 0)
+        $tb = New-Object Windows.Controls.TextBlock
+        $tb.FontSize = $Size
+        $tb.Foreground = $Brush
+        $tb.Text = $Text
+        if ($Wrap) { $tb.TextWrapping = 'Wrap' }
+        if ($Mono) { $tb.FontFamily = New-Object Windows.Media.FontFamily 'Consolas'; $tb.TextTrimming = 'CharacterEllipsis' }
+        if ($TopMargin -gt 0) { $tb.Margin = [Windows.Thickness]::new(0, $TopMargin, 0, 0) }
+        $stack.Children.Add($tb) | Out-Null
+    }
+
+    $details = $script:GitCommitDetails
+    if (-not $details -or [string]$details.Hash -ne $Hash) {
+        & $addLine 'Loading commit details...' 10 (Get-WidgetResource 'BrushTextDim')
+        return $card
+    }
+    if (-not $details.Found) {
+        & $addLine ([string]$details.Error) 10 (Get-WidgetResource 'BrushAccentEmber') $true
+        return $card
+    }
+
+    $bright = Get-WidgetResource 'BrushTextBright'
+    $dim = Get-WidgetResource 'BrushTextDim'
+    & $addLine ([string]$details.Hash) 9.5 $dim $false $true
+    $dateText = [string]$details.Date
+    try { $dateText = ([datetimeoffset]::Parse([string]$details.Date)).ToString('yyyy-MM-dd HH:mm') } catch { }
+    $byline = [string]$details.Author
+    if ($details.Email) { $byline += " <$($details.Email)>" }
+    if ($dateText) { $byline += "  -  $dateText" }
+    & $addLine $byline 9.5 $dim
+    if ($details.Message) {
+        & $addLine ([string]$details.Message) 10.5 $bright $true $false 6
+    }
+    # Changed-files summary: a count/+/- header line, then per-file rows
+    # (capped - a 500-file squash merge shouldn't bury the graph).
+    if ($details.FilesChanged -gt 0 -or @($details.Files).Count -gt 0) {
+        $fileWord = if ($details.FilesChanged -eq 1) { 'file' } else { 'files' }
+        & $addLine ("{0} {1} changed  (+{2} / -{3})" -f $details.FilesChanged, $fileWord, $details.Insertions, $details.Deletions) 9.5 $dim $false $false 6
+        $rows = @($details.Files)
+        $cap = 12
+        foreach ($f in ($rows | Select-Object -First $cap)) {
+            $stat = if ($f.IsBinary) { 'binary' } else { "+$($f.Added)/-$($f.Deleted)" }
+            & $addLine ("{0}   {1}" -f $f.Path, $stat) 9 $dim $false $true 1
+        }
+        if ($rows.Count -gt $cap) { & $addLine ("+{0} more" -f ($rows.Count - $cap)) 9 $dim $false $false 1 }
+    }
+    return $card
+}
+
 function Render-DevKitGitGraph {
     # Draws Get-DevKitRepoOverview's lane layout onto GitGraphCanvas: gradient
     # S-curve links between lanes, bright node dots with a HEAD ring, branch/
     # tag pills, and subject + meta text per commit. Pure render - the layout
-    # was computed in the work runspace.
+    # was computed in the work runspace. When a commit row is selected
+    # ($script:GitExpandedCommitHash, toggled by Show-DevKitCommitDetails) an
+    # inline details card is injected directly under that row and every row
+    # below it shifts down by the card's measured height - lane columns and
+    # row pitches are untouched, only Y positions move.
     param([Parameter(Mandatory = $true)]$Graph)
 
     $canvas = $ui.GitGraphCanvas
@@ -2598,19 +4031,49 @@ function Render-DevKitGitGraph {
     $laneDx = 15.0; $rowH = 36.0; $leftPad = 16.0; $topPad = 10.0; $nodeR = 4.5
     $laneCount = [Math]::Max(1, [int]$Graph.LaneCount)
     $textX = $leftPad + ($laneCount * $laneDx) + 6.0
+
+    # Inline commit-details expansion: find the selected commit's node (a
+    # selection whose hash fell out of the 40-commit window - refresh after
+    # fetch/rebase - is silently dropped, never an error) and pre-measure its
+    # card so every Y below can be shifted BEFORE anything is drawn.
+    $expandedNode = $null
+    if ($script:GitExpandedCommitHash) {
+        foreach ($n in $Graph.Nodes) {
+            if ([string]$n.Commit.Hash -eq $script:GitExpandedCommitHash) { $expandedNode = $n; break }
+        }
+        if (-not $expandedNode) {
+            $script:GitExpandedCommitHash = $null
+            $script:GitCommitDetails = $null
+        }
+    }
+    $detailsCard = $null
+    $detailsH = 0.0
+    if ($expandedNode) {
+        # Card width tracks the flyout, not the (possibly wider) canvas: the
+        # graph scrolls horizontally, reading a commit shouldn't.
+        $detailsWidth = [Math]::Max(220.0, [double]$ui.GitFlyoutInner.Width - 66.0)
+        $detailsCard = New-DevKitCommitDetailsCard -Hash ([string]$expandedNode.Commit.Hash) -Width $detailsWidth
+        $detailsCard.Measure((New-Object Windows.Size ($detailsWidth, [double]::PositiveInfinity)))
+        $detailsH = [Math]::Ceiling($detailsCard.DesiredSize.Height) + 4.0
+    }
+    $rowShift = {
+        param([int]$Row)
+        if ($expandedNode -and $Row -gt $expandedNode.Row) { return $detailsH }
+        return 0.0
+    }
     # Member enumeration, not Measure-Object -Property: on Windows PowerShell
     # 5.1, -Property can't see hashtable keys (works on pwsh 7) and the
     # terminating error would kill every render on a supported shell.
     $maxRow = ($Graph.Nodes | ForEach-Object Row | Measure-Object -Maximum).Maximum
     $canvas.Width = $textX + 200
-    $canvas.Height = $topPad * 2 + ($maxRow + 1) * $rowH
+    $canvas.Height = $topPad * 2 + ($maxRow + 1) * $rowH + $detailsH
 
     # Links first so nodes sit on top of the lines.
     foreach ($link in $Graph.Links) {
         $x1 = $leftPad + $link.FromLane * $laneDx
-        $y1 = $topPad + $link.FromRow * $rowH + ($rowH / 2)
+        $y1 = $topPad + $link.FromRow * $rowH + ($rowH / 2) + (& $rowShift ([int]$link.FromRow))
         $x2 = $leftPad + $link.ToLane * $laneDx
-        $y2 = $topPad + $link.ToRow * $rowH + ($rowH / 2)
+        $y2 = $topPad + $link.ToRow * $rowH + ($rowH / 2) + (& $rowShift ([int]$link.ToRow))
         $geo = New-Object Windows.Media.StreamGeometry
         $ctx = $geo.Open()
         $ctx.BeginFigure([Windows.Point]::new($x1, $y1 + $nodeR), $false, $false)
@@ -2637,7 +4100,7 @@ function Render-DevKitGitGraph {
     $darkBrush = Get-DevKitGitBrush '#0A0D12'
     foreach ($node in $Graph.Nodes) {
         $cx = $leftPad + $node.Lane * $laneDx
-        $cy = $topPad + $node.Row * $rowH + ($rowH / 2)
+        $cy = $topPad + $node.Row * $rowH + ($rowH / 2) + (& $rowShift ([int]$node.Row))
         $commit = $node.Commit
         $laneBrush = Get-DevKitGitBrush $node.Color
         $tip = "$($commit.Subject)`n$($commit.ShortHash)  -  $($commit.Author), $($commit.When)"
@@ -2671,9 +4134,19 @@ function Render-DevKitGitGraph {
             $pill.CornerRadius = [Windows.CornerRadius]::new(7)
             $pill.Padding = [Windows.Thickness]::new(6, 1, 6, 1)
             $pill.Margin = [Windows.Thickness]::new(0, 0, 5, 0)
+            $pillContent = New-Object Windows.Controls.StackPanel
+            $pillContent.Orientation = 'Horizontal'
+            # Small glyph before the pill text: branch / tag / HEAD - frozen
+            # shared drawings, same discipline as the Files tree icons.
+            $pillIconKey = switch ($ref.Kind) { 'tag' { 'git-tag' } 'head' { 'git-head' } default { 'git-branch' } }
+            $pillIcon = New-DevKitIconImage -Key $pillIconKey -Size 9
+            $pillIcon.Margin = [Windows.Thickness]::new(0, 0, 3, 0)
+            $pillContent.Children.Add($pillIcon) | Out-Null
             $pillText = New-Object Windows.Controls.TextBlock
             $pillText.FontSize = 9
             $pillText.Text = [string]$ref.Name
+            $pillText.VerticalAlignment = 'Center'
+            $pillContent.Children.Add($pillText) | Out-Null
             if ($ref.Kind -eq 'head') {
                 $pill.Background = Get-DevKitGitBrush $refColor
                 $pillText.Foreground = $darkBrush
@@ -2683,7 +4156,7 @@ function Render-DevKitGitGraph {
                 $pill.BorderThickness = [Windows.Thickness]::new(1)
                 $pillText.Foreground = Get-DevKitGitBrush $refColor
             }
-            $pill.Child = $pillText
+            $pill.Child = $pillContent
             $pill.ToolTip = $tip
             $panel.Children.Add($pill) | Out-Null
         }
@@ -2720,6 +4193,37 @@ function Render-DevKitGitGraph {
         }
     }
     $canvas.Width = $neededWidth + 12
+
+    # Clickable row hit areas go in LAST so they sit on top: one transparent
+    # rect per commit row spanning the full content width, tagged (via the
+    # handler closure) with the commit hash. They carry a hand cursor and the
+    # row tooltip (topmost hit wins, so the dots'/pills' own tips under the
+    # rect are shadowed - the rect repeats the same text), and clicking one
+    # toggles that commit's inline details card. The canvas is rebuilt every
+    # render, so handlers attach per render and each closes over its own
+    # $hash via GetNewClosure().
+    foreach ($node in $Graph.Nodes) {
+        $hash = [string]$node.Commit.Hash
+        $hit = New-Object Windows.Shapes.Rectangle
+        $hit.Width = $neededWidth + 12
+        $hit.Height = $rowH
+        $hit.Fill = if ($expandedNode -and $node.Row -eq $expandedNode.Row) { Get-DevKitGitBrush '#1AFFFFFF' } else { [Windows.Media.Brushes]::Transparent }
+        $hit.Cursor = [Windows.Input.Cursors]::Hand
+        $hitCommit = $node.Commit
+        $hit.ToolTip = "$($hitCommit.Subject)`n$($hitCommit.ShortHash)  -  $($hitCommit.Author), $($hitCommit.When)`nClick for commit details"
+        [Windows.Controls.Canvas]::SetLeft($hit, 0)
+        [Windows.Controls.Canvas]::SetTop($hit, $topPad + $node.Row * $rowH + (& $rowShift ([int]$node.Row)))
+        $hit.Add_MouseLeftButtonUp({ Show-DevKitCommitDetails -Hash $hash }.GetNewClosure())
+        $canvas.Children.Add($hit) | Out-Null
+    }
+
+    # The expanded commit's details card slots into the gap the row shift
+    # opened up, directly under its row.
+    if ($detailsCard) {
+        [Windows.Controls.Canvas]::SetLeft($detailsCard, $leftPad)
+        [Windows.Controls.Canvas]::SetTop($detailsCard, $topPad + ($expandedNode.Row + 1) * $rowH)
+        $canvas.Children.Add($detailsCard) | Out-Null
+    }
 }
 
 function Get-DevKitGitStatusStyle {
@@ -2803,7 +4307,7 @@ function Update-DevKitGitUncommittedList {
 # GitTab*View siblings is Visible and lazily kicks off a background fetch via
 # Start-DevKitWorkJob. Update-DevKitWidgetPullRequests/Issues below (invoked
 # from Update-DevKitWorkAsyncPoll once that job completes) render the real
-# PR-row / issue-accordion lists via Add-DevKitPrRow / Add-DevKitIssueAccordion.
+# PR/issue accordion lists via Add-DevKitPrRow / Add-DevKitIssueAccordion.
 $script:LastPrResult = $null
 $script:LastIssuesResult = $null
 $script:GitActiveTab = 'Commits'
@@ -2971,27 +4475,26 @@ function New-DevKitLabelChip {
 }
 
 function Add-DevKitPrRow {
-    # One clickable PR card (ToolCard reuses its existing hover-lift/glow
-    # animation for free): "#N  Title" (ellipsis) + draft/review badges on
-    # the title line, "by author  |  head -> base  |  updated X ago" below.
-    # Clicking anywhere on the row opens the PR on GitHub, same as a node
-    # table port link.
+    # One collapsed-by-default Expander per PR - the SAME accordion treatment
+    # as the Issues tab (Add-DevKitIssueAccordion): the shared Expander
+    # ControlTemplate in Theme.xaml gives the header-click behavior, chevron
+    # and fade/unfold animation for free. Header = "#N  Title" (ellipsis) +
+    # draft/review badges; Content = the author/branches/updated meta line +
+    # an Open-on-GitHub button (the issue accordion's safe Start-Process
+    # pattern - the header itself now expands/collapses instead of opening
+    # the browser, which is what the whole row used to do on click).
     param($Panel, $Pr)
 
-    $row = New-Object Windows.Controls.Border
-    $row.Style = Get-WidgetResource 'ToolCard'
-    $row.Cursor = [System.Windows.Input.Cursors]::Hand
-    $row.ToolTip = "Open #$($Pr.number) on GitHub"
-    $prUrl = [string]$Pr.url
-    $row.Add_MouseLeftButtonUp({ Open-DevKitExternalUrl -Url $prUrl }.GetNewClosure())
+    $expander = New-Object Windows.Controls.Expander
+    $expander.IsExpanded = $false
+    $expander.Margin = '0,0,0,8'
+    $expander.ToolTip = 'Click to expand or collapse'
 
-    $stack = New-Object Windows.Controls.StackPanel
-
-    $titleGrid = New-Object Windows.Controls.Grid
+    $headerGrid = New-Object Windows.Controls.Grid
     $colTitle = New-Object Windows.Controls.ColumnDefinition; $colTitle.Width = [Windows.GridLength]::new(1, [Windows.GridUnitType]::Star)
     $colBadges = New-Object Windows.Controls.ColumnDefinition; $colBadges.Width = [Windows.GridLength]::Auto
-    $titleGrid.ColumnDefinitions.Add($colTitle)
-    $titleGrid.ColumnDefinitions.Add($colBadges)
+    $headerGrid.ColumnDefinitions.Add($colTitle)
+    $headerGrid.ColumnDefinitions.Add($colBadges)
 
     $titleText = New-Object Windows.Controls.TextBlock
     $titleText.Style = Get-WidgetResource 'WidgetExpanderTitle'
@@ -2999,7 +4502,7 @@ function Add-DevKitPrRow {
     $titleText.TextTrimming = 'CharacterEllipsis'
     $titleText.ToolTip = [string]$Pr.title
     [Windows.Controls.Grid]::SetColumn($titleText, 0)
-    $titleGrid.Children.Add($titleText) | Out-Null
+    $headerGrid.Children.Add($titleText) | Out-Null
 
     $badgePanel = New-Object Windows.Controls.StackPanel
     $badgePanel.Orientation = 'Horizontal'
@@ -3037,21 +4540,34 @@ function Add-DevKitPrRow {
         $badgePanel.Children.Add($b) | Out-Null
     }
     [Windows.Controls.Grid]::SetColumn($badgePanel, 1)
-    $titleGrid.Children.Add($badgePanel) | Out-Null
-    $stack.Children.Add($titleGrid) | Out-Null
+    $headerGrid.Children.Add($badgePanel) | Out-Null
+    $expander.Header = $headerGrid
+
+    $content = New-Object Windows.Controls.StackPanel
 
     $sub = New-Object Windows.Controls.TextBlock
     $sub.Style = Get-WidgetResource 'WidgetExpanderSub'
-    $sub.TextTrimming = 'CharacterEllipsis'
+    $sub.Margin = 0
+    $sub.TextWrapping = 'Wrap'
     $author = if ($Pr.author -and $Pr.author.login) { [string]$Pr.author.login } else { 'unknown' }
     $subParts = @("by $author", "$($Pr.headRefName) -> $($Pr.baseRefName)")
     $when = Format-DevKitRelativeTime -Iso ([string]$Pr.updatedAt)
     if ($when) { $subParts += "updated $when" }
     $sub.Text = ($subParts -join '  |  ')
-    $stack.Children.Add($sub) | Out-Null
+    $content.Children.Add($sub) | Out-Null
 
-    $row.Child = $stack
-    $Panel.Children.Add($row) | Out-Null
+    $openBtn = New-Object Windows.Controls.Button
+    $openBtn.Style = Get-WidgetResource 'GhostButton'
+    $openBtn.FontSize = 10.5
+    $openBtn.Content = 'Open on GitHub'
+    $openBtn.HorizontalAlignment = 'Left'
+    $openBtn.Margin = '0,8,0,0'
+    $prUrl = [string]$Pr.url
+    $openBtn.Add_Click({ Open-DevKitExternalUrl -Url $prUrl }.GetNewClosure())
+    $content.Children.Add($openBtn) | Out-Null
+
+    $expander.Content = $content
+    $Panel.Children.Add($expander) | Out-Null
 }
 
 function Get-DevKitIssueBodyText {
@@ -3138,7 +4654,8 @@ function Add-DevKitIssueAccordion {
 }
 
 function Update-DevKitWidgetPullRequests {
-    # Full render: one clickable Add-DevKitPrRow card per open PR, or the
+    # Full render: one collapsed-by-default Add-DevKitPrRow accordion per open
+    # PR (same Expander treatment as the issue accordions), or the
     # CLI-not-found/not-a-repo/error/empty-state message in the same tone
     # Render-DevKitMcpPanel/Start-DevKitAgentCli already use for other CLIs.
     param($Result)
@@ -3229,6 +4746,7 @@ function Update-DevKitWidgetGitFlyout {
     if (-not $Overview -or -not $Overview.IsRepo) {
         $ui.GitFlyoutBranch.Text = ''
         $ui.GitBadgeText.Visibility = 'Collapsed'
+        $ui.CommitGraphCountBadgeText.Text = '0'
         & $showText $(if ($Overview -and $Overview.Error) { [string]$Overview.Error } else { 'Not a git repository.' }) 'BrushTextDim'
         foreach ($b in $repoButtons) { $b.IsEnabled = $false }
         return
@@ -3252,9 +4770,11 @@ function Update-DevKitWidgetGitFlyout {
     if (-not $Overview.Graph -or @($Overview.Graph.Nodes).Count -eq 0) {
         # GraphSkipped = the job deliberately didn't collect the log (badge
         # refresh while closed); the flyout's own open-refresh is on its way.
+        $ui.CommitGraphCountBadgeText.Text = '0'
         & $showText $(if ($Overview.GraphSkipped -and $script:GitFlyoutOpen) { 'Loading commit graph...' } else { 'No commits yet.' }) 'BrushTextDim'
         return
     }
+    $ui.CommitGraphCountBadgeText.Text = [string]@($Overview.Graph.Nodes).Count
     if (-not $script:GitFlyoutOpen) { return }   # badge-only refresh: leave the canvas alone
     try {
         Render-DevKitGitGraph -Graph $Overview.Graph
@@ -3317,11 +4837,21 @@ $ui.BtnGitClose.Add_Click({ Set-DevKitGitFlyout -Open $false })
 # rendering, the debounced autosave, and the slide-out panel - which reuses
 # the Git flyout's animation/geometry machinery wholesale (shared
 # Start-DevKitFlyoutSlide, shared anim token, shared grip handlers routed by
-# -Kind), since the two panels are mutually exclusive by design.
+# -Kind), since the four side panels are mutually exclusive by design.
+#
+# Note lifecycle: a note is either an EXPANDED editor (the one note whose Id
+# is $script:ExpandedNoteId - tinted card with the multiline TextBox) or a
+# COLLAPSED title card (default; one line, ellipsis, title derived from the
+# body's first line by Get-DevKitNoteTitle - the on-disk schema is unchanged,
+# so older widget builds read the same notes.json and nothing migrates).
+# Clicking a card expands it; saving (the Done button) or clicking/focusing
+# away collapses it back. Every note renders collapsed when the flyout opens.
 
 $script:ActiveNotes = @()            # live note objects bound to the rendered cards
 $script:NotesProjectPath = $null     # the project the CURRENT cards belong to
 $script:NotesDirty = $false
+$script:ExpandedNoteId = $null       # the one note currently open for editing ($null = all collapsed)
+$script:ExpandedNoteCard = $null     # its live card Border (click-outside detection)
 
 # Sticky-tint rotation for new notes: color KEYS are persisted (not hex), so
 # a future palette tweak restyles existing notes for free.
@@ -3371,17 +4901,21 @@ function Save-DevKitWidgetNotesFlush {
 
 function Open-DevKitWidgetNotesProject {
     # Flush whatever project the cards currently belong to, then load and
-    # render the active project's notes.
+    # render the active project's notes. Every note starts COLLAPSED (title
+    # card) on (re)load - the flyout never reopens mid-edit.
     Save-DevKitWidgetNotesFlush
     $script:NotesProjectPath = $script:ActiveProjectPath
     $script:ActiveNotes = @(Get-DevKitProjectNotes -ProjectPath $script:NotesProjectPath)
     $script:NotesDirty = $false
+    $script:ExpandedNoteId = $null
+    $script:ExpandedNoteCard = $null
     $ui.NotesFlyoutSub.Text = [string]$script:ActiveProjectName
     Update-DevKitWidgetNotesPanel
 }
 
 function Update-DevKitWidgetNotesPanel {
     $ui.NotesPanel.Children.Clear()
+    $script:ExpandedNoteCard = $null   # rebuilt below if a note is expanded
     if (@($script:ActiveNotes).Count -eq 0) {
         $empty = New-Object Windows.Controls.TextBlock
         $empty.Text = "No notes yet - '+ Note' adds a sticky for this project."
@@ -3397,13 +4931,138 @@ function Update-DevKitWidgetNotesPanel {
     }
 }
 
+function Test-DevKitWidgetWithin {
+    # True when $Source is $Ancestor itself or sits anywhere under it. Walks
+    # the visual tree first and falls back to the logical tree (some event
+    # sources are not Visuals). Used to tell "clicked/focused inside this
+    # card" from "clicked away from it" - a plain Border is not focusable,
+    # so focus events alone can't answer that.
+    param($Ancestor, $Source)
+    $cur = $Source
+    while ($null -ne $cur) {
+        if ($cur -eq $Ancestor) { return $true }
+        $parent = $null
+        if ($cur -is [System.Windows.Media.Visual]) {
+            try { $parent = [System.Windows.Media.VisualTreeHelper]::GetParent($cur) } catch { }
+        }
+        if ($null -eq $parent) {
+            try { $parent = [System.Windows.LogicalTreeHelper]::GetParent($cur) } catch { }
+        }
+        if ($parent -eq $cur) { return $false }   # paranoia: never loop on a self-parent
+        $cur = $parent
+    }
+    return $false
+}
+
+function Open-DevKitWidgetNoteEditor {
+    # Expands one note into its editor (collapsing whichever note was open -
+    # its pending debounced edits are flushed first). Re-renders the panel
+    # and focuses the fresh TextBox (the expanded card's Tag).
+    param([Parameter(Mandatory = $true)][string]$NoteId)
+    if ($script:ExpandedNoteId -eq $NoteId) { return }
+    Save-DevKitWidgetNotesFlush
+    $script:ExpandedNoteId = $NoteId
+    Update-DevKitWidgetNotesPanel
+    foreach ($child in @($ui.NotesPanel.Children)) {
+        if ($child.Tag -is [Windows.Controls.TextBox]) {
+            try {
+                $child.Tag.Focus() | Out-Null
+                $child.Tag.CaretIndex = $child.Tag.Text.Length
+            } catch { }
+            break
+        }
+    }
+}
+
+function Close-DevKitWidgetNoteEditor {
+    # Collapses the open editor back to its title card, flushing any
+    # still-debounced edits first (this IS the note's "save" - typing only
+    # arms the 800ms autosave).
+    if (-not $script:ExpandedNoteId) { return }
+    Save-DevKitWidgetNotesFlush
+    $script:ExpandedNoteId = $null
+    $script:ExpandedNoteCard = $null
+    Update-DevKitWidgetNotesPanel
+}
+
+function Close-DevKitWidgetNoteEditorIfOutside {
+    # The editor TextBox's LostFocus handler: collapses the editor only when
+    # keyboard focus actually moved OUTSIDE its card (clicking the card's
+    # own Done/delete moves focus within the card and must not collapse it
+    # out from under the click). Focus has already settled when LostFocus
+    # fires, so Keyboard.FocusedElement is the NEW element here.
+    param($Card, [Parameter(Mandatory = $true)][string]$NoteId)
+    if ($script:ExpandedNoteId -ne $NoteId) { return }
+    $focused = [System.Windows.Input.Keyboard]::FocusedElement
+    if ($null -ne $focused -and (Test-DevKitWidgetWithin -Ancestor $Card -Source $focused)) { return }
+    Close-DevKitWidgetNoteEditor
+}
+
+function New-DevKitNoteDeleteButton {
+    # The shared two-step delete ('x' -> 'sure?' for 3s -> gone), used by
+    # both the collapsed title card and the expanded editor - lighter than a
+    # modal popup but still a guard against a stray click. The revert timer
+    # is per-button; the token-free Tag flag is enough state because a
+    # re-render rebuilds the card (and its state) from scratch anyway.
+    # The Click closure captures $Note/$del/$revert via .GetNewClosure() and
+    # only CALLS functions for shared state - see Request-DevKitNotesAutosave
+    # for why a closure must never touch $script: directly.
+    param([Parameter(Mandatory = $true)]$Note)
+
+    $del = New-Object Windows.Controls.Button
+    $del.Style = Get-WidgetResource 'ChromeButton'
+    $del.FontFamily = New-Object Windows.Media.FontFamily('Segoe MDL2 Assets')
+    $del.FontSize = 9
+    $del.Content = [char]0xE106
+    $del.MinWidth = 24
+    $del.Height = 18
+    $del.HorizontalAlignment = 'Right'
+    $del.VerticalAlignment = 'Center'
+    $del.Margin = '0,0,4,0'
+    $del.ToolTip = 'Delete this note'
+    $del.Tag = $false   # $true while in the 'sure?' confirm window
+    [System.Windows.Automation.AutomationProperties]::SetAutomationId($del, "NoteDelete_$($Note.Id)")
+
+    $revert = New-Object Windows.Threading.DispatcherTimer
+    $revert.Interval = [TimeSpan]::FromSeconds(3)
+    $revert.Add_Tick({
+        $revert.Stop()
+        $del.Tag = $false
+        $del.FontFamily = New-Object Windows.Media.FontFamily('Segoe MDL2 Assets')
+        $del.FontSize = 9
+        $del.Content = [char]0xE106
+        $del.ClearValue([Windows.Controls.Control]::ForegroundProperty)
+    }.GetNewClosure())
+    $del.Add_Click({
+        if (-not $del.Tag) {
+            $del.Tag = $true
+            $del.FontFamily = New-Object Windows.Media.FontFamily('Segoe UI')
+            $del.FontSize = 9
+            $del.Content = 'sure?'
+            $del.Foreground = Get-WidgetResource 'BrushDangerRed'
+            $revert.Start()
+            return
+        }
+        $revert.Stop()
+        Remove-DevKitWidgetNote -Note $Note
+    }.GetNewClosure())
+    return $del
+}
+
 function New-DevKitNoteCard {
-    # One sticky-note card: tinted rounded Border, colored accent bar on the
-    # left, a borderless multiline TextBox, and a footer with the last-edited
-    # time and a two-step delete ('x' -> 'sure?' for 3s -> gone) - lighter
-    # than a modal popup but still a guard against a stray click.
-    # Returns the card Border; its .Tag is the TextBox (used to focus a
-    # freshly added note).
+    # One sticky note, in one of two shapes:
+    #  - COLLAPSED (the default): a compact card showing just the note's
+    #    title - the first body line via Get-DevKitNoteTitle, single line
+    #    with ellipsis - plus the same two-step delete the editor has.
+    #    Clicking the card expands it into the editor.
+    #  - EXPANDED (only the note whose Id is $script:ExpandedNoteId): the
+    #    full editor - borderless multiline TextBox with debounced autosave,
+    #    a footer with the last-edited time, a Done button (flush + collapse)
+    #    and the two-step delete. Clicking/focusing away collapses it (see
+    #    Close-DevKitWidgetNoteEditorIfOutside and the flyout-level
+    #    PreviewMouseLeftButtonDown handler).
+    # Returns the card Border; an EXPANDED card's .Tag is its TextBox (used
+    # to focus a freshly added/opened note), a collapsed card's .Tag is $null.
     param([Parameter(Mandatory = $true)]$Note)
 
     $palette = $script:NoteColorMap[[string]$Note.Color]
@@ -3427,6 +5086,44 @@ function New-DevKitNoteCard {
     $accent.CornerRadius = New-Object Windows.CornerRadius(5, 0, 0, 5)
     $grid.Children.Add($accent) | Out-Null
 
+    if ($script:ExpandedNoteId -ne $Note.Id) {
+        # ---- Collapsed title card ----
+        $row = New-Object Windows.Controls.Grid
+        [Windows.Controls.Grid]::SetColumn($row, 1)
+        $rc0 = New-Object Windows.Controls.ColumnDefinition
+        $rc1 = New-Object Windows.Controls.ColumnDefinition; $rc1.Width = 'Auto'
+        $row.ColumnDefinitions.Add($rc0); $row.ColumnDefinitions.Add($rc1)
+
+        $title = New-Object Windows.Controls.TextBlock
+        $title.Text = Get-DevKitNoteTitle -Text ([string]$Note.Text)
+        $title.Foreground = Get-WidgetResource 'BrushTextBright'
+        $title.FontSize = 11.5
+        $title.TextTrimming = 'CharacterEllipsis'
+        $title.VerticalAlignment = 'Center'
+        $title.Margin = '8,7'
+        $title.ToolTip = 'Click to edit this note'
+        $row.Children.Add($title) | Out-Null
+
+        $delCollapsed = New-DevKitNoteDeleteButton -Note $Note
+        [Windows.Controls.Grid]::SetColumn($delCollapsed, 1)
+        $row.Children.Add($delCollapsed) | Out-Null
+
+        $grid.Children.Add($row) | Out-Null
+        $card.Child = $grid
+        $card.Tag = $null
+        $card.Cursor = [System.Windows.Input.Cursors]::Hand
+        $card.ToolTip = 'Click to edit this note'
+        # Expand on click - but NOT when the click landed on the delete
+        # button (bubbling would otherwise expand as the note is deleted).
+        $card.Add_MouseLeftButtonUp({
+            param($s, $e)
+            if (Test-DevKitWidgetWithin -Ancestor $delCollapsed -Source $e.OriginalSource) { return }
+            Open-DevKitWidgetNoteEditor -NoteId $Note.Id
+        }.GetNewClosure())
+        return $card
+    }
+
+    # ---- Expanded editor ----
     $body = New-Object Windows.Controls.Grid
     [Windows.Controls.Grid]::SetColumn($body, 1)
     $r0 = New-Object Windows.Controls.RowDefinition; $r0.Height = 'Auto'
@@ -3459,24 +5156,33 @@ function New-DevKitNoteCard {
     $edited.Text = if ([string]::IsNullOrWhiteSpace([string]$Note.UpdatedAt)) { '' } else { "edited $(Format-DevKitRelativeTime -Iso ([string]$Note.UpdatedAt))" }
     $footer.Children.Add($edited) | Out-Null
 
-    $del = New-Object Windows.Controls.Button
-    $del.Style = Get-WidgetResource 'ChromeButton'
-    $del.FontFamily = New-Object Windows.Media.FontFamily('Segoe MDL2 Assets')
-    $del.FontSize = 9
-    $del.Content = [char]0xE106
-    $del.MinWidth = 24
-    $del.Height = 18
-    $del.HorizontalAlignment = 'Right'
-    $del.Margin = '0,0,4,4'
-    $del.ToolTip = 'Delete this note'
-    $del.Tag = $false   # $true while in the 'sure?' confirm window
-    [System.Windows.Automation.AutomationProperties]::SetAutomationId($del, "NoteDelete_$($Note.Id)")
-    $footer.Children.Add($del) | Out-Null
+    $footerButtons = New-Object Windows.Controls.StackPanel
+    $footerButtons.Orientation = 'Horizontal'
+    $footerButtons.HorizontalAlignment = 'Right'
+    $footerButtons.Margin = '0,0,4,4'
+
+    $done = New-Object Windows.Controls.Button
+    $done.Style = Get-WidgetResource 'GhostButton'
+    $done.FontSize = 9.5
+    $done.Padding = '6,1'
+    $done.Content = 'Done'
+    $done.VerticalAlignment = 'Center'
+    $done.Margin = '0,0,6,0'
+    $done.ToolTip = 'Save and collapse this note'
+    $done.Add_Click({ Close-DevKitWidgetNoteEditor })
+    $footerButtons.Children.Add($done) | Out-Null
+
+    $del = New-DevKitNoteDeleteButton -Note $Note
+    $del.Margin = '0'
+    $footerButtons.Children.Add($del) | Out-Null
+
+    $footer.Children.Add($footerButtons) | Out-Null
     $body.Children.Add($footer) | Out-Null
 
     $grid.Children.Add($body) | Out-Null
     $card.Child = $grid
     $card.Tag = $tb
+    $script:ExpandedNoteCard = $card
 
     $tb.Add_TextChanged({
         $Note.Text = $tb.Text
@@ -3484,33 +5190,16 @@ function New-DevKitNoteCard {
         $edited.Text = 'edited just now'
         Request-DevKitNotesAutosave   # NOT inline $script: sets - see the function's comment
     }.GetNewClosure())
-
-    # Two-step delete. The revert timer is per-card; the token-free Tag flag
-    # is enough state because a re-render rebuilds the card (and its state)
-    # from scratch anyway.
-    $revert = New-Object Windows.Threading.DispatcherTimer
-    $revert.Interval = [TimeSpan]::FromSeconds(3)
-    $revert.Add_Tick({
-        $revert.Stop()
-        $del.Tag = $false
-        $del.FontFamily = New-Object Windows.Media.FontFamily('Segoe MDL2 Assets')
-        $del.FontSize = 9
-        $del.Content = [char]0xE106
-        $del.ClearValue([Windows.Controls.Control]::ForegroundProperty)
+    # Clicked/focused away -> collapse back to the title card (function call,
+    # never inline $script: state, same closure rule as above).
+    $tb.Add_LostFocus({
+        Close-DevKitWidgetNoteEditorIfOutside -Card $card -NoteId $Note.Id
     }.GetNewClosure())
-    $del.Add_Click({
-        if (-not $del.Tag) {
-            $del.Tag = $true
-            $del.FontFamily = New-Object Windows.Media.FontFamily('Segoe UI')
-            $del.FontSize = 9
-            $del.Content = 'sure?'
-            $del.Foreground = Get-WidgetResource 'BrushDangerRed'
-            $revert.Start()
-            return
-        }
-        $revert.Stop()
-        Remove-DevKitWidgetNote -Note $Note
-    }.GetNewClosure())
+    # Escape saves + collapses too.
+    $tb.Add_KeyDown({
+        param($s, $e)
+        if ($e.Key -eq 'Escape') { Close-DevKitWidgetNoteEditor }
+    })
 
     return $card
 }
@@ -3524,8 +5213,10 @@ function Add-DevKitWidgetNote {
         Color     = $color
         UpdatedAt = [DateTime]::UtcNow.ToString('o')
     }
-    # Newest on top, like a fresh sticky slapped over the pile.
+    # Newest on top, like a fresh sticky slapped over the pile. A new note
+    # opens straight into its editor (every other note is a collapsed card).
     $script:ActiveNotes = @($note) + @($script:ActiveNotes)
+    $script:ExpandedNoteId = $note.Id
     $script:NotesDirty = $true
     Save-DevKitWidgetNotesFlush
     Update-DevKitWidgetNotesPanel
@@ -3534,6 +5225,10 @@ function Add-DevKitWidgetNote {
 
 function Remove-DevKitWidgetNote {
     param([Parameter(Mandatory = $true)]$Note)
+    if ($script:ExpandedNoteId -eq $Note.Id) {
+        $script:ExpandedNoteId = $null
+        $script:ExpandedNoteCard = $null
+    }
     $script:ActiveNotes = @($script:ActiveNotes | Where-Object { $_.Id -ne $Note.Id })
     $script:NotesDirty = $true
     Save-DevKitWidgetNotesFlush
@@ -3544,21 +5239,26 @@ function Set-DevKitNotesFlyout {
     param([bool]$Open, [switch]$Instant)
     if ($Open -eq $script:NotesFlyoutOpen) { return }
     if ($Open -and -not $script:ActiveProjectPath) { return }
-    # Only one flyout at a time - mirror of the guard in Set-DevKitGitFlyout
-    # (see the comment there for why the close is -Instant).
+    # Only one CAROUSEL flyout at a time - mirror of the guard in
+    # Set-DevKitGitFlyout (see the comment there for why the close is
+    # -Instant, and why the terminal panel is deliberately NOT in this list).
     if ($Open -and $script:GitFlyoutOpen) { Set-DevKitGitFlyout -Open $false -Instant }
+    if ($Open -and $script:FilesFlyoutOpen) { Set-DevKitFilesFlyout -Open $false -Instant }
+    if ($Open -and $script:OnDeckFlyoutOpen) { Set-DevKitOnDeckFlyout -Open $false -Instant }
+    if ($Open -and $script:ProcPanelKind) { Set-DevKitProcPanel -Open $false -Instant }
 
     # Same lockstep window/flyout animation contract as Set-DevKitGitFlyout
-    # (see the long comment there). The two flyouts share one anim token:
-    # only one slide is ever in flight, and a toggle of either must stale-out
-    # the other's pending Completed handlers.
+    # (see the long comment there - flag set BEFORE target computation, all
+    # window targets derived from the flag-based target layout so overlapping
+    # slides still converge). All panels share one anim token: a toggle of
+    # any one must stale-out another's pending Completed handlers.
     $script:GitFlyoutAnimToken++
     $token = $script:GitFlyoutAnimToken
-    $curFlyoutWidth = $ui.NotesFlyout.Width
-    $curLeft = $window.Left
-    $contentWidth = $window.Width - $curFlyoutWidth
+    $script:NotesFlyoutOpen = $Open
     $targetFlyoutWidth = if ($Open) { $script:NotesFlyoutWidth } else { 0 }
-    $targetWindowWidth = $contentWidth + $targetFlyoutWidth
+    $targetWindowWidth = $script:WidgetChromeWidth + $script:WidgetContentWidth + (Get-DevKitWidgetPanelExtra)
+    $pinnedRight = $window.Left + $window.Width
+    $targetLeft = $pinnedRight - $targetWindowWidth
 
     if ($Instant) {
         $window.BeginAnimation([Windows.Window]::WidthProperty, $null)
@@ -3566,11 +5266,7 @@ function Set-DevKitNotesFlyout {
         $ui.NotesFlyout.BeginAnimation([Windows.Controls.Border]::WidthProperty, $null)
         $ui.NotesFlyout.Width = $targetFlyoutWidth
         $window.Width = $targetWindowWidth
-        if ($script:DockMode -eq 'Right') {
-            $contentLeft = $curLeft + $curFlyoutWidth
-            $window.Left = if ($Open) { $contentLeft - $targetFlyoutWidth } else { $contentLeft }
-        }
-        $script:NotesFlyoutOpen = $Open
+        if ($script:DockMode -eq 'Right') { $window.Left = $targetLeft }
         if ($Open) {
             $ui.NotesFlyoutInner.Width = $script:NotesFlyoutWidth
             $ui.BtnNotesTab.Foreground = Get-DevKitGitBrush '#E5C07B'
@@ -3583,26 +5279,21 @@ function Set-DevKitNotesFlyout {
     }
 
     if ($Open) {
-        $script:NotesFlyoutOpen = $true
         $ui.NotesFlyoutInner.Width = $script:NotesFlyoutWidth
         Start-DevKitFlyoutSlide -Target $ui.NotesFlyout -Property ([Windows.Controls.Border]::WidthProperty) -To $targetFlyoutWidth -Opening $true -Token $token
         Start-DevKitFlyoutSlide -Target $window -Property ([Windows.Window]::WidthProperty) -To $targetWindowWidth -Opening $true -Token $token
         if ($script:DockMode -eq 'Right') {
             # Right-docked: pinned right edge, window grows leftward - same
             # Left+Width lockstep as the Git flyout's open path.
-            $contentLeft = $window.Left + $curFlyoutWidth
-            $targetLeft = $contentLeft - $targetFlyoutWidth
             Start-DevKitFlyoutSlide -Target $window -Property ([Windows.Window]::LeftProperty) -To $targetLeft -Opening $true -Token $token
         }
         $ui.BtnNotesTab.Foreground = Get-DevKitGitBrush '#E5C07B'
         Open-DevKitWidgetNotesProject
     } else {
-        $script:NotesFlyoutOpen = $false
         Start-DevKitFlyoutSlide -Target $ui.NotesFlyout -Property ([Windows.Controls.Border]::WidthProperty) -To 0 -Opening $false -Token $token
         Start-DevKitFlyoutSlide -Target $window -Property ([Windows.Window]::WidthProperty) -To $targetWindowWidth -Opening $false -Token $token
         if ($script:DockMode -eq 'Right') {
-            $contentLeft = $window.Left + $curFlyoutWidth
-            Start-DevKitFlyoutSlide -Target $window -Property ([Windows.Window]::LeftProperty) -To $contentLeft -Opening $false -Token $token
+            Start-DevKitFlyoutSlide -Target $window -Property ([Windows.Window]::LeftProperty) -To $targetLeft -Opening $false -Token $token
         }
         $ui.BtnNotesTab.Foreground = Get-WidgetResource 'BrushTextMuted'
         Save-DevKitWidgetNotesFlush
@@ -3612,6 +5303,729 @@ function Set-DevKitNotesFlyout {
 $ui.BtnNotesTab.Add_Click({ Set-DevKitNotesFlyout -Open (-not $script:NotesFlyoutOpen) })
 $ui.BtnNotesClose.Add_Click({ Set-DevKitNotesFlyout -Open $false })
 $ui.BtnNoteAdd.Add_Click({ Add-DevKitWidgetNote })
+# Click-away collapse for the open note editor: a Border isn't focusable, so
+# clicking a collapsed card or dead space never raises LostFocus on the
+# editor - catch the mouse-down at the flyout root instead (Preview* fires
+# before the click lands, so the collapse/re-render can't eat the click: the
+# collapsed card under the cursor is only rebuilt afterwards, and a click on
+# the editor's own card is inside it and ignored).
+$ui.NotesFlyoutInner.Add_PreviewMouseLeftButtonDown({
+    param($s, $e)
+    if (-not $script:ExpandedNoteId -or -not $script:ExpandedNoteCard) { return }
+    if (Test-DevKitWidgetWithin -Ancestor $script:ExpandedNoteCard -Source $e.OriginalSource) { return }
+    Close-DevKitWidgetNoteEditor
+})
+
+# ==================== FILES FLYOUT (PROJECT FILE EXPLORER) ====================
+# A mini VS Code-style explorer for the active project's root folder, behind
+# the FILES pull-tab under NOTES. The tree lazy-loads one directory level per
+# expansion (Get-DevKitDirChildren, DevKit-WidgetCore.ps1) via a dummy child
+# that is replaced on first expand - nothing ever auto-recurses. Expansion
+# state is a live set of root-relative paths so a rebuild keeps the same
+# folders open; EVERY open of the panel re-enumerates from disk through that
+# rebuild (same path as the Refresh button), so the tree never shows a stale
+# snapshot cached from before the panel was closed. Cut/Copy/Paste are an
+# INTERNAL clipboard (no Windows file-clipboard interop); Delete goes to the
+# Recycle Bin behind the styled confirm dialog; every mutating op re-validates
+# containment with Test-DevKitPathWithinRoot. Panel slide/geometry reuses the
+# Git/Notes machinery wholesale (shared Start-DevKitFlyoutSlide, shared anim
+# token, shared grip handlers routed by -Kind 'Files').
+
+# Recycle-Bin deletes (Microsoft.VisualBasic.FileIO) - load once, best effort.
+try { Add-Type -AssemblyName Microsoft.VisualBasic -ErrorAction Stop } catch { }
+
+$script:FilesProjectPath = $null        # the project folder the CURRENT tree belongs to
+$script:FilesExpandedPaths = @{}        # root-relative path ('' = root) -> $true
+$script:FilesClipboard = $null          # @{ Paths = @(...); Cut = $bool } - internal only
+$script:FilesCutPaths = @{}             # full paths currently shown dimmed (pending cut)
+$script:FilesSelectedItem = $null       # last selected TreeViewItem
+
+function Set-DevKitFilesStatus {
+    # The flyout's status line - same contract as the Git flyout's: dim for
+    # routine info, ember for failures.
+    param([string]$Text, [bool]$IsError = $false)
+    $ui.FilesFlyoutStatus.Text = $Text
+    $ui.FilesFlyoutStatus.Foreground = Get-WidgetResource $(if ($IsError) { 'BrushAccentEmber' } else { 'BrushTextDim' })
+}
+
+function Test-DevKitFilesNodeInfo {
+    # True when a tree item's Tag is a real file/folder entry (dummy placeholder
+    # and "access denied" nodes carry no FullName and fail every file op).
+    param($Info)
+    return ($null -ne $Info -and $Info.PSObject.Properties['FullName'] -and -not [string]::IsNullOrEmpty($Info.FullName))
+}
+
+function Test-DevKitFilesIsRootInfo {
+    # The project root node itself: no Rename/Delete/Cut - those would rip the
+    # ground out from under the whole tree.
+    param($Info)
+    if (-not (Test-DevKitFilesNodeInfo -Info $Info) -or -not $script:FilesProjectPath) { return $false }
+    try {
+        return [IO.Path]::GetFullPath($Info.FullName).TrimEnd('\').Equals(
+            [IO.Path]::GetFullPath($script:FilesProjectPath).TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase)
+    } catch { return $false }
+}
+
+function Get-DevKitFilesItemRelPath {
+    param($Info)
+    if (-not (Test-DevKitFilesNodeInfo -Info $Info) -or -not $script:FilesProjectPath) { return $null }
+    return Get-DevKitRelativePath -Root $script:FilesProjectPath -Path $Info.FullName
+}
+
+function Get-DevKitFilesTargetFolder {
+    # Where a toolbar create/paste lands: the selected folder, the selected
+    # file's parent folder, or the project root when nothing usable is selected.
+    $info = $null
+    if ($script:FilesSelectedItem) { $info = $script:FilesSelectedItem.Tag }
+    if (Test-DevKitFilesNodeInfo -Info $info) {
+        if ($info.IsDirectory) { return $info.FullName }
+        return Split-Path -Parent $info.FullName
+    }
+    return $script:FilesProjectPath
+}
+
+function Get-DevKitFilesInfoTargetFolder {
+    # 'Here' for a right-clicked item: the folder itself, or the file's parent.
+    param($Info)
+    if (Test-DevKitFilesNodeInfo -Info $Info) {
+        if ($Info.IsDirectory) { return $Info.FullName }
+        return Split-Path -Parent $Info.FullName
+    }
+    return $script:FilesProjectPath
+}
+
+function New-DevKitFilesTreeItem {
+    # One tree node: a type icon (frozen shared DrawingImage - see
+    # gui/DevKit-WidgetIcons.ps1) + name header, Tag carrying the
+    # path info the shared (capture-free) event handlers act on. Folders get a
+    # single dummy child so a closed folder still shows an expander arrow; the
+    # real children are enumerated on first expand and cached in the item.
+    param([Parameter(Mandatory = $true)]$Entry)
+    $info = [PSCustomObject]@{
+        Name        = [string]$Entry.Name
+        FullName    = [string]$Entry.FullName
+        IsDirectory = [bool]$Entry.IsDirectory
+        Loaded      = $false
+    }
+    $item = New-Object Windows.Controls.TreeViewItem
+    $item.Style = Get-WidgetResource 'FilesTreeViewItem'
+
+    $header = New-Object Windows.Controls.StackPanel
+    $header.Orientation = 'Horizontal'
+    # The icon Image is always header.Children[0] - the expand/collapse
+    # handlers swap its Source between the frozen 'folder'/'folder-open'
+    # drawings (a pointer swap, no allocation).
+    $iconKey = (Get-DevKitFileIconInfo -Name $info.Name -IsFolder:$info.IsDirectory).Key
+    $icon = New-DevKitIconImage -Key $iconKey -Size 14
+    $icon.Margin = [Windows.Thickness]::new(0, 0, 5, 0)
+    $header.Children.Add($icon) | Out-Null
+    $label = New-Object Windows.Controls.TextBlock
+    $label.Text = $info.Name
+    $label.Foreground = Get-WidgetResource 'BrushTextBright'
+    $label.VerticalAlignment = 'Center'
+    $header.Children.Add($label) | Out-Null
+    $item.Header = $header
+    $item.ToolTip = $info.FullName
+    $item.Tag = $info
+    # A rebuilt tree re-applies the dimmed look for paths still pending a cut.
+    if ($script:FilesCutPaths.ContainsKey($info.FullName)) { $item.Opacity = 0.5 }
+
+    if ($info.IsDirectory) {
+        $dummy = New-Object Windows.Controls.TreeViewItem
+        $dummy.Header = '...'
+        $dummy.Foreground = Get-WidgetResource 'BrushTextDim'
+        $dummy.Tag = [PSCustomObject]@{ IsDummy = $true }
+        $item.Items.Add($dummy) | Out-Null
+    }
+
+    $item.ContextMenu = New-DevKitFilesItemMenu -Info $info
+    # These handlers capture NO locals (everything routes through $s.Tag and
+    # function calls), so they deliberately do NOT use .GetNewClosure() - a
+    # closure would rebind $script: to a dead dynamic module (see the notes
+    # autosave comment for that trap).
+    $item.Add_Expanded({ param($s, $e) $e.Handled = $true; Expand-DevKitFilesTreeItem -Item $s })
+    $item.Add_Collapsed({ param($s, $e) $e.Handled = $true; Remove-DevKitFilesExpansion -Item $s })
+    $item.Add_MouseDoubleClick({ param($s, $e)
+        # Clicks landing on the expander arrow are its own business.
+        if ($e.OriginalSource -is [Windows.Controls.Primitives.ToggleButton]) { return }
+        $e.Handled = $true
+        Invoke-DevKitFilesItemDefault -Item $s
+    })
+    $item.Add_PreviewMouseRightButtonDown({ param($s, $e) $s.IsSelected = $true })
+    return $item
+}
+
+function Expand-DevKitFilesTreeItem {
+    # First-expand lazy load: swap the dummy child for the directory's real
+    # entries (one level only). Enumeration errors degrade to a greyed
+    # "access denied" node - never a throw.
+    param([Parameter(Mandatory = $true)]$Item)
+    $info = $Item.Tag
+    if (-not (Test-DevKitFilesNodeInfo -Info $info)) { return }
+    if (-not $info.IsDirectory) { return }
+    $rel = Get-DevKitFilesItemRelPath -Info $info
+    if ($null -ne $rel) { $script:FilesExpandedPaths[$rel] = $true }
+    # Folder closed -> open icon (frozen-source pointer swap, no allocation).
+    if ($Item.Header -is [Windows.Controls.StackPanel] -and $Item.Header.Children.Count -gt 0) {
+        $Item.Header.Children[0].Source = Get-DevKitIconDrawing -Key 'folder-open'
+    }
+    if ($info.Loaded) { return }
+    $Item.Items.Clear()
+    $info.Loaded = $true
+    $result = Get-DevKitDirChildren -Path $info.FullName
+    if ($result.Error) {
+        $errItem = New-Object Windows.Controls.TreeViewItem
+        $errItem.Header = "(access denied)"
+        $errItem.Foreground = Get-WidgetResource 'BrushTextDim'
+        $errItem.Tag = [PSCustomObject]@{ IsError = $true }
+        $Item.Items.Add($errItem) | Out-Null
+        Set-DevKitFilesStatus "Cannot list $($info.Name): $($result.Error)" -IsError $true
+        return
+    }
+    foreach ($child in $result.Children) {
+        $Item.Items.Add((New-DevKitFilesTreeItem -Entry $child)) | Out-Null
+    }
+}
+
+function Remove-DevKitFilesExpansion {
+    # Collapsed handler: drop the folder from the expansion set. Descendants
+    # keep their entries so re-expanding restores the whole branch.
+    param([Parameter(Mandatory = $true)]$Item)
+    $info = $Item.Tag
+    if (-not (Test-DevKitFilesNodeInfo -Info $info)) { return }
+    $rel = Get-DevKitFilesItemRelPath -Info $info
+    if ($null -ne $rel -and $script:FilesExpandedPaths.ContainsKey($rel)) {
+        $script:FilesExpandedPaths.Remove($rel)
+    }
+    # Folder open -> closed icon (frozen-source pointer swap).
+    if ($info.IsDirectory -and $Item.Header -is [Windows.Controls.StackPanel] -and $Item.Header.Children.Count -gt 0) {
+        $Item.Header.Children[0].Source = Get-DevKitIconDrawing -Key 'folder'
+    }
+}
+
+function Restore-DevKitFilesExpansion {
+    # After a rebuild, re-expand (which lazy-loads, synchronously) every folder
+    # still in the expansion set, breadth-first so freshly loaded levels get
+    # their own chance to restore.
+    param([Parameter(Mandatory = $true)]$Item)
+    $queue = New-Object System.Collections.Generic.Queue[object]
+    $queue.Enqueue($Item)
+    while ($queue.Count -gt 0) {
+        $cur = $queue.Dequeue()
+        foreach ($child in @($cur.Items)) {
+            $info = $child.Tag
+            if (-not (Test-DevKitFilesNodeInfo -Info $info)) { continue }
+            if (-not $info.IsDirectory) { continue }
+            $rel = Get-DevKitFilesItemRelPath -Info $info
+            if ($null -ne $rel -and $script:FilesExpandedPaths.ContainsKey($rel)) {
+                if (-not $child.IsExpanded) { $child.IsExpanded = $true }
+                $queue.Enqueue($child)
+            }
+        }
+    }
+}
+
+function Update-DevKitFilesTree {
+    # Full rebuild of the visible tree from disk, preserving the expansion set
+    # (maintained live by the Expanded/Collapsed handlers). Refresh, project
+    # switch, and every mutating op funnel through here.
+    $ui.FilesTree.Items.Clear()
+    $script:FilesSelectedItem = $null
+    if (-not $script:FilesProjectPath) {
+        $ui.FilesEmptyText.Text = 'Link a project to browse files'
+        $ui.FilesEmptyText.Visibility = 'Visible'
+        return
+    }
+    if (-not (Test-Path -LiteralPath $script:FilesProjectPath -PathType Container)) {
+        $ui.FilesEmptyText.Text = "Project folder not found:`n$script:FilesProjectPath"
+        $ui.FilesEmptyText.Visibility = 'Visible'
+        return
+    }
+    $ui.FilesEmptyText.Visibility = 'Collapsed'
+    $rootEntry = [PSCustomObject]@{
+        Name        = Split-Path ($script:FilesProjectPath.TrimEnd('\')) -Leaf
+        FullName    = $script:FilesProjectPath
+        IsDirectory = $true
+    }
+    $rootItem = New-DevKitFilesTreeItem -Entry $rootEntry
+    $ui.FilesTree.Items.Add($rootItem) | Out-Null
+    $script:FilesExpandedPaths[''] = $true
+    $rootItem.IsExpanded = $true   # fires Expanded -> loads the top level
+    Restore-DevKitFilesExpansion -Item $rootItem
+}
+
+function Open-DevKitWidgetFilesProject {
+    # (Re)roots the tree on the active project, dropping the previous
+    # project's clipboard/cut marks and expansion state with it.
+    $script:FilesProjectPath = $script:ActiveProjectPath
+    $script:FilesClipboard = $null
+    $script:FilesCutPaths = @{}
+    $script:FilesExpandedPaths = @{}
+    $ui.FilesFlyoutSub.Text = [string]$script:ActiveProjectName
+    $ui.FilesFlyoutSub.ToolTip = [string]$script:ActiveProjectPath
+    Set-DevKitFilesStatus ''
+    Update-DevKitFilesTree
+}
+
+function Find-DevKitFilesTreeItem {
+    # Locates the TreeViewItem for a full path among the currently loaded
+    # (i.e. visible-or-previously-expanded) nodes; $null when it was never
+    # expanded into existence.
+    param([Parameter(Mandatory = $true)][string]$FullName)
+    $queue = New-Object System.Collections.Generic.Queue[object]
+    foreach ($root in @($ui.FilesTree.Items)) { $queue.Enqueue($root) }
+    while ($queue.Count -gt 0) {
+        $cur = $queue.Dequeue()
+        $info = $cur.Tag
+        if ((Test-DevKitFilesNodeInfo -Info $info) -and $info.FullName -ieq $FullName) { return $cur }
+        foreach ($child in @($cur.Items)) { $queue.Enqueue($child) }
+    }
+    return $null
+}
+
+function Invoke-DevKitFilesItemDefault {
+    # Double-click / context "Open": folders toggle expansion, files open with
+    # the shell default association.
+    param([Parameter(Mandatory = $true)]$Item)
+    $info = $Item.Tag
+    if (-not (Test-DevKitFilesNodeInfo -Info $info)) { return }
+    if ($info.IsDirectory) {
+        $Item.IsExpanded = -not $Item.IsExpanded
+        return
+    }
+    try {
+        Start-Process -FilePath $info.FullName
+    } catch {
+        Set-DevKitFilesStatus "Could not open $($info.Name): $($_.Exception.Message)" -IsError $true
+    }
+}
+
+function Invoke-DevKitFilesExplorerSelect {
+    # 'Open in Explorer' - Explorer window with the item pre-selected.
+    param([Parameter(Mandatory = $true)]$Info)
+    if (-not (Test-DevKitFilesNodeInfo -Info $Info)) { return }
+    try {
+        Start-Process 'explorer.exe' -ArgumentList "/select,`"$($Info.FullName)`""
+    } catch {
+        Set-DevKitFilesStatus "Could not open Explorer: $($_.Exception.Message)" -IsError $true
+    }
+}
+
+function Open-DevKitWidgetEditorPath {
+    # 'Open in Editor' from the Files flyout. Folders go through the real
+    # Code-Here tool (exactly like the Editor quick action); files launch the
+    # detected editor directly with the file path - Code-Here only accepts
+    # directories and would flash a terminal for nothing.
+    param([Parameter(Mandatory = $true)]$Info)
+    if (-not (Test-DevKitFilesNodeInfo -Info $Info)) { return }
+    if ($Info.IsDirectory) {
+        Start-DevKitWidgetTool -RelativeScript 'workflow\Code-Here.ps1' -Arguments @{ Path = $Info.FullName } -Title 'Open in Editor'
+        return
+    }
+    $editor = Get-DevKitWindowsExecutable -Name 'code'
+    if (-not $editor) {
+        # Mirror workflow/Code-Here.ps1's Cursor fallback locations.
+        foreach ($candidate in @(
+            (Join-Path $env:LOCALAPPDATA 'Programs\cursor\resources\app\bin\cursor.cmd'),
+            (Join-Path $env:LOCALAPPDATA 'Programs\cursor\bin\cursor.cmd'),
+            (Join-Path $env:LOCALAPPDATA 'Programs\cursor\Cursor.exe'))) {
+            if (Test-Path $candidate) { $editor = @{ Source = $candidate }; break }
+        }
+    }
+    if (-not $editor) {
+        Set-DevKitFilesStatus 'No editor found (expected VS Code or Cursor).' -IsError $true
+        return
+    }
+    try {
+        Start-Process -FilePath $editor.Source -ArgumentList (Format-DevKitShellArgument -Value $Info.FullName)
+    } catch {
+        Set-DevKitFilesStatus "Could not launch the editor: $($_.Exception.Message)" -IsError $true
+    }
+}
+
+function Set-DevKitFilesClipboard {
+    # Internal Copy/Cut. Cut dims the item until the paste lands or Esc cancels.
+    param([Parameter(Mandatory = $true)]$Info, [switch]$Cut)
+    if (-not (Test-DevKitFilesNodeInfo -Info $Info)) { return }
+    Clear-DevKitFilesCutMarks
+    $script:FilesClipboard = @{ Paths = @($Info.FullName); Cut = [bool]$Cut }
+    if ($Cut) {
+        $script:FilesCutPaths[$Info.FullName] = $true
+        $it = Find-DevKitFilesTreeItem -FullName $Info.FullName
+        if ($it) { $it.Opacity = 0.5 }
+        Set-DevKitFilesStatus "Cut $($Info.Name) - right-click a folder and Paste (Esc cancels)."
+    } else {
+        Set-DevKitFilesStatus "Copied $($Info.Name)."
+    }
+}
+
+function Clear-DevKitFilesCutMarks {
+    foreach ($p in @($script:FilesCutPaths.Keys)) {
+        $it = Find-DevKitFilesTreeItem -FullName $p
+        if ($it) { $it.Opacity = 1.0 }
+    }
+    $script:FilesCutPaths = @{}
+}
+
+function Invoke-DevKitFilesPaste {
+    # Paste the internal clipboard into $TargetDir: Copy duplicates, Cut moves
+    # (once - the clipboard clears after a successful cut-paste, like Explorer).
+    # Name collisions get Explorer's ' - Copy' suffix via Get-DevKitCopyName.
+    param([Parameter(Mandatory = $true)][string]$TargetDir)
+    if (-not $script:FilesProjectPath) { return }
+    if (-not $script:FilesClipboard -or @($script:FilesClipboard.Paths).Count -eq 0) {
+        Set-DevKitFilesStatus 'Nothing to paste - Copy or Cut an item first.'
+        return
+    }
+    if (-not (Test-DevKitPathWithinRoot -Root $script:FilesProjectPath -Path $TargetDir)) {
+        Set-DevKitFilesStatus 'Paste target is outside the project - refused.' -IsError $true
+        return
+    }
+    if (-not (Test-Path -LiteralPath $TargetDir -PathType Container)) {
+        Set-DevKitFilesStatus 'Paste target folder no longer exists.' -IsError $true
+        return
+    }
+    $cut = [bool]$script:FilesClipboard.Cut
+    $done = 0
+    foreach ($src in @($script:FilesClipboard.Paths)) {
+        if (-not (Test-DevKitPathWithinRoot -Root $script:FilesProjectPath -Path $src)) { continue }
+        if (-not (Test-Path -LiteralPath $src)) {
+            Set-DevKitFilesStatus "No longer exists: $(Split-Path $src -Leaf)" -IsError $true
+            continue
+        }
+        $srcIsDir = Test-Path -LiteralPath $src -PathType Container
+        # Never paste a folder into itself or its own descendant (a copy would
+        # recurse forever, a move would be nonsensical).
+        if ($srcIsDir -and (Test-DevKitPathWithinRoot -Root $src -Path $TargetDir)) {
+            Set-DevKitFilesStatus "Cannot paste '$(Split-Path $src -Leaf)' into itself." -IsError $true
+            continue
+        }
+        if ($cut -and ((Split-Path -Parent $src).TrimEnd('\') -ieq $TargetDir.TrimEnd('\'))) {
+            # Cut + Paste into the item's own folder is a no-op, like Explorer.
+            continue
+        }
+        $leaf = Split-Path $src -Leaf
+        $destName = Get-DevKitCopyName -Folder $TargetDir -Name $leaf -IsDirectory:$srcIsDir
+        $dest = Join-Path $TargetDir $destName
+        try {
+            if ($cut) {
+                Move-Item -LiteralPath $src -Destination $dest -ErrorAction Stop
+            } else {
+                Copy-Item -LiteralPath $src -Destination $dest -Recurse -ErrorAction Stop
+            }
+            $done++
+        } catch {
+            Set-DevKitFilesStatus "Paste failed for $($leaf): $($_.Exception.Message)" -IsError $true
+        }
+    }
+    if ($cut -and $done -gt 0) {
+        $script:FilesClipboard = $null
+        $script:FilesCutPaths = @{}
+    }
+    # Reveal the paste target after the rebuild.
+    $rel = Get-DevKitRelativePath -Root $script:FilesProjectPath -Path $TargetDir
+    if ($null -ne $rel) { $script:FilesExpandedPaths[$rel] = $true }
+    Update-DevKitFilesTree
+    if ($done -gt 0) { Set-DevKitFilesStatus "Pasted $done item$(if ($done -ne 1) { 's' })." }
+}
+
+function Invoke-DevKitFilesNew {
+    # Toolbar '+ File'/'+ Folder' and the context menu's 'New ... Here'.
+    param(
+        [Parameter(Mandatory = $true)][ValidateSet('File', 'Folder')][string]$Kind,
+        [Parameter(Mandatory = $true)][string]$TargetDir
+    )
+    if (-not $script:FilesProjectPath) { return }
+    if (-not (Test-DevKitPathWithinRoot -Root $script:FilesProjectPath -Path $TargetDir)) {
+        Set-DevKitFilesStatus 'Target is outside the project - refused.' -IsError $true
+        return
+    }
+    $name = Show-DevKitWidgetTextInput -Title "New $Kind" -Label "$Kind name (created inside the selected folder):"
+    if ($null -eq $name) { return }   # cancelled (validation happens in the dialog)
+    $dest = Join-Path $TargetDir $name
+    if (Test-Path -LiteralPath $dest) {
+        Set-DevKitFilesStatus "'$name' already exists there." -IsError $true
+        return
+    }
+    try {
+        if ($Kind -eq 'File') {
+            New-Item -ItemType File -Path $dest -ErrorAction Stop | Out-Null
+        } else {
+            New-Item -ItemType Directory -Path $dest -ErrorAction Stop | Out-Null
+        }
+    } catch {
+        Set-DevKitFilesStatus "Could not create $($Kind.ToLower()): $($_.Exception.Message)" -IsError $true
+        return
+    }
+    $rel = Get-DevKitRelativePath -Root $script:FilesProjectPath -Path $TargetDir
+    if ($null -ne $rel) { $script:FilesExpandedPaths[$rel] = $true }
+    Update-DevKitFilesTree
+    Set-DevKitFilesStatus "Created $name."
+}
+
+function Invoke-DevKitFilesRename {
+    param([Parameter(Mandatory = $true)]$Info)
+    if (-not (Test-DevKitFilesNodeInfo -Info $Info)) { return }
+    if (Test-DevKitFilesIsRootInfo -Info $Info) {
+        Set-DevKitFilesStatus 'The project root cannot be renamed here.' -IsError $true
+        return
+    }
+    $newName = Show-DevKitWidgetTextInput -Title 'Rename' -Label "New name for '$($Info.Name)':" -Initial $Info.Name
+    if ($null -eq $newName -or $newName -ceq $Info.Name) { return }
+    $parent = Split-Path -Parent $Info.FullName
+    $dest = Join-Path $parent $newName
+    # A case-only rename (Foo.txt -> foo.txt) targets the same file - allowed.
+    if ((Test-Path -LiteralPath $dest) -and ($dest -ine $Info.FullName)) {
+        Set-DevKitFilesStatus "'$newName' already exists there." -IsError $true
+        return
+    }
+    try {
+        Move-Item -LiteralPath $Info.FullName -Destination $dest -ErrorAction Stop
+    } catch {
+        Set-DevKitFilesStatus "Rename failed: $($_.Exception.Message)" -IsError $true
+        return
+    }
+    Update-DevKitFilesTree
+    Set-DevKitFilesStatus "Renamed to $newName."
+}
+
+function Invoke-DevKitFilesDelete {
+    # Recycle Bin only, behind the styled confirm - never a hard delete.
+    param([Parameter(Mandatory = $true)]$Info)
+    if (-not (Test-DevKitFilesNodeInfo -Info $Info)) { return }
+    if (Test-DevKitFilesIsRootInfo -Info $Info) {
+        Set-DevKitFilesStatus 'The project root cannot be deleted here.' -IsError $true
+        return
+    }
+    $kind = if ($Info.IsDirectory) { 'folder' } else { 'file' }
+    $yes = Show-DevKitWidgetConfirm -Title "Delete $kind" -Message "Move '$($Info.Name)' to the Recycle Bin?"
+    if (-not $yes) { return }
+    try {
+        if ($Info.IsDirectory) {
+            [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($Info.FullName,
+                [Microsoft.VisualBasic.FileIO.UIOption]::OnlyErrorDialogs,
+                [Microsoft.VisualBasic.FileIO.RecycleOption]::SendToRecycleBin)
+        } else {
+            [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($Info.FullName,
+                [Microsoft.VisualBasic.FileIO.UIOption]::OnlyErrorDialogs,
+                [Microsoft.VisualBasic.FileIO.RecycleOption]::SendToRecycleBin)
+        }
+    } catch {
+        Set-DevKitFilesStatus "Delete failed: $($_.Exception.Message)" -IsError $true
+        return
+    }
+    # Drop the deleted folder (and anything under it) from the expansion set.
+    $rel = Get-DevKitFilesItemRelPath -Info $Info
+    if ($null -ne $rel -and $Info.IsDirectory) {
+        foreach ($k in @($script:FilesExpandedPaths.Keys)) {
+            if ($k -eq $rel -or $k.StartsWith($rel + '\', [StringComparison]::OrdinalIgnoreCase)) {
+                $script:FilesExpandedPaths.Remove($k)
+            }
+        }
+    }
+    Update-DevKitFilesTree
+    Set-DevKitFilesStatus "Moved $($Info.Name) to the Recycle Bin."
+}
+
+function Copy-DevKitFilesPath {
+    # 'Copy Full Path' / 'Copy Relative Path' - plain text to the Windows
+    # clipboard (the file clipboard itself stays internal by design).
+    param([Parameter(Mandatory = $true)]$Info, [switch]$Relative)
+    if (-not (Test-DevKitFilesNodeInfo -Info $Info)) { return }
+    $text = $Info.FullName
+    if ($Relative) {
+        $rel = Get-DevKitFilesItemRelPath -Info $Info
+        if ($null -eq $rel) {
+            Set-DevKitFilesStatus 'Not inside the project root.' -IsError $true
+            return
+        }
+        $text = if ($rel -eq '') { '.' } else { $rel }
+    }
+    try {
+        [Windows.Clipboard]::SetText($text)
+        Set-DevKitFilesStatus "Copied: $text"
+    } catch {
+        Set-DevKitFilesStatus "Clipboard error: $($_.Exception.Message)" -IsError $true
+    }
+}
+
+function Collapse-DevKitFilesTree {
+    # Fold every folder except the root (which IS the project). Children of a
+    # collapsing parent keep IsExpanded=true while hidden, so this walks the
+    # whole loaded tree rather than just the visible frontier.
+    $script:FilesExpandedPaths = @{}
+    $queue = New-Object System.Collections.Generic.Queue[object]
+    foreach ($root in @($ui.FilesTree.Items)) { $queue.Enqueue($root) }
+    $isRoot = $true
+    while ($queue.Count -gt 0) {
+        $cur = $queue.Dequeue()
+        foreach ($child in @($cur.Items)) { $queue.Enqueue($child) }
+        if ($isRoot) { $isRoot = $false; continue }
+        if ($cur.IsExpanded) { $cur.IsExpanded = $false }
+    }
+    $script:FilesExpandedPaths[''] = $true
+    Set-DevKitFilesStatus 'Collapsed all folders.'
+}
+
+function Add-DevKitFilesMenuItem {
+    # One MenuItem in a Files context menu. The $Action scriptblock must stay
+    # capture-free - it receives the entry info back via $s.Tag, so no
+    # .GetNewClosure() is needed (or wanted - see New-DevKitFilesTreeItem).
+    param($Menu, [string]$Header, [scriptblock]$Action, [bool]$Enabled = $true, $Tag = $null)
+    $mi = New-Object Windows.Controls.MenuItem
+    $mi.Header = $Header
+    $mi.Tag = $Tag
+    if (-not $Enabled) { $mi.IsEnabled = $false }
+    if ($null -ne $Action) { $mi.Add_Click($Action) }
+    $Menu.Items.Add($mi) | Out-Null
+}
+
+function New-DevKitFilesItemMenu {
+    # Right-click menu for a file/folder node. Rebuilt per node creation; the
+    # project root gets Copy/Open entries only (no Cut/Rename/Delete).
+    param([Parameter(Mandatory = $true)]$Info)
+    $isRoot = Test-DevKitFilesIsRootInfo -Info $Info
+    $menu = New-Object Windows.Controls.ContextMenu
+    $menu.Style = Get-WidgetResource 'FilesContextMenu'
+    Add-DevKitFilesMenuItem $menu 'Open' { param($s, $e) Invoke-DevKitFilesContextOpen -Info $s.Tag } -Tag $Info
+    Add-DevKitFilesMenuItem $menu 'Open in Explorer' { param($s, $e) Invoke-DevKitFilesExplorerSelect -Info $s.Tag } -Tag $Info
+    Add-DevKitFilesMenuItem $menu 'Open in Editor' { param($s, $e) Open-DevKitWidgetEditorPath -Info $s.Tag } -Tag $Info
+    $menu.Items.Add((New-Object Windows.Controls.Separator)) | Out-Null
+    Add-DevKitFilesMenuItem $menu 'Copy' { param($s, $e) Set-DevKitFilesClipboard -Info $s.Tag } -Tag $Info -Enabled (-not $isRoot)
+    Add-DevKitFilesMenuItem $menu 'Cut' { param($s, $e) Set-DevKitFilesClipboard -Info $s.Tag -Cut } -Tag $Info -Enabled (-not $isRoot)
+    Add-DevKitFilesMenuItem $menu 'Paste' { param($s, $e) Invoke-DevKitFilesPaste -TargetDir (Get-DevKitFilesInfoTargetFolder -Info $s.Tag) } -Tag $Info
+    $menu.Items.Add((New-Object Windows.Controls.Separator)) | Out-Null
+    Add-DevKitFilesMenuItem $menu 'New File Here' { param($s, $e) Invoke-DevKitFilesNew -Kind 'File' -TargetDir (Get-DevKitFilesInfoTargetFolder -Info $s.Tag) } -Tag $Info
+    Add-DevKitFilesMenuItem $menu 'New Folder Here' { param($s, $e) Invoke-DevKitFilesNew -Kind 'Folder' -TargetDir (Get-DevKitFilesInfoTargetFolder -Info $s.Tag) } -Tag $Info
+    $menu.Items.Add((New-Object Windows.Controls.Separator)) | Out-Null
+    Add-DevKitFilesMenuItem $menu 'Rename...' { param($s, $e) Invoke-DevKitFilesRename -Info $s.Tag } -Tag $Info -Enabled (-not $isRoot)
+    Add-DevKitFilesMenuItem $menu 'Delete' { param($s, $e) Invoke-DevKitFilesDelete -Info $s.Tag } -Tag $Info -Enabled (-not $isRoot)
+    $menu.Items.Add((New-Object Windows.Controls.Separator)) | Out-Null
+    Add-DevKitFilesMenuItem $menu 'Copy Full Path' { param($s, $e) Copy-DevKitFilesPath -Info $s.Tag } -Tag $Info
+    Add-DevKitFilesMenuItem $menu 'Copy Relative Path' { param($s, $e) Copy-DevKitFilesPath -Info $s.Tag -Relative } -Tag $Info
+    return $menu
+}
+
+function Invoke-DevKitFilesContextOpen {
+    # 'Open' from a context menu (only the path info is at hand, so the item
+    # is located by path for the folder-toggle case).
+    param([Parameter(Mandatory = $true)]$Info)
+    if (-not (Test-DevKitFilesNodeInfo -Info $Info)) { return }
+    $it = Find-DevKitFilesTreeItem -FullName $Info.FullName
+    if ($it) { Invoke-DevKitFilesItemDefault -Item $it }
+}
+
+function Set-DevKitFilesFlyout {
+    param([bool]$Open, [switch]$Instant)
+    if ($Open -eq $script:FilesFlyoutOpen) { return }
+    if ($Open -and -not $script:ActiveProjectPath) { return }
+    # Only one CAROUSEL flyout at a time - mirror of the guard in
+    # Set-DevKitGitFlyout (see the comment there for why the close is
+    # -Instant, and why the terminal panel is deliberately NOT in this list).
+    if ($Open -and $script:GitFlyoutOpen) { Set-DevKitGitFlyout -Open $false -Instant }
+    if ($Open -and $script:NotesFlyoutOpen) { Set-DevKitNotesFlyout -Open $false -Instant }
+    if ($Open -and $script:OnDeckFlyoutOpen) { Set-DevKitOnDeckFlyout -Open $false -Instant }
+    if ($Open -and $script:ProcPanelKind) { Set-DevKitProcPanel -Open $false -Instant }
+
+    # Same lockstep window/flyout animation contract as Set-DevKitGitFlyout
+    # (see the long comment there - flag set BEFORE target computation, all
+    # window targets derived from the flag-based target layout so overlapping
+    # slides still converge). All panels share one anim token.
+    $script:GitFlyoutAnimToken++
+    $token = $script:GitFlyoutAnimToken
+    $script:FilesFlyoutOpen = $Open
+    $targetFlyoutWidth = if ($Open) { $script:FilesFlyoutWidth } else { 0 }
+    $targetWindowWidth = $script:WidgetChromeWidth + $script:WidgetContentWidth + (Get-DevKitWidgetPanelExtra)
+    $pinnedRight = $window.Left + $window.Width
+    $targetLeft = $pinnedRight - $targetWindowWidth
+
+    if ($Instant) {
+        $window.BeginAnimation([Windows.Window]::WidthProperty, $null)
+        $window.BeginAnimation([Windows.Window]::LeftProperty, $null)
+        $ui.FilesFlyout.BeginAnimation([Windows.Controls.Border]::WidthProperty, $null)
+        $ui.FilesFlyout.Width = $targetFlyoutWidth
+        $window.Width = $targetWindowWidth
+        if ($script:DockMode -eq 'Right') { $window.Left = $targetLeft }
+        if ($Open) {
+            $ui.FilesFlyoutInner.Width = $script:FilesFlyoutWidth
+            $ui.BtnFilesTab.Foreground = Get-DevKitGitBrush '#98C379'
+            if ($script:FilesProjectPath -ne $script:ActiveProjectPath) {
+                Open-DevKitWidgetFilesProject
+            } else {
+                # Every open re-enumerates from disk (same rescan the Refresh
+                # button performs) - the tree never serves a stale snapshot
+                # from before the panel was closed. The expansion set is
+                # live, so expanded folders survive the rebuild.
+                Update-DevKitFilesTree
+            }
+        } else {
+            $ui.BtnFilesTab.Foreground = Get-WidgetResource 'BrushTextMuted'
+        }
+        return
+    }
+
+    if ($Open) {
+        $ui.FilesFlyoutInner.Width = $script:FilesFlyoutWidth
+        Start-DevKitFlyoutSlide -Target $ui.FilesFlyout -Property ([Windows.Controls.Border]::WidthProperty) -To $targetFlyoutWidth -Opening $true -Token $token
+        Start-DevKitFlyoutSlide -Target $window -Property ([Windows.Window]::WidthProperty) -To $targetWindowWidth -Opening $true -Token $token
+        if ($script:DockMode -eq 'Right') {
+            # Right-docked: pinned right edge, window grows leftward - same
+            # Left+Width lockstep as the Git flyout's open path.
+            Start-DevKitFlyoutSlide -Target $window -Property ([Windows.Window]::LeftProperty) -To $targetLeft -Opening $true -Token $token
+        }
+        $ui.BtnFilesTab.Foreground = Get-DevKitGitBrush '#98C379'
+        if ($script:FilesProjectPath -ne $script:ActiveProjectPath) {
+            Open-DevKitWidgetFilesProject
+        } else {
+            # Same rescan-on-open as the -Instant path above: reopening the
+            # panel for the SAME project re-enumerates from disk instead of
+            # keeping the cached tree; expanded folders are restored.
+            Update-DevKitFilesTree
+        }
+    } else {
+        Start-DevKitFlyoutSlide -Target $ui.FilesFlyout -Property ([Windows.Controls.Border]::WidthProperty) -To 0 -Opening $false -Token $token
+        Start-DevKitFlyoutSlide -Target $window -Property ([Windows.Window]::WidthProperty) -To $targetWindowWidth -Opening $false -Token $token
+        if ($script:DockMode -eq 'Right') {
+            Start-DevKitFlyoutSlide -Target $window -Property ([Windows.Window]::LeftProperty) -To $targetLeft -Opening $false -Token $token
+        }
+        $ui.BtnFilesTab.Foreground = Get-WidgetResource 'BrushTextMuted'
+    }
+}
+
+$ui.BtnFilesTab.Add_Click({ Set-DevKitFilesFlyout -Open (-not $script:FilesFlyoutOpen) })
+$ui.BtnFilesClose.Add_Click({ Set-DevKitFilesFlyout -Open $false })
+$ui.BtnFileNew.Add_Click({ Invoke-DevKitFilesNew -Kind 'File' -TargetDir (Get-DevKitFilesTargetFolder) })
+$ui.BtnFolderNew.Add_Click({ Invoke-DevKitFilesNew -Kind 'Folder' -TargetDir (Get-DevKitFilesTargetFolder) })
+$ui.BtnFilesRefresh.Add_Click({ Update-DevKitFilesTree; Set-DevKitFilesStatus 'Refreshed.' })
+$ui.BtnFilesCollapse.Add_Click({ Collapse-DevKitFilesTree })
+
+$ui.FilesTree.Add_SelectedItemChanged({ param($s, $e) $script:FilesSelectedItem = $e.NewValue })
+# Esc cancels a pending cut (clears the internal clipboard + the dimmed look).
+$ui.FilesTree.Add_KeyDown({
+    param($s, $e)
+    if ($e.Key -eq 'Escape' -and $script:FilesClipboard) {
+        Clear-DevKitFilesCutMarks
+        $script:FilesClipboard = $null
+        Set-DevKitFilesStatus 'Clipboard cleared.'
+    }
+})
+# Right-click on empty background (below the last item): project-level menu.
+$filesBgMenu = New-Object Windows.Controls.ContextMenu
+$filesBgMenu.Style = Get-WidgetResource 'FilesContextMenu'
+Add-DevKitFilesMenuItem $filesBgMenu 'Refresh' { param($s, $e) Update-DevKitFilesTree; Set-DevKitFilesStatus 'Refreshed.' }
+Add-DevKitFilesMenuItem $filesBgMenu 'New File' { param($s, $e) Invoke-DevKitFilesNew -Kind 'File' -TargetDir $script:FilesProjectPath }
+Add-DevKitFilesMenuItem $filesBgMenu 'New Folder' { param($s, $e) Invoke-DevKitFilesNew -Kind 'Folder' -TargetDir $script:FilesProjectPath }
+Add-DevKitFilesMenuItem $filesBgMenu 'Paste' { param($s, $e) Invoke-DevKitFilesPaste -TargetDir $script:FilesProjectPath }
+Add-DevKitFilesMenuItem $filesBgMenu 'Copy Project Path' { param($s, $e)
+    try {
+        [Windows.Clipboard]::SetText([string]$script:FilesProjectPath)
+        Set-DevKitFilesStatus 'Project path copied.'
+    } catch {
+        Set-DevKitFilesStatus "Clipboard error: $($_.Exception.Message)" -IsError $true
+    }
+}
+$ui.FilesTree.ContextMenu = $filesBgMenu
+
 $ui.BtnGitFetch.Add_Click({ Start-DevKitGitAction -Kind 'GitFetch' -Verb 'fetch' })
 $ui.BtnGitPull.Add_Click({ Start-DevKitGitAction -Kind 'GitPull' -Verb 'pull' })
 $ui.BtnGitPush.Add_Click({ Start-DevKitGitAction -Kind 'GitPush' -Verb 'push' })
@@ -3623,6 +6037,947 @@ $ui.BtnGitCleanup.Add_Click({
     Start-DevKitWidgetTool -RelativeScript 'git\Git-Cleanup.ps1' -Arguments $args -Title 'Git Cleanup'
 })
 
+# ==================== ON-DECK FLYOUT (PER-PROJECT TO-DO LIST) ====================
+# A three-section to-do list (NOT STARTED / IN PROGRESS / DONE) scoped to the
+# active project, behind the ON DECK pull-tab under FILES. Persistence is
+# Get/Save-DevKitProjectOnDeck (DevKit-WidgetCore.ps1, ondeck.json in
+# %LOCALAPPDATA%) - the same per-project keying and forgiving load/save
+# posture as the notes store. Mutations (add/delete/status change/clear
+# done) are discrete user actions, so they save IMMEDIATELY - no debounce
+# like the notes' per-keystroke autosave needs. The stored list is always
+# kept section-grouped (Group-DevKitOnDeckItems), so a status change moves
+# the item to its new section with no manual reordering. Panel slide/
+# geometry reuses the Git/Notes/Files machinery wholesale (shared
+# Start-DevKitFlyoutSlide, shared anim token, shared grip handlers routed by
+# -Kind 'OnDeck').
+
+$script:OnDeckItems = @()              # live item objects behind the rendered rows
+$script:OnDeckProjectPath = $null      # the project the CURRENT list belongs to
+
+function Save-DevKitWidgetOnDeck {
+    # Persists the CURRENT list to the project it belongs to - called after
+    # every mutation, never just on close.
+    if (-not $script:OnDeckProjectPath) { return }
+    try { Save-DevKitProjectOnDeck -ProjectPath $script:OnDeckProjectPath -Items @($script:OnDeckItems) } catch { }
+}
+
+function Open-DevKitWidgetOnDeckProject {
+    # Loads and renders the active project's on-deck list (a corrupt/missing
+    # store just reads as empty - Get-DevKitProjectOnDeck never throws).
+    $script:OnDeckProjectPath = $script:ActiveProjectPath
+    $script:OnDeckItems = @(Get-DevKitProjectOnDeck -ProjectPath $script:OnDeckProjectPath)
+    $ui.OnDeckFlyoutSub.Text = [string]$script:ActiveProjectName
+    Update-DevKitWidgetOnDeckPanel
+}
+
+function Get-DevKitOnDeckNextStatus {
+    # The cycle button's rotation: notStarted -> inProgress -> done -> ...
+    param([string]$Status)
+    switch (Get-DevKitOnDeckStatus -Status $Status) {
+        'notStarted' { return 'inProgress' }
+        'inProgress' { return 'done' }
+        default      { return 'notStarted' }
+    }
+}
+
+function Get-DevKitOnDeckStatusLabel {
+    param([string]$Status)
+    switch (Get-DevKitOnDeckStatus -Status $Status) {
+        'notStarted' { return 'Not Started' }
+        'inProgress' { return 'In Progress' }
+        default      { return 'Done' }
+    }
+}
+
+function Add-DevKitWidgetOnDeckItem {
+    # Add-row (button or Enter): new items land at the top of NOT STARTED.
+    if (-not $script:OnDeckProjectPath) { return }
+    $text = [string]$ui.OnDeckNewText.Text
+    if ([string]::IsNullOrWhiteSpace($text)) { return }
+    $script:OnDeckItems = @(Add-DevKitOnDeckItem -Items $script:OnDeckItems -Text $text)
+    $ui.OnDeckNewText.Text = ''
+    Save-DevKitWidgetOnDeck
+    Update-DevKitWidgetOnDeckPanel
+    try { $ui.OnDeckNewText.Focus() | Out-Null } catch { }
+}
+
+function Remove-DevKitWidgetOnDeckItem {
+    # Immediate delete (a list, not files - no recycle bin); reachability is
+    # guarded by the delete being a deliberate click on the row's own small
+    # x button or context-menu entry, never a plain row click.
+    param([Parameter(Mandatory = $true)]$Item)
+    $script:OnDeckItems = @(Remove-DevKitOnDeckItem -Items $script:OnDeckItems -Id ([string]$Item.Id))
+    Save-DevKitWidgetOnDeck
+    Update-DevKitWidgetOnDeckPanel
+}
+
+function Set-DevKitWidgetOnDeckItemStatus {
+    # Cycle button / context-menu status change: the core helper returns the
+    # regrouped list, so the row lands in its new section on the re-render.
+    param([Parameter(Mandatory = $true)]$Item, [Parameter(Mandatory = $true)][string]$Status)
+    $script:OnDeckItems = @(Set-DevKitOnDeckItemStatus -Items $script:OnDeckItems -Id ([string]$Item.Id) -Status $Status)
+    Save-DevKitWidgetOnDeck
+    Update-DevKitWidgetOnDeckPanel
+}
+
+function Clear-DevKitWidgetOnDeckDone {
+    $script:OnDeckItems = @(Clear-DevKitOnDeckDone -Items $script:OnDeckItems)
+    Save-DevKitWidgetOnDeck
+    Update-DevKitWidgetOnDeckPanel
+}
+
+function New-DevKitOnDeckItemRow {
+    # One to-do row: a status cycle button (glyph colored by state, click
+    # rotates notStarted -> inProgress -> done), the item text (dimmed +
+    # strikethrough when done), and a small x delete (single deliberate
+    # click). The right-click menu (Files flyout's context-menu styling)
+    # offers the three statuses explicitly - the current one disabled - plus
+    # Delete. Menu state travels via MenuItem.Tag and the Click handlers are
+    # capture-free (the Files flyout's documented pattern); the row's own
+    # buttons capture $Item via .GetNewClosure() and only CALL functions for
+    # shared state (see Request-DevKitNotesAutosave for why).
+    param([Parameter(Mandatory = $true)]$Item)
+
+    $status = Get-DevKitOnDeckStatus -Status ([string]$Item.Status)
+    $isDone = ($status -eq 'done')
+
+    $card = New-Object Windows.Controls.Border
+    $card.Background = Get-WidgetResource 'BrushInputBg'
+    $card.BorderBrush = Get-WidgetResource 'BrushCardBorder'
+    $card.BorderThickness = 1
+    $card.CornerRadius = 6
+    $card.Padding = '6,4'
+    $card.Margin = '0,0,0,6'
+    if ($isDone) { $card.Opacity = 0.6 }
+
+    $grid = New-Object Windows.Controls.Grid
+    $gc0 = New-Object Windows.Controls.ColumnDefinition; $gc0.Width = 'Auto'
+    $gc1 = New-Object Windows.Controls.ColumnDefinition
+    $gc2 = New-Object Windows.Controls.ColumnDefinition; $gc2.Width = 'Auto'
+    $grid.ColumnDefinitions.Add($gc0); $grid.ColumnDefinitions.Add($gc1); $grid.ColumnDefinitions.Add($gc2)
+
+    $cycle = New-Object Windows.Controls.Button
+    $cycle.Style = Get-WidgetResource 'ChromeButton'
+    $cycle.FontFamily = New-Object Windows.Media.FontFamily('Segoe UI Symbol')
+    $cycle.FontSize = 11
+    $cycle.Width = 24
+    $cycle.Height = 22
+    $cycle.Padding = 0
+    $cycle.VerticalAlignment = 'Top'
+    $cycle.Margin = '0,0,4,0'
+    switch ($status) {
+        'notStarted' { $cycle.Content = [char]0x25CB; $cycle.Foreground = Get-WidgetResource 'BrushTextDim' }
+        'inProgress' { $cycle.Content = [char]0x25D0; $cycle.Foreground = Get-DevKitGitBrush '#E5C07B' }
+        default      { $cycle.Content = [char]0x25CF; $cycle.Foreground = Get-DevKitGitBrush '#3EDD8F' }
+    }
+    $next = Get-DevKitOnDeckNextStatus -Status $status
+    $cycle.ToolTip = "Status: $(Get-DevKitOnDeckStatusLabel -Status $status) - click to move to $(Get-DevKitOnDeckStatusLabel -Status $next) (right-click for all choices)"
+    [System.Windows.Automation.AutomationProperties]::SetAutomationId($cycle, "OnDeckCycle_$($Item.Id)")
+    $cycle.Add_Click({ Set-DevKitWidgetOnDeckItemStatus -Item $Item -Status $next }.GetNewClosure())
+    $grid.Children.Add($cycle) | Out-Null
+
+    $txt = New-Object Windows.Controls.TextBlock
+    $txt.Text = [string]$Item.Text
+    $txt.FontSize = 11
+    $txt.TextWrapping = 'Wrap'
+    $txt.VerticalAlignment = 'Center'
+    $txt.Margin = '2,1,4,1'
+    if ($isDone) {
+        $txt.Foreground = Get-WidgetResource 'BrushTextDim'
+        $txt.TextDecorations = [Windows.TextDecorations]::Strikethrough
+    } else {
+        $txt.Foreground = Get-WidgetResource 'BrushTextBright'
+    }
+    [Windows.Controls.Grid]::SetColumn($txt, 1)
+    $grid.Children.Add($txt) | Out-Null
+
+    $del = New-Object Windows.Controls.Button
+    $del.Style = Get-WidgetResource 'ChromeButton'
+    $del.FontFamily = New-Object Windows.Media.FontFamily('Segoe MDL2 Assets')
+    $del.FontSize = 9
+    $del.Content = [char]0xE106
+    $del.MinWidth = 24
+    $del.Height = 18
+    $del.VerticalAlignment = 'Top'
+    $del.ToolTip = 'Delete this item'
+    [System.Windows.Automation.AutomationProperties]::SetAutomationId($del, "OnDeckDelete_$($Item.Id)")
+    $del.Add_Click({ Remove-DevKitWidgetOnDeckItem -Item $Item }.GetNewClosure())
+    [Windows.Controls.Grid]::SetColumn($del, 2)
+    $grid.Children.Add($del) | Out-Null
+
+    $card.Child = $grid
+
+    # Right-click status menu - same styling/pattern as the Files flyout's
+    # context menus (FilesContextMenu + capture-free handlers + Tag state).
+    $menu = New-Object Windows.Controls.ContextMenu
+    $menu.Style = Get-WidgetResource 'FilesContextMenu'
+    Add-DevKitFilesMenuItem $menu 'Not Started' { param($s, $e) Set-DevKitWidgetOnDeckItemStatus -Item $s.Tag -Status 'notStarted' } -Tag $Item -Enabled ($status -ne 'notStarted')
+    Add-DevKitFilesMenuItem $menu 'In Progress' { param($s, $e) Set-DevKitWidgetOnDeckItemStatus -Item $s.Tag -Status 'inProgress' } -Tag $Item -Enabled ($status -ne 'inProgress')
+    Add-DevKitFilesMenuItem $menu 'Done'        { param($s, $e) Set-DevKitWidgetOnDeckItemStatus -Item $s.Tag -Status 'done' } -Tag $Item -Enabled ($status -ne 'done')
+    $menu.Items.Add((New-Object Windows.Controls.Separator)) | Out-Null
+    Add-DevKitFilesMenuItem $menu 'Delete' { param($s, $e) Remove-DevKitWidgetOnDeckItem -Item $s.Tag } -Tag $Item
+    $card.ContextMenu = $menu
+
+    return $card
+}
+
+function Update-DevKitWidgetOnDeckPanel {
+    # Full re-render: the three sections in fixed order, each header showing
+    # its live count; empty sections get a subtle hint instead of rows. The
+    # stored list is already section-grouped (every mutation re-groups), so
+    # this just filters per section.
+    $ui.OnDeckPanel.Children.Clear()
+    foreach ($sec in @(
+        @{ Status = 'notStarted'; Title = 'NOT STARTED' },
+        @{ Status = 'inProgress'; Title = 'IN PROGRESS' },
+        @{ Status = 'done';       Title = 'DONE' }
+    )) {
+        $items = @($script:OnDeckItems | Where-Object { (Get-DevKitOnDeckStatus -Status ([string]$_.Status)) -eq $sec.Status })
+
+        $header = New-Object Windows.Controls.Grid
+        $header.Margin = '2,8,2,4'
+        $hc0 = New-Object Windows.Controls.ColumnDefinition
+        $hc1 = New-Object Windows.Controls.ColumnDefinition; $hc1.Width = 'Auto'
+        $header.ColumnDefinitions.Add($hc0); $header.ColumnDefinitions.Add($hc1)
+
+        $ht = New-Object Windows.Controls.TextBlock
+        $ht.Style = Get-WidgetResource 'WidgetSectionHeader'
+        $ht.Text = "$($sec.Title) ($($items.Count))"
+        $ht.VerticalAlignment = 'Center'
+        $header.Children.Add($ht) | Out-Null
+
+        if ($sec.Status -eq 'done' -and $items.Count -gt 0) {
+            $clear = New-Object Windows.Controls.Button
+            $clear.Style = Get-WidgetResource 'GhostButton'
+            $clear.FontSize = 9.5
+            $clear.Padding = '6,1'
+            $clear.Content = 'Clear Done'
+            $clear.ToolTip = 'Delete every item in DONE'
+            $clear.Add_Click({ Clear-DevKitWidgetOnDeckDone })
+            [Windows.Controls.Grid]::SetColumn($clear, 1)
+            $header.Children.Add($clear) | Out-Null
+        }
+        $ui.OnDeckPanel.Children.Add($header) | Out-Null
+
+        if ($items.Count -eq 0) {
+            $hint = New-Object Windows.Controls.TextBlock
+            $hint.Text = 'No items'
+            $hint.FontSize = 10
+            $hint.Foreground = Get-WidgetResource 'BrushTextDim'
+            $hint.Opacity = 0.7
+            $hint.Margin = '4,0,0,6'
+            $ui.OnDeckPanel.Children.Add($hint) | Out-Null
+        } else {
+            foreach ($item in $items) {
+                $ui.OnDeckPanel.Children.Add((New-DevKitOnDeckItemRow -Item $item)) | Out-Null
+            }
+        }
+    }
+}
+
+function Set-DevKitOnDeckFlyout {
+    param([bool]$Open, [switch]$Instant)
+    if ($Open -eq $script:OnDeckFlyoutOpen) { return }
+    if ($Open -and -not $script:ActiveProjectPath) { return }
+    # Only one CAROUSEL flyout at a time - mirror of the guard in
+    # Set-DevKitGitFlyout (see the comment there for why the close is
+    # -Instant, and why the terminal panel is deliberately NOT in this list).
+    if ($Open -and $script:GitFlyoutOpen) { Set-DevKitGitFlyout -Open $false -Instant }
+    if ($Open -and $script:NotesFlyoutOpen) { Set-DevKitNotesFlyout -Open $false -Instant }
+    if ($Open -and $script:FilesFlyoutOpen) { Set-DevKitFilesFlyout -Open $false -Instant }
+    if ($Open -and $script:ProcPanelKind) { Set-DevKitProcPanel -Open $false -Instant }
+
+    # Same lockstep window/flyout animation contract as Set-DevKitGitFlyout
+    # (see the long comment there - flag set BEFORE target computation, all
+    # window targets derived from the flag-based target layout so overlapping
+    # slides still converge). All panels share one anim token.
+    $script:GitFlyoutAnimToken++
+    $token = $script:GitFlyoutAnimToken
+    $script:OnDeckFlyoutOpen = $Open
+    $targetFlyoutWidth = if ($Open) { $script:OnDeckFlyoutWidth } else { 0 }
+    $targetWindowWidth = $script:WidgetChromeWidth + $script:WidgetContentWidth + (Get-DevKitWidgetPanelExtra)
+    $pinnedRight = $window.Left + $window.Width
+    $targetLeft = $pinnedRight - $targetWindowWidth
+
+    if ($Instant) {
+        $window.BeginAnimation([Windows.Window]::WidthProperty, $null)
+        $window.BeginAnimation([Windows.Window]::LeftProperty, $null)
+        $ui.OnDeckFlyout.BeginAnimation([Windows.Controls.Border]::WidthProperty, $null)
+        $ui.OnDeckFlyout.Width = $targetFlyoutWidth
+        $window.Width = $targetWindowWidth
+        if ($script:DockMode -eq 'Right') { $window.Left = $targetLeft }
+        if ($Open) {
+            $ui.OnDeckFlyoutInner.Width = $script:OnDeckFlyoutWidth
+            $ui.BtnOnDeckTab.Foreground = Get-DevKitGitBrush '#C678DD'
+            Open-DevKitWidgetOnDeckProject
+        } else {
+            $ui.BtnOnDeckTab.Foreground = Get-WidgetResource 'BrushTextMuted'
+        }
+        return
+    }
+
+    if ($Open) {
+        $ui.OnDeckFlyoutInner.Width = $script:OnDeckFlyoutWidth
+        Start-DevKitFlyoutSlide -Target $ui.OnDeckFlyout -Property ([Windows.Controls.Border]::WidthProperty) -To $targetFlyoutWidth -Opening $true -Token $token
+        Start-DevKitFlyoutSlide -Target $window -Property ([Windows.Window]::WidthProperty) -To $targetWindowWidth -Opening $true -Token $token
+        if ($script:DockMode -eq 'Right') {
+            # Right-docked: pinned right edge, window grows leftward - same
+            # Left+Width lockstep as the Git flyout's open path.
+            Start-DevKitFlyoutSlide -Target $window -Property ([Windows.Window]::LeftProperty) -To $targetLeft -Opening $true -Token $token
+        }
+        $ui.BtnOnDeckTab.Foreground = Get-DevKitGitBrush '#C678DD'
+        Open-DevKitWidgetOnDeckProject
+    } else {
+        Start-DevKitFlyoutSlide -Target $ui.OnDeckFlyout -Property ([Windows.Controls.Border]::WidthProperty) -To 0 -Opening $false -Token $token
+        Start-DevKitFlyoutSlide -Target $window -Property ([Windows.Window]::WidthProperty) -To $targetWindowWidth -Opening $false -Token $token
+        if ($script:DockMode -eq 'Right') {
+            Start-DevKitFlyoutSlide -Target $window -Property ([Windows.Window]::LeftProperty) -To $targetLeft -Opening $false -Token $token
+        }
+        $ui.BtnOnDeckTab.Foreground = Get-WidgetResource 'BrushTextMuted'
+    }
+}
+
+$ui.BtnOnDeckTab.Add_Click({ Set-DevKitOnDeckFlyout -Open (-not $script:OnDeckFlyoutOpen) })
+$ui.BtnOnDeckClose.Add_Click({ Set-DevKitOnDeckFlyout -Open $false })
+$ui.BtnOnDeckAdd.Add_Click({ Add-DevKitWidgetOnDeckItem })
+$ui.OnDeckNewText.Add_KeyDown({
+    param($s, $e)
+    if ($e.Key -eq 'Return') {
+        Add-DevKitWidgetOnDeckItem
+        $e.Handled = $true
+    }
+})
+
+# ==================== TERMINAL PANEL (HOSTED REAL TERMINAL) ====================
+# A REAL terminal hosted inside the panel (replacing the old embedded-REPL:
+# queue/pump/dot-sourced ScriptBlocks). Opening the TERMINAL side tab
+# launches an actual terminal process - Windows Terminal (wt.exe, forced
+# into a NEW window via `-w new`, with the registered "Northstar DevKit"
+# fragment profile when present, else the default profile) when available,
+# a classic pwsh/powershell console window otherwise - strips its window
+# chrome, makes the widget its OWNER (GWL_HWNDPARENT), and glues it over the
+# panel's TermHostSurface element. Interactive CLIs (kimi, claude) work
+# exactly as in a normal terminal because it IS a normal terminal - real
+# console/WT process, real Win32 keyboard focus.
+#
+# Why ownership + position sync instead of a SetParent'd HwndHost: this
+# window is AllowsTransparency=True (a per-pixel-alpha layered window), and
+# WPF renders those through UpdateLayeredWindow - a child HWND inside them
+# NEVER renders (documented HwndHost airspace restriction). An owned
+# TOP-LEVEL window renders on its own, and the window manager keeps it above
+# its owner, hidden with its owner, destroyed with its owner, and out of
+# Alt+Tab/the taskbar - the panel only has to keep it positioned over
+# TermHostSurface, which the 40ms TermSyncTimer does from the surface's live
+# PointToScreen rect (so open/close slides, dock flips, grip resizes and
+# title-bar drags all track). One z-order subtlety: the owned-above-owner
+# rule holds only WITHIN a z-band - an owned window that is not itself
+# topmost sinks BELOW a topmost owner - so the hosted window's WS_EX_TOPMOST
+# is kept identical to the widget's pin state (set on attach, re-asserted by
+# every sync tick), or the terminal is invisible while the widget is pinned.
+# The timer runs ONLY while a session is hosted and the widget is visible
+# (hidden = costs ~nothing, same discipline as FastTimer/SlowTimer), and it
+# doubles as the session watchdog: if the hosted window vanishes (the user
+# typed `exit`), the panel says so instead of framing a ghost.
+#
+# Lifecycle: the session belongs to the panel. Closing the panel CLOSES the
+# session (WM_CLOSE, escalated to a kill ~1.2s later by the one-shot
+# TermKillTimer - a full process-tree kill for the conhost shell; for
+# Windows Terminal only when its PID owns no other window, so the user's
+# existing WT is never collateral damage). A project switch while open
+# RESTARTS the session in the new project root (Set-DevKitTermLocation - the
+# old REPL re-home hook, kept). Hiding the widget only hides the hosted
+# window - the session SURVIVES the hide. Widget exit closes the session.
+# Dock-side flips close the panel (the long-standing Set-DevKitWidgetDock
+# behavior for every panel), which ends the session - it relaunches on the
+# new side when the tab is reopened.
+#
+# Honest limitations: a native console/WT window is hosted, so it renders
+# whatever it renders (WT keeps its own tab strip; its minimum window size
+# can overflow a narrowly grip-resized panel); for the ~0.2-1s between
+# process start and the HWND poll finding the window it can flash at its
+# default position before being glued; a wt launch cancelled mid-flight
+# (panel closed within the first second or two) can't be recalled - its
+# window may still appear, untracked. When neither wt.exe nor a PowerShell
+# executable exists, or no window shows within 15s, the panel shows an
+# honest "could not host a terminal here" note instead of a fake console.
+
+# Win32 interop for the hosted terminal, compiled once. Guarded: if the
+# compile itself fails, Start-DevKitHostedTerminal shows the honest note.
+if (-not ('DevKitTermWin32' -as [type])) {
+    try {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Text;
+
+public static class DevKitTermWin32
+{
+    public const int GWL_STYLE = -16;
+    public const int GWL_EXSTYLE = -20;
+    public const int GWL_HWNDPARENT = -8;
+
+    public const long WS_CAPTION = 0x00C00000L;
+    public const long WS_THICKFRAME = 0x00040000L;
+    public const long WS_MINIMIZEBOX = 0x00020000L;
+    public const long WS_MAXIMIZEBOX = 0x00010000L;
+    public const long WS_SYSMENU = 0x00080000L;
+    public const long WS_CHILD = 0x40000000L;
+    public const long WS_EX_TOPMOST = 0x00000008L;
+
+    public static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
+    public static readonly IntPtr HWND_NOTOPMOST = new IntPtr(-2);
+
+    public const int SW_HIDE = 0;
+    public const int SW_SHOWNA = 8;
+
+    public const uint SWP_NOSIZE = 0x0001;
+    public const uint SWP_NOMOVE = 0x0002;
+    public const uint SWP_NOZORDER = 0x0004;
+    public const uint SWP_NOACTIVATE = 0x0010;
+    public const uint SWP_FRAMECHANGED = 0x0020;
+    // Skips WM_WINDOWPOSCHANGING - and with it the WM_GETMINMAXINFO clamp
+    // Windows Terminal applies to plain resizes (its minimum window width
+    // would otherwise overflow a narrower panel; verified live).
+    public const uint SWP_NOSENDCHANGING = 0x0400;
+
+    public const uint WM_CLOSE = 0x0010;
+
+    public const string WindowsTerminalClass = "CASCADIA_HOSTING_WINDOW_CLASS";
+
+    [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+    [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
+    [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+    public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongW")] private static extern int GetWindowLong32(IntPtr hWnd, int nIndex);
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] private static extern IntPtr GetWindowLongPtr64(IntPtr hWnd, int nIndex);
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongW")] private static extern int SetWindowLong32(IntPtr hWnd, int nIndex, int dwNewLong);
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")] private static extern IntPtr SetWindowLongPtr64(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
+
+    public static long GetWindowStyle(IntPtr hWnd)
+    {
+        return IntPtr.Size == 8 ? GetWindowLongPtr64(hWnd, GWL_STYLE).ToInt64() : (long)GetWindowLong32(hWnd, GWL_STYLE);
+    }
+
+    public static void SetWindowStyle(IntPtr hWnd, long style)
+    {
+        if (IntPtr.Size == 8) { SetWindowLongPtr64(hWnd, GWL_STYLE, new IntPtr(style)); }
+        else { SetWindowLong32(hWnd, GWL_STYLE, (int)style); }
+    }
+
+    public static void SetWindowOwnerHwnd(IntPtr hWnd, IntPtr owner)
+    {
+        if (IntPtr.Size == 8) { SetWindowLongPtr64(hWnd, GWL_HWNDPARENT, owner); }
+        else { SetWindowLong32(hWnd, GWL_HWNDPARENT, (int)owner); }
+    }
+
+    // Removes every trace of the window frame and makes `owner` the window's
+    // OWNER (z-order above the owner, hidden/destroyed with it, no
+    // Alt+Tab/taskbar entry) - NOT a child: the widget window is layered
+    // (AllowsTransparency), where a child HWND would never render.
+    public static void StripChromeAndOwn(IntPtr hwnd, IntPtr owner)
+    {
+        long style = GetWindowStyle(hwnd);
+        style &= ~(WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU | WS_CHILD);
+        SetWindowStyle(hwnd, style);
+        SetWindowOwnerHwnd(hwnd, owner);
+        SetWindowPos(hwnd, IntPtr.Zero, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    }
+
+    public static void MoveTo(IntPtr hwnd, int x, int y, int w, int h)
+    {
+        SetWindowPos(hwnd, IntPtr.Zero, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOSENDCHANGING);
+    }
+
+    // The widget's pin (Topmost) decides which z-band the hosted window lives
+    // in: an owned window that is NOT itself topmost sinks BELOW a topmost
+    // owner (the owned-above-owner rule only holds within a band) - that was
+    // the "terminal invisible while pinned" bug. This keeps the hosted
+    // window's WS_EX_TOPMOST identical to the widget's.
+    public static bool IsTopmost(IntPtr hwnd)
+    {
+        long ex = IntPtr.Size == 8 ? GetWindowLongPtr64(hwnd, GWL_EXSTYLE).ToInt64() : (long)GetWindowLong32(hwnd, GWL_EXSTYLE);
+        return (ex & WS_EX_TOPMOST) != 0;
+    }
+
+    public static void SetTopmost(IntPtr hwnd, bool topmost)
+    {
+        SetWindowPos(hwnd, topmost ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOSENDCHANGING);
+    }
+
+    public static uint GetPid(IntPtr hwnd)
+    {
+        uint pid;
+        GetWindowThreadProcessId(hwnd, out pid);
+        return pid;
+    }
+
+    [DllImport("user32.dll")] public static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
+    public const uint GW_OWNER = 4;
+
+    public static IntPtr GetWindowOwner(IntPtr hwnd)
+    {
+        return GetWindow(hwnd, GW_OWNER);
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+
+    [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
+    public static bool TryGetRect(IntPtr hwnd, out int x, out int y, out int w, out int h)
+    {
+        RECT r;
+        x = y = w = h = 0;
+        if (!GetWindowRect(hwnd, out r)) { return false; }
+        x = r.Left; y = r.Top; w = r.Right - r.Left; h = r.Bottom - r.Top;
+        return true;
+    }
+
+    private static EnumWindowsProc _enumProc;
+    private static List<IntPtr> _found;
+    private static string _wantedClass;
+    private static uint _wantedPid;
+
+    private static bool EnumProc(IntPtr hWnd, IntPtr lParam)
+    {
+        if (_wantedClass != null)
+        {
+            StringBuilder sb = new StringBuilder(256);
+            GetClassName(hWnd, sb, sb.Capacity);
+            if (sb.ToString() != _wantedClass) { return true; }
+        }
+        if (_wantedPid != 0)
+        {
+            uint pid;
+            GetWindowThreadProcessId(hWnd, out pid);
+            if (pid != _wantedPid) { return true; }
+        }
+        _found.Add(hWnd);
+        return true;
+    }
+
+    public static IntPtr[] FindTopLevelWindowsByClass(string className)
+    {
+        _found = new List<IntPtr>();
+        _wantedClass = className;
+        _wantedPid = 0;
+        if (_enumProc == null) { _enumProc = new EnumWindowsProc(EnumProc); }
+        EnumWindows(_enumProc, IntPtr.Zero);
+        _wantedClass = null;
+        return _found.ToArray();
+    }
+
+    public static IntPtr[] FindWindowsForPid(uint pid)
+    {
+        _found = new List<IntPtr>();
+        _wantedClass = null;
+        _wantedPid = pid;
+        if (_enumProc == null) { _enumProc = new EnumWindowsProc(EnumProc); }
+        EnumWindows(_enumProc, IntPtr.Zero);
+        _wantedPid = 0;
+        return _found.ToArray();
+    }
+}
+'@
+    } catch { }
+}
+
+$script:TermHostedHwnd = [IntPtr]::Zero
+$script:TermHostedProcess = $null   # conhost-kind shell process (kept for the tree-kill); $null for wt
+$script:TermHostedPid = 0           # PID that owns the hosted window
+$script:TermHostedKind = $null      # 'wt' | 'conhost'
+$script:TermLaunchPending = $false
+$script:TermLaunchElapsedMs = 0
+$script:TermMaxLaunchMs = 15000
+$script:TermWtBefore = @()
+$script:TermConBefore = @()
+$script:TermCwd = $null             # directory the hosted session was started in (Sync-DevKitWidgetGitState compares against it)
+$script:TermWidgetHwnd = [IntPtr]::Zero
+
+function Get-DevKitTermHostRoot {
+    if ($script:ActiveProjectPath) { return $script:ActiveProjectPath }
+    return $ScriptDir
+}
+
+function Set-DevKitTermStatus {
+    # Status line text; -Overlay ALSO shows it centered on the dark surface
+    # (the launch/failure note the hosted window covers once attached).
+    param([string]$Text, [switch]$Overlay)
+    $ui.TermFlyoutStatus.Text = $Text
+    if ($Overlay) {
+        $ui.TermHostStatus.Text = $Text
+        $ui.TermHostStatus.Visibility = 'Visible'
+    } else {
+        $ui.TermHostStatus.Visibility = 'Collapsed'
+    }
+}
+
+function Stop-DevKitProcessTree {
+    # Depth-first kill of a process and every descendant. Stop-Process (not
+    # taskkill) is used deliberately: taskkill is a console app and would
+    # flash a console window from this headless tray process.
+    param([int]$RootPid)
+    try {
+        foreach ($k in @(Get-CimInstance Win32_Process -Filter "ParentProcessId=$RootPid" -ErrorAction Stop)) {
+            Stop-DevKitProcessTree -RootPid ([int]$k.ProcessId)
+        }
+    } catch { }
+    try { Stop-Process -Id $RootPid -Force -ErrorAction Stop } catch { }
+}
+
+function Invoke-DevKitTermPendingKill {
+    # The escalated half of session close (see Stop-DevKitHostedTerminal):
+    # ~1.2s after WM_CLOSE, force-kill whatever ignored it. Runs off the
+    # one-shot TermKillTimer's Tag context, so a NEW session started meanwhile
+    # is never touched by an old session's backstop.
+    $ctx = $script:TermKillTimer.Tag
+    $script:TermKillTimer.Stop()
+    $script:TermKillTimer.Tag = $null
+    if ($null -eq $ctx) { return }
+    try {
+        if (-not [DevKitTermWin32]::IsWindow($ctx.Hwnd)) { return }
+        if ($ctx.Kind -eq 'conhost' -and $ctx.ProcId -gt 0) {
+            Stop-DevKitProcessTree -RootPid $ctx.ProcId
+        } elseif ($ctx.OwnedPid -gt 0) {
+            # Windows Terminal: the last-resort kill fires only when the window
+            # is still demonstrably OURS (HWND values get recycled between
+            # windows, so re-verify owner AND pid) and its PID owns no other
+            # window - on single-process WT installs that PID also hosts the
+            # user's own windows, which must never be collateral damage.
+            $stillOurs = ([DevKitTermWin32]::GetWindowOwner($ctx.Hwnd) -eq $script:TermWidgetHwnd)
+            $samePid = ([int][DevKitTermWin32]::GetPid($ctx.Hwnd) -eq $ctx.OwnedPid)
+            if ($stillOurs -and $samePid) {
+                $others = @([DevKitTermWin32]::FindWindowsForPid([uint32]$ctx.OwnedPid))
+                if ($others.Count -le 1) { Stop-Process -Id $ctx.OwnedPid -Force -ErrorAction Stop }
+            }
+        }
+    } catch { }
+}
+
+function Reset-DevKitHostedTerminalState {
+    $script:TermHostedHwnd = [IntPtr]::Zero
+    $script:TermHostedProcess = $null
+    $script:TermHostedPid = 0
+    $script:TermHostedKind = $null
+    $script:TermLaunchPending = $false
+    $script:TermPollTimer.Stop()
+    $script:TermSyncTimer.Stop()
+}
+
+function Stop-DevKitHostedTerminal {
+    # Closes the hosted SESSION (panel close / restart / widget exit): the
+    # window gets WM_CLOSE first (graceful - closing a console window ends
+    # its whole attached tree; closing a WT window ends that window's
+    # sessions), with the force-kill backstop above firing ~1.2s later.
+    Invoke-DevKitTermPendingKill   # a previous backstop must not fire into new state
+    $hwnd = $script:TermHostedHwnd
+    $proc = $script:TermHostedProcess
+    $kind = $script:TermHostedKind
+    $ownedPid = $script:TermHostedPid
+    Reset-DevKitHostedTerminalState
+    if ($hwnd -ne [IntPtr]::Zero -and [DevKitTermWin32]::IsWindow($hwnd)) {
+        [DevKitTermWin32]::PostMessage($hwnd, [DevKitTermWin32]::WM_CLOSE, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+        $script:TermKillTimer.Tag = @{
+            Hwnd     = $hwnd
+            Kind     = $kind
+            ProcId   = $(if ($proc) { try { $proc.Id } catch { 0 } } else { 0 })
+            OwnedPid = $ownedPid
+        }
+        $script:TermKillTimer.Start()
+    } elseif ($proc) {
+        # Launch still pending (no window yet): kill the half-started shell
+        # before its console can flash on screen. (A pending wt launch can't
+        # be recalled - its window may still appear, untracked; see header.)
+        try { if (-not $proc.HasExited) { Stop-DevKitProcessTree -RootPid $proc.Id } } catch { }
+    }
+}
+
+function Start-DevKitHostedTerminal {
+    # Launches the real terminal for the current root and begins the HWND
+    # poll. Preference order: (a) wt.exe with the registered "Northstar
+    # DevKit" fragment profile, (b) wt.exe default profile, (c) a classic
+    # pwsh/powershell console window. Whatever hosts, it starts already cd'd
+    # to the active project (DevKit root + dim note when none is selected).
+    if ($script:TermHostedHwnd -ne [IntPtr]::Zero -or $script:TermLaunchPending) { return }
+    if (-not ('DevKitTermWin32' -as [type])) {
+        Set-DevKitTermStatus 'Could not host a terminal here: the Win32 host component failed to compile.' -Overlay
+        return
+    }
+    $root = Get-DevKitTermHostRoot
+    $script:TermCwd = $root
+    $ui.TermFlyoutSub.Text = $root
+    $ui.TermNoProjectNote.Visibility = if ($script:ActiveProjectPath) { 'Collapsed' } else { 'Visible' }
+
+    if (Get-Command wt.exe -ErrorAction SilentlyContinue) {
+        $fragment = Join-Path (Join-Path $env:LOCALAPPDATA 'Microsoft\Windows Terminal\Fragments\Northstar DevKit') 'devkit.json'
+        $wtArgs = '-w new --title "Northstar DevKit" -d "' + $root + '"'
+        if (Test-Path $fragment) { $wtArgs += ' -p "Northstar DevKit"' }
+        # Snapshot the existing WT windows so the poll can recognize OURS as
+        # "the one that wasn't there before" (wt.exe just hands the request
+        # to the WindowsTerminal.exe peasant process - its own PID is useless).
+        $script:TermWtBefore = @([DevKitTermWin32]::FindTopLevelWindowsByClass([DevKitTermWin32]::WindowsTerminalClass) | ForEach-Object { $_.ToInt64() })
+        try {
+            Start-Process -FilePath 'wt.exe' -ArgumentList $wtArgs
+            $script:TermHostedKind = 'wt'
+            $script:TermLaunchPending = $true
+            $script:TermLaunchElapsedMs = 0
+            Set-DevKitTermStatus 'Starting Windows Terminal...' -Overlay
+            $script:TermPollTimer.Start()
+            return
+        } catch { }   # fall through to the console host below
+    }
+
+    $shellCmd = Get-Command pwsh -ErrorAction SilentlyContinue
+    if (-not $shellCmd) { $shellCmd = Get-Command powershell -ErrorAction SilentlyContinue }
+    if (-not $shellCmd) {
+        Set-DevKitTermStatus 'Could not host a terminal here: neither wt.exe nor a PowerShell executable was found on PATH.' -Overlay
+        return
+    }
+    try {
+        # -NoLogo but deliberately NOT -NoProfile: this is the user's REAL
+        # terminal, so it loads their profile like any freshly opened console.
+        # Snapshot BOTH window classes first: the shell's window can be a
+        # classic ConsoleWindowClass console OR - on machines whose default
+        # terminal application is Windows Terminal - a new CASCADIA window
+        # (console delegation; Process.MainWindowHandle never populates in
+        # that case, which is why discovery is a window diff, never that).
+        $script:TermConBefore = @([DevKitTermWin32]::FindTopLevelWindowsByClass('ConsoleWindowClass') | ForEach-Object { $_.ToInt64() })
+        $script:TermWtBefore = @([DevKitTermWin32]::FindTopLevelWindowsByClass([DevKitTermWin32]::WindowsTerminalClass) | ForEach-Object { $_.ToInt64() })
+        $script:TermHostedProcess = Start-Process -FilePath $shellCmd.Source -ArgumentList '-NoLogo' -WorkingDirectory $root -PassThru
+    } catch {
+        Set-DevKitTermStatus "Could not host a terminal here: $($_.Exception.Message)" -Overlay
+        return
+    }
+    $script:TermHostedKind = 'conhost'
+    $script:TermLaunchPending = $true
+    $script:TermLaunchElapsedMs = 0
+    Set-DevKitTermStatus "Starting $([IO.Path]::GetFileNameWithoutExtension($shellCmd.Name)) console..." -Overlay
+    $script:TermPollTimer.Start()
+}
+
+function Update-DevKitTermLaunchPoll {
+    # TermPollTimer tick: look for the just-launched window (a brand-new
+    # ConsoleWindowClass or CASCADIA window - never Process.MainWindowHandle,
+    # which stays 0 when the console is delegated to Windows Terminal) and
+    # attach it, or give up honestly after TermMaxLaunchMs.
+    if (-not $script:TermLaunchPending) { $script:TermPollTimer.Stop(); return }
+    $script:TermLaunchElapsedMs += 200
+    $hwnd = [IntPtr]::Zero
+    if ($script:TermHostedKind -eq 'conhost') {
+        foreach ($h in @([DevKitTermWin32]::FindTopLevelWindowsByClass('ConsoleWindowClass'))) {
+            if ($script:TermConBefore -notcontains $h.ToInt64()) { $hwnd = $h; break }
+        }
+        if ($hwnd -eq [IntPtr]::Zero) {
+            # Console delegated to Windows Terminal: the shell landed in a
+            # fresh WT window instead - host that (and treat it as wt-kind
+            # from here, so the close/kill semantics stay correct).
+            foreach ($h in @([DevKitTermWin32]::FindTopLevelWindowsByClass([DevKitTermWin32]::WindowsTerminalClass))) {
+                if ($script:TermWtBefore -notcontains $h.ToInt64()) { $hwnd = $h; $script:TermHostedKind = 'wt'; break }
+            }
+        }
+    } elseif ($script:TermHostedKind -eq 'wt') {
+        foreach ($h in @([DevKitTermWin32]::FindTopLevelWindowsByClass([DevKitTermWin32]::WindowsTerminalClass))) {
+            if ($script:TermWtBefore -notcontains $h.ToInt64()) { $hwnd = $h; break }
+        }
+    }
+    if ($hwnd -ne [IntPtr]::Zero) {
+        $script:TermPollTimer.Stop()
+        $script:TermLaunchPending = $false
+        Complete-DevKitTermAttach -Hwnd $hwnd
+        return
+    }
+    if ($script:TermLaunchElapsedMs -ge $script:TermMaxLaunchMs) {
+        $kind = $script:TermHostedKind
+        $proc = $script:TermHostedProcess
+        Reset-DevKitHostedTerminalState
+        try { if ($proc -and -not $proc.HasExited) { Stop-DevKitProcessTree -RootPid $proc.Id } } catch { }
+        Set-DevKitTermStatus "Could not host a terminal here: the $kind window never appeared (15s). Use Restart to try again." -Overlay
+    }
+}
+
+function Complete-DevKitTermAttach {
+    # The poll found the launched window: strip its chrome, make the widget
+    # its OWNER (not its parent - see the section header for why), park it
+    # over the panel surface, and start the rect sync.
+    param([IntPtr]$Hwnd)
+    try {
+        if ($script:TermWidgetHwnd -eq [IntPtr]::Zero) {
+            $script:TermWidgetHwnd = (New-Object Windows.Interop.WindowInteropHelper $window).Handle
+        }
+        [DevKitTermWin32]::StripChromeAndOwn($Hwnd, $script:TermWidgetHwnd)
+    } catch {
+        Reset-DevKitHostedTerminalState
+        Set-DevKitTermStatus "Could not host a terminal here: $($_.Exception.Message)" -Overlay
+        return
+    }
+    $script:TermHostedHwnd = $Hwnd
+    $script:TermHostedPid = [int][DevKitTermWin32]::GetPid($Hwnd)
+    # Match the widget's pin band immediately - a non-topmost owned window
+    # sinks BELOW a topmost owner (the terminal would be invisible while the
+    # widget is pinned). The sync timer re-asserts this on every toggle.
+    [DevKitTermWin32]::SetTopmost($Hwnd, [bool]$window.Topmost)
+    Set-DevKitTermStatus "$(if ($script:TermHostedKind -eq 'wt') { 'Windows Terminal' } else { 'PowerShell console' }) hosted - running in $($script:TermCwd)"
+    $ui.TermHostStatus.Visibility = 'Collapsed'
+    Sync-DevKitHostedTerminalRect
+    if ($window.IsVisible) {
+        [DevKitTermWin32]::ShowWindow($Hwnd, [DevKitTermWin32]::SW_SHOWNA) | Out-Null
+        $script:TermSyncTimer.Start()
+        # The panel was just opened interactively - hand the terminal real
+        # keyboard focus so typing works without an extra click.
+        if ($window.IsActive) { [DevKitTermWin32]::SetForegroundWindow($Hwnd) | Out-Null }
+    } else {
+        [DevKitTermWin32]::ShowWindow($Hwnd, [DevKitTermWin32]::SW_HIDE) | Out-Null
+    }
+}
+
+function Sync-DevKitHostedTerminalRect {
+    # Glues the hosted window to TermHostSurface's live screen rect. Runs on
+    # the 40ms TermSyncTimer (only while a session is hosted AND the widget
+    # is visible) and is called directly on attach/show. Authoritative: the
+    # window's ACTUAL rect is compared to the target every tick, so the glue
+    # holds no matter who moved the window (slide animations, grip resizes,
+    # dock flips - or the terminal app itself). Also the session watchdog: a
+    # vanished hosted window means the shell exited on its own.
+    $hwnd = $script:TermHostedHwnd
+    if ($hwnd -eq [IntPtr]::Zero) { return }
+    if (-not [DevKitTermWin32]::IsWindow($hwnd)) {
+        Reset-DevKitHostedTerminalState
+        Set-DevKitTermStatus 'Terminal session ended - Restart relaunches it here.' -Overlay
+        return
+    }
+    if (-not $window.IsVisible) { return }
+    $surface = $ui.TermHostSurface
+    if ($surface.ActualWidth -lt 20 -or $surface.ActualHeight -lt 20) { return }
+    try {
+        # PointToScreen returns PHYSICAL pixels (DPI-correct); mapping both
+        # corners avoids any DIP/px math of our own.
+        $p0 = $surface.PointToScreen((New-Object Windows.Point(0, 0)))
+        $p1 = $surface.PointToScreen((New-Object Windows.Point($surface.ActualWidth, $surface.ActualHeight)))
+    } catch { return }
+    $x = [int][math]::Round($p0.X); $y = [int][math]::Round($p0.Y)
+    $w = [int][math]::Round($p1.X - $p0.X); $h = [int][math]::Round($p1.Y - $p0.Y)
+    if ($w -lt 20 -or $h -lt 20) { return }
+    $ax = 0; $ay = 0; $aw = 0; $ah = 0
+    if (-not [DevKitTermWin32]::TryGetRect($hwnd, [ref]$ax, [ref]$ay, [ref]$aw, [ref]$ah)) { return }
+    if ($ax -ne $x -or $ay -ne $y -or $aw -ne $w -or $ah -ne $h) {
+        [DevKitTermWin32]::MoveTo($hwnd, $x, $y, $w, $h) | Out-Null
+    }
+    # Keep the hosted window in the widget's pin z-band: an owned window that
+    # is not itself topmost sinks BELOW a topmost owner, which made the
+    # terminal invisible whenever the widget was pinned. Enforced here (not
+    # just on the pin toggle) so nothing can strand it - toggle the pin,
+    # hide/show, dock flip; the next tick heals the band.
+    $wantTopmost = [bool]$window.Topmost
+    if ([DevKitTermWin32]::IsTopmost($hwnd) -ne $wantTopmost) {
+        [DevKitTermWin32]::SetTopmost($hwnd, $wantTopmost)
+    }
+    # WT draws its own title-bar buttons even with the Win32 frame stripped -
+    # its Minimize can park the hosted window iconic; drag it right back.
+    if ([DevKitTermWin32]::IsIconic($hwnd)) {
+        [DevKitTermWin32]::ShowWindow($hwnd, [DevKitTermWin32]::SW_SHOWNA) | Out-Null
+    }
+}
+
+function Restart-DevKitHostedTerminal {
+    Stop-DevKitHostedTerminal
+    Start-DevKitHostedTerminal
+}
+
+function Set-DevKitTermLocation {
+    # Re-homes the hosted terminal: the active project's root, or the DevKit
+    # root when no project is selected (the dim note row says so). A real
+    # terminal has no injectable Set-Location, so a re-home is a session
+    # RESTART in the new directory. Kept as the project-switch hook called by
+    # Sync-DevKitWidgetGitState; -Note reports the restart on the status line.
+    param([switch]$Note)
+    if (-not $script:TermFlyoutOpen) { return }
+    $root = Get-DevKitTermHostRoot
+    $ui.TermNoProjectNote.Visibility = if ($script:ActiveProjectPath) { 'Collapsed' } else { 'Visible' }
+    if ($script:TermCwd -ne $root) {
+        Restart-DevKitHostedTerminal
+        if ($Note) { $ui.TermFlyoutStatus.Text = "Terminal restarted in $root" }
+    }
+}
+
+function Set-DevKitTerminalFlyout {
+    # Opens/closes the terminal panel. Same slide/geometry contract as
+    # Set-DevKitGitFlyout (flag set BEFORE targets are computed; every window
+    # target derived from the flag-based target layout) - but deliberately NO
+    # carousel exclusivity in either direction: the terminal coexists with
+    # whichever flyout is open.
+    param([bool]$Open, [switch]$Instant)
+    if ($Open -eq $script:TermFlyoutOpen) { return }
+    $script:GitFlyoutAnimToken++
+    $token = $script:GitFlyoutAnimToken
+    $script:TermFlyoutOpen = $Open
+    $targetFlyoutWidth = if ($Open) { $script:TermFlyoutWidth } else { 0 }
+    $targetWindowWidth = $script:WidgetChromeWidth + $script:WidgetContentWidth + (Get-DevKitWidgetPanelExtra)
+    $pinnedRight = $window.Left + $window.Width
+    $targetLeft = $pinnedRight - $targetWindowWidth
+
+    if ($Instant) {
+        $window.BeginAnimation([Windows.Window]::WidthProperty, $null)
+        $window.BeginAnimation([Windows.Window]::LeftProperty, $null)
+        $ui.TermFlyout.BeginAnimation([Windows.Controls.Border]::WidthProperty, $null)
+        $ui.TermFlyout.Width = $targetFlyoutWidth
+        $window.Width = $targetWindowWidth
+        if ($script:DockMode -eq 'Right') { $window.Left = $targetLeft }
+    } else {
+        Start-DevKitFlyoutSlide -Target $ui.TermFlyout -Property ([Windows.Controls.Border]::WidthProperty) -To $targetFlyoutWidth -Opening $Open -Token $token
+        Start-DevKitFlyoutSlide -Target $window -Property ([Windows.Window]::WidthProperty) -To $targetWindowWidth -Opening $Open -Token $token
+        if ($script:DockMode -eq 'Right') {
+            # Right-docked: pinned right edge - the terminal (the OUTERMOST
+            # panel) grows/shrinks the window leftward, pushing nothing on
+            # the widget side.
+            Start-DevKitFlyoutSlide -Target $window -Property ([Windows.Window]::LeftProperty) -To $targetLeft -Opening $Open -Token $token
+        }
+    }
+
+    if ($Open) {
+        $ui.TermFlyoutInner.Width = $script:TermFlyoutWidth
+        $ui.BtnTerminalTab.Foreground = Get-DevKitGitBrush '#56B6C2'
+        # Every open hosts a FRESH session for the current project root (the
+        # close below killed the previous one); Start-DevKitHostedTerminal
+        # also re-homes the subtitle and the no-project note.
+        Start-DevKitHostedTerminal
+    } else {
+        $ui.BtnTerminalTab.Foreground = Get-WidgetResource 'BrushTextMuted'
+        # The session belongs to the panel: closing the panel closes the
+        # hosted terminal (graceful WM_CLOSE + the kill backstop).
+        Stop-DevKitHostedTerminal
+    }
+}
+
+# The three hosted-terminal timers, all created STOPPED - none is ever an
+# always-on timer: the launch poll only ticks while a window is being found,
+# the rect sync only while a session is hosted AND the widget is visible
+# (same hidden-costs-nothing discipline as FastTimer/SlowTimer), and the kill
+# timer is a one-shot backstop for the graceful WM_CLOSE.
+$script:TermPollTimer = New-Object Windows.Threading.DispatcherTimer
+$script:TermPollTimer.Interval = [TimeSpan]::FromMilliseconds(200)
+$script:TermPollTimer.Add_Tick({ try { Update-DevKitTermLaunchPoll } catch { } })
+
+$script:TermSyncTimer = New-Object Windows.Threading.DispatcherTimer
+$script:TermSyncTimer.Interval = [TimeSpan]::FromMilliseconds(40)
+$script:TermSyncTimer.Add_Tick({ try { Sync-DevKitHostedTerminalRect } catch { } })
+
+$script:TermKillTimer = New-Object Windows.Threading.DispatcherTimer
+$script:TermKillTimer.Interval = [TimeSpan]::FromMilliseconds(1200)
+$script:TermKillTimer.Add_Tick({ try { Invoke-DevKitTermPendingKill } catch { } })
+
+$ui.BtnTerminalTab.Add_Click({ Set-DevKitTerminalFlyout -Open (-not $script:TermFlyoutOpen) })
+$ui.BtnTermClose.Add_Click({ Set-DevKitTerminalFlyout -Open $false })
+$ui.BtnTermRestart.Add_Click({ Restart-DevKitHostedTerminal })
+
 # ==================== QUICK ACTIONS ====================
 
 function Start-DevKitWidgetTool {
@@ -3631,7 +6986,9 @@ function Start-DevKitWidgetTool {
         [hashtable]$Arguments = @{},
         [Parameter(Mandatory = $true)][string]$Title
     )
-    $launch = Get-DevKitTerminalCommand -ScriptPath (Join-Path $ScriptDir $RelativeScript) `
+    # RelativeScript is relative to tools\ (the 4.0 layout keeps every
+    # category folder under tools\ instead of the repo root).
+    $launch = Get-DevKitTerminalCommand -ScriptPath (Join-Path $ToolsDir $RelativeScript) `
         -Arguments $Arguments -WorkingDirectory $ScriptDir -Title $Title
     if (-not $launch.FilePath) {
         $script:TrayIcon.BalloonTipTitle = 'Cannot launch tool'
@@ -3656,6 +7013,7 @@ $ui.BtnClearNpmCache.Add_Click({
 $ui.BtnKillNode.Add_Click({ Start-DevKitWidgetTool -RelativeScript 'ports\Kill-AllNode.ps1' -Title 'Kill All Node Processes' })
 $ui.BtnDoctor.Add_Click({ Start-DevKitWidgetTool -RelativeScript 'diagnostics\DevKit-Doctor.ps1' -Title 'DevKit Doctor' })
 $ui.BtnOpenDevKit.Add_Click({ Start-Process (Join-Path $ScriptDir 'DevKit-GUI.bat') -WorkingDirectory $ScriptDir })
+$ui.BtnDevKitHub.Add_Click({ Start-Process (Join-Path $ScriptDir 'DevKit-GUI.bat') -WorkingDirectory $ScriptDir })
 
 # Project-scoped launchers (enabled/disabled by Sync-DevKitWidgetGitState).
 $ui.BtnOpenEditor.Add_Click({
@@ -3774,6 +7132,104 @@ function Show-DevKitWidgetInput {
     $box.Add_KeyDown({ param($s, $e) if ($e.Key -eq 'Return') { & $submit } })
     $dlg.Add_KeyDown({ param($s, $e) if ($e.Key -eq 'Escape') { $s.Close() } })
     $dlg.Add_ContentRendered({ $box.Focus() | Out-Null })
+    $dlg.ShowDialog() | Out-Null
+    return $dlg.Tag
+}
+
+# Free-text variant of the dialog chrome above, for the Files flyout's
+# New File/New Folder/Rename prompts. Names are validated in-dialog with
+# Get-DevKitSafeChildName (DevKit-WidgetCore.ps1); returns the validated
+# name, or $null when cancelled/closed.
+function Show-DevKitWidgetTextInput {
+    param(
+        [Parameter(Mandatory = $true)][string]$Title,
+        [Parameter(Mandatory = $true)][string]$Label,
+        [string]$Initial = ''
+    )
+    $dlg = New-Object Windows.Window
+    $dlg.Title = $Title
+    $dlg.Width = 320
+    $dlg.SizeToContent = [Windows.SizeToContent]::Height
+    $dlg.WindowStyle = [Windows.WindowStyle]::None
+    $dlg.AllowsTransparency = $true
+    $dlg.Background = [Windows.Media.Brushes]::Transparent
+    $dlg.WindowStartupLocation = [Windows.WindowStartupLocation]::CenterOwner
+    $dlg.Owner = $window
+    $dlg.Icon = $window.Icon
+    $dlg.FontFamily = $window.FontFamily
+    $dlg.Topmost = $true
+
+    $root = New-Object Windows.Controls.Border
+    $root.Style = Get-WidgetResource 'RootWindow'
+    $stack = New-Object Windows.Controls.StackPanel
+    $stack.Margin = '16,14,16,14'
+
+    $titleText = New-Object Windows.Controls.TextBlock
+    $titleText.Style = Get-WidgetResource 'GroupTitle'
+    $titleText.Text = $Title
+    $stack.Children.Add($titleText) | Out-Null
+
+    $labelText = New-Object Windows.Controls.TextBlock
+    $labelText.Style = Get-WidgetResource 'WidgetRowText'
+    $labelText.Text = $Label
+    $labelText.TextWrapping = 'Wrap'
+    $labelText.Margin = '0,8,0,0'
+    $stack.Children.Add($labelText) | Out-Null
+
+    $box = New-Object Windows.Controls.TextBox
+    $box.Style = Get-WidgetResource 'InputBox'
+    $box.Height = 30
+    $box.Margin = '0,6,0,0'
+    $box.Text = $Initial
+    $stack.Children.Add($box) | Out-Null
+
+    $errorText = New-Object Windows.Controls.TextBlock
+    $errorText.Style = Get-WidgetResource 'WidgetRowText'
+    $errorText.Foreground = Get-WidgetResource 'BrushAccentEmber'
+    $errorText.TextWrapping = 'Wrap'
+    $errorText.Margin = '0,6,0,0'
+    $stack.Children.Add($errorText) | Out-Null
+
+    $row = New-Object Windows.Controls.StackPanel
+    $row.Orientation = 'Horizontal'
+    $row.HorizontalAlignment = 'Right'
+    $row.Margin = '0,10,0,0'
+    $cancelBtn = New-Object Windows.Controls.Button
+    $cancelBtn.Style = Get-WidgetResource 'GhostButton'
+    $cancelBtn.Content = 'Cancel'
+    $cancelBtn.Margin = '0,0,8,0'
+    $okBtn = New-Object Windows.Controls.Button
+    $okBtn.Style = Get-WidgetResource 'PrimaryButton'
+    $okBtn.Content = 'OK'
+    $row.Children.Add($cancelBtn) | Out-Null
+    $row.Children.Add($okBtn) | Out-Null
+    $stack.Children.Add($row) | Out-Null
+    $root.Child = $stack
+    $dlg.Content = $root
+
+    $dlg.Tag = $null
+    $cancelBtn.Add_Click({ $dlg.Close() })
+    $submit = {
+        $safe = Get-DevKitSafeChildName -Name $box.Text
+        if ($null -eq $safe) {
+            $errorText.Text = 'Enter a valid name - no \ / : * ? " < > | characters, not empty, no trailing dot or space.'
+            return
+        }
+        $dlg.Tag = $safe
+        $dlg.Close()
+    }
+    $okBtn.Add_Click($submit)
+    $box.Add_KeyDown({ param($s, $e) if ($e.Key -eq 'Return') { & $submit } })
+    $dlg.Add_KeyDown({ param($s, $e) if ($e.Key -eq 'Escape') { $s.Close() } })
+    $dlg.Add_ContentRendered({
+        $box.Focus() | Out-Null
+        # A prefilled Rename keeps the extension out of the selection so
+        # typing replaces just the base name, Explorer-style.
+        if (-not [string]::IsNullOrEmpty($box.Text)) {
+            $stem = [IO.Path]::GetFileNameWithoutExtension($box.Text)
+            $box.Select($stem.Length, $box.Text.Length - $stem.Length)
+        }
+    })
     $dlg.ShowDialog() | Out-Null
     return $dlg.Tag
 }
@@ -4056,6 +7512,14 @@ $script:SummonTimer = New-Object Windows.Threading.DispatcherTimer
 $script:SummonTimer.Interval = [TimeSpan]::FromMilliseconds(750)
 $script:SummonTimer.Add_Tick({
     if ($script:SummonEvent -and $script:SummonEvent.WaitOne(0)) {
+        # The startup .vbs deletes the pid file before EVERY launch attempt
+        # (stale-handshake guard) - including ones that just summon this
+        # already-running instance - so re-write it here, otherwise the file
+        # Uninstall.ps1 uses to find and stop this process goes missing after
+        # any icon click while the widget is up.
+        try {
+            Set-Content -LiteralPath (Join-Path $env:LOCALAPPDATA "NorthstarDevKit\widget.pid") -Value $PID -Encoding ASCII
+        } catch { }
         Show-DevKitWidget
     }
 })
@@ -4113,8 +7577,11 @@ $script:SlowTimer.Add_Tick({
     if (-not $script:McpBusy -and ((Get-Date) - $script:McpLastAttempt).TotalSeconds -gt 600) {
         Start-DevKitMcpRefresh
     }
-    # Junk rescan every 5 minutes; a no-op while the work runspace is busy.
-    if (-not $script:WorkBusy -and ((Get-Date) - $script:JunkLastScan).TotalSeconds -gt 300) {
+    # Junk rescan every 30 minutes; a no-op while the work runspace is busy.
+    # A scan is a full recursive enumeration of the temp folders - far too
+    # expensive to run more often for a dial, and it doesn't run at all while
+    # the window is hidden (SlowTimer is stopped - see Hide-DevKitWidget).
+    if (-not $script:WorkBusy -and ((Get-Date) - $script:JunkLastScan).TotalSeconds -gt 1800) {
         Start-DevKitJunkScan
     }
     # Ambient git badge refresh every 2 minutes while a project is active.
@@ -4135,18 +7602,46 @@ $script:SlowTimer.Add_Tick({
 
 # ==================== START ====================
 
-Update-DevKitWidgetProjects
+# One failing initializer must not take the whole widget down via the trap -
+# with $ErrorActionPreference='Stop' a single throwing call (e.g.
+# Update-DevKitWidgetProjects hitting an unwritable %LOCALAPPDATA% dir) used
+# to be an invisible startup death. Log and continue instead; every one of
+# these is individually re-runnable (timers/watchers fire them again later).
+foreach ($startupStep in @(
+    { Update-DevKitWidgetProjects },
+    { Set-DevKitWidgetDock -Mode (Get-DevKitWidgetDockSetting) },
+    { Start-DevKitMetricsRefresh },
+    { Start-DevKitJunkScan },
+    { Update-DevKitWidgetFooter },
+    { Start-DevKitMcpRefresh }
+)) {
+    try {
+        & $startupStep
+    } catch {
+        try {
+            $startupLogDir = Join-Path $env:LOCALAPPDATA "NorthstarDevKit"
+            if (-not (Test-Path $startupLogDir)) { New-Item -ItemType Directory -Path $startupLogDir -Force | Out-Null }
+            Add-Content -LiteralPath (Join-Path $startupLogDir "widget-startup.log") -Encoding UTF8 -Value (
+                "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] PID=$PID startup step failed: $($_.Exception.Message)`n$($_.InvocationInfo.PositionMessage)`n")
+        } catch { }
+    }
+}
 # Main's fixed width is set from the one constant so the XAML's design-time
 # value can never silently disagree with the geometry math.
 if ($ui.MainColumn) { $ui.MainColumn.Width = [Windows.GridLength]::new($script:WidgetContentWidth) }
 $window.Width = $script:WidgetChromeWidth + $script:WidgetContentWidth
-Set-DevKitWidgetDock -Mode (Get-DevKitWidgetDockSetting)
-Start-DevKitMetricsRefresh
-Start-DevKitJunkScan
-Update-DevKitWidgetFooter
 $script:FastTimer.Start()
 $script:SlowTimer.Start()
-Start-DevKitMcpRefresh
+
+# Startup-launcher handshake: Start-Widget-Startup.vbs polls for this file
+# (written only once the window exists and every initializer above has run)
+# to know the launch actually worked - see that script's header. Best-effort:
+# the widget runs fine without it, the launcher just can't confirm success.
+try {
+    $pidDir = Join-Path $env:LOCALAPPDATA "NorthstarDevKit"
+    if (-not (Test-Path $pidDir)) { New-Item -ItemType Directory -Path $pidDir -Force | Out-Null }
+    Set-Content -LiteralPath (Join-Path $pidDir "widget.pid") -Value $PID -Encoding ASCII
+} catch { }
 
 # A WPF Application (created at the top, holding the theme resources) owns the
 # message loop: Hide() (every hide-to-tray path - the X button, minimize, the
@@ -4174,7 +7669,12 @@ try { Save-DevKitWidgetNotesFlush } catch { }   # any keystrokes still inside th
 $script:FastTimer.Stop()
 $script:SlowTimer.Stop()
 $script:SummonTimer.Stop()
-$script:GaugeAnimTimer.Stop()
+# Close the hosted terminal session (WM_CLOSE, then a 600ms beat for the
+# graceful close before the kill backstop is flushed inline - the dispatcher
+# is ending, so the one-shot TermKillTimer would never fire on its own).
+try { Stop-DevKitHostedTerminal } catch { }
+Start-Sleep -Milliseconds 600
+try { Invoke-DevKitTermPendingKill } catch { }
 $script:TrayIcon.Visible = $false
 try { $script:TrayIcon.Dispose() } catch { }
 try { if ($script:McpShell) { $script:McpShell.Dispose() } } catch { }
