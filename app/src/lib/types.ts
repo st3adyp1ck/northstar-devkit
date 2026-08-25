@@ -56,7 +56,7 @@ export interface NodeSnapshot {
 
 // ---------- process.topCpu / process.topMemory / metrics.gpuProcesses
 // (verified live against Get-DevKitTopCpuProcesses / Get-DevKitTopMemoryProcesses /
-// Get-DevKitGpuProcessUsage in gui/DevKit-WidgetCore.ps1 - the original
+// Get-DevKitGpuProcessUsage in core/DevKit-WidgetCore.ps1 - the original
 // placeholder shape here was wrong on three counts: topCpu's percent field
 // is `CpuPercent`, not `Percent`; topMemory does NOT return a bare array -
 // it returns `{ Processes, TotalGB, UsedGB, FreeGB }`; and
@@ -160,7 +160,7 @@ export interface LinkedProject {
 
 // ---------- git.overview (verified live via ConvertFrom-DevKitGitLogOutput /
 // ConvertTo-DevKitGitGraphLayout / Get-DevKitRepoOverview in
-// gui/DevKit-WidgetCore.ps1 - the original placeholder shapes here were
+// core/DevKit-WidgetCore.ps1 - the original placeholder shapes here were
 // wrong: DirtyFiles is not string[], and GitCommit/GitGraphLink both carry
 // more fields than first assumed) ----------
 export interface GitRef {
@@ -236,7 +236,7 @@ export interface GitActionResult {
 }
 
 // ---------- git.commitDetails (verified live via Get-DevKitCommitDetails /
-// ConvertFrom-DevKitGitShow in gui/DevKit-WidgetCore.ps1) ----------
+// ConvertFrom-DevKitGitShow in core/DevKit-WidgetCore.ps1) ----------
 export interface GitCommitFile {
   Path: string;
   Added: number;
@@ -324,7 +324,7 @@ export interface OnDeckItem {
   UpdatedAt: string;
 }
 
-// ---------- env.drift (verified live: Get-DevKitEnvDrift in gui/DevKit-WidgetCore.ps1) ----------
+// ---------- env.drift (verified live: Get-DevKitEnvDrift in core/DevKit-WidgetCore.ps1) ----------
 export interface EnvDrift {
   Template: string;
   EnvFile: string;

@@ -12,17 +12,17 @@
     process) and re-exports every function so callers get one flat surface
     instead of having to know which file defines what.
 
-    Deliberately does NOT dot-source gui/DevKit-GUI.ps1 or
-    gui/DevKit-Widget.ps1 themselves - those are WPF/console front-ends.
-    Only their *Core.ps1 logic layers (already UI-free and Pester-covered)
-    are loaded here.
+    DevKit-WidgetCore.ps1 and DevKit-GuiCore.ps1 used to live under gui/
+    alongside the WPF front-ends (DevKit-GUI.ps1, DevKit-Widget.ps1) they
+    were UI-free siblings of. That WPF app was retired once this Tauri
+    rebuild proved out, so the two pure-logic files moved here, next to
+    their only remaining consumer.
 #>
 
 $ErrorActionPreference = 'Stop'
 
 $script:RepoRoot = Split-Path -Parent $PSScriptRoot
 $script:ToolsLibDir = Join-Path $script:RepoRoot 'tools\lib'
-$script:GuiDir = Join-Path $script:RepoRoot 'gui'
 
 $filesToLoad = @(
     (Join-Path $script:ToolsLibDir 'DevKit-UI.ps1')
@@ -30,8 +30,8 @@ $filesToLoad = @(
     (Join-Path $script:ToolsLibDir 'DevKit-McpCatalog.ps1')
     (Join-Path $script:ToolsLibDir 'DevKit-McpList.ps1')
     (Join-Path $script:ToolsLibDir 'DevKit-McpAddFlow.ps1')
-    (Join-Path $script:GuiDir 'DevKit-WidgetCore.ps1')
-    (Join-Path $script:GuiDir 'DevKit-GuiCore.ps1')
+    (Join-Path $PSScriptRoot 'DevKit-WidgetCore.ps1')
+    (Join-Path $PSScriptRoot 'DevKit-GuiCore.ps1')
 )
 
 foreach ($file in $filesToLoad) {

@@ -14,7 +14,7 @@ type Tab = "prs" | "issues";
 /**
  * gh CLI's own `--json` output is what these two RPC methods return
  * untouched (Get-DevKitGitHubPullRequests / Get-DevKitGitHubIssues in
- * gui/DevKit-WidgetCore.ps1 pass '--json number,title,author,url,...'
+ * core/DevKit-WidgetCore.ps1 pass '--json number,title,author,url,...'
  * straight through ConvertFrom-Json - no PascalCase transform). lib/types.ts's
  * GitHubPullRequest already matches, but GitHubIssue is missing `author`
  * even though the PS source requests it in the same shape as the PR's

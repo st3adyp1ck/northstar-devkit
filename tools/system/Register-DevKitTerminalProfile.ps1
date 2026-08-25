@@ -12,8 +12,8 @@
     by running Unregister-DevKitTerminalProfile.ps1 or simply deleting the
     dropped file.
 
-    This is an opt-in setup script, like Setup-Path.bat - it is not run
-    automatically by anything and is not part of the interactive menu.
+    This is an opt-in setup script - it is not run automatically by
+    anything.
 
     Created by Northstar Software Development
     Website: https://www.northstarcoding.com
@@ -30,14 +30,13 @@ Write-DevKitHeader "Register Windows Terminal Profile"
 
 # Two levels up: this script lives at tools\system\, the repo root is above tools\.
 $devKitRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-$devKitScript = Join-Path $devKitRoot "DevKit.ps1"
-if (-not (Test-Path $devKitScript)) {
-    Write-DevKitError "DevKit.ps1 not found at '$devKitScript'."
+$releaseExe = Join-Path $devKitRoot "target\release\devkit.exe"
+$debugExe = Join-Path $devKitRoot "target\debug\devkit.exe"
+$devKitExe = if (Test-Path $releaseExe) { $releaseExe } elseif (Test-Path $debugExe) { $debugExe } else { $null }
+if (-not $devKitExe) {
+    Write-DevKitError "devkit.exe not found - build the CLI first: cargo build --release -p devkit-cli"
     exit 1
 }
-
-$pwshCmd = Get-Command pwsh -ErrorAction SilentlyContinue
-$shellExe = if ($pwshCmd) { $pwshCmd.Source } else { (Get-Command powershell -ErrorAction Stop).Source }
 
 $fragmentDir = Join-Path (Join-Path $env:LOCALAPPDATA "Microsoft\Windows Terminal\Fragments") "Northstar DevKit"
 $fragmentFile = Join-Path $fragmentDir "devkit.json"
@@ -47,7 +46,7 @@ $fragment = [ordered]@{
     profiles = @(
         [ordered]@{
             name              = "Northstar DevKit"
-            commandline       = "`"$shellExe`" -NoExit -NoProfile -ExecutionPolicy Bypass -File `"$devKitScript`""
+            commandline       = "`"$devKitExe`""
             startingDirectory = $devKitRoot
             icon              = "🧭"
         }

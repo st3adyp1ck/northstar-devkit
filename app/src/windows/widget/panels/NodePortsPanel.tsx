@@ -11,7 +11,7 @@ import "./NodePortsPanel.css";
 
 /**
  * Node process + listening-port table for the widget. Backed by
- * metrics.node (Get-DevKitNodeSnapshot in gui/DevKit-WidgetCore.ps1),
+ * metrics.node (Get-DevKitNodeSnapshot in core/DevKit-WidgetCore.ps1),
  * polled every 3s. Self-contained: fetches its own data, handles its own
  * empty state, never crashes on a missing field.
  */

@@ -10,7 +10,7 @@ import "./McpPanel.css";
 /**
  * Backed by mcp.report, polled every 20s - claude.exe/kimi.exe health
  * checks take real seconds (see Get-DevKitMcpWidgetReport's docstring in
- * gui/DevKit-WidgetCore.ps1), so this must stay infrequent.
+ * core/DevKit-WidgetCore.ps1), so this must stay infrequent.
  *
  * Status vocabulary is read from the actual parsers, not guessed:
  *   - Claude (ConvertFrom-DevKitClaudeMcpLine): Connected | Disconnected |

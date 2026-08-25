@@ -21,7 +21,7 @@ body:
       label: Steps to reproduce
       description: How can we reproduce the issue?
       placeholder: |
-        1. Run DevKit.bat
+        1. Run `devkit` (or open the DevKit widget)
         2. Select ...
         3. See error
     validations:

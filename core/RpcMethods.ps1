@@ -2,8 +2,8 @@
 <#
 .SYNOPSIS
     The RPC method table: maps a "namespace.verb" method name to a call
-    into DevKit.Core (tools/lib/* + gui/DevKit-WidgetCore.ps1 +
-    gui/DevKit-GuiCore.ps1 - all logic untouched, this file only adapts
+    into DevKit.Core (tools/lib/* + core/DevKit-WidgetCore.ps1 +
+    core/DevKit-GuiCore.ps1 - all logic untouched, this file only adapts
     JSON params <-> PowerShell calls). Dot-sourced independently inside
     each lane runspace in Invoke-DevKitRpc.ps1 after DevKit.Core is
     imported there.

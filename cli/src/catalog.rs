@@ -11,7 +11,7 @@
 //! `.psd1` hashtables, so their own keys stay PascalCase.
 //!
 //! `build_arguments` is a line-for-line port of `ConvertTo-DevKitToolArguments`
-//! (`gui/DevKit-GuiCore.ps1`): project arg via `ProjectArgName`/`Path` when
+//! (`core/DevKit-GuiCore.ps1`): project arg via `ProjectArgName`/`Path` when
 //! `requiresProject`, `RequiresFile`'s `ParamName` otherwise, prompts in
 //! manifest order (Int parsed + range-checked, YesNo only added when true,
 //! blank/missing values skipped when `Optional` else an error), then

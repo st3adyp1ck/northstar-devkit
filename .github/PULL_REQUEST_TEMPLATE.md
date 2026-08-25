@@ -19,7 +19,7 @@ Fixes #(issue)
 <!-- Describe how you tested your changes -->
 - [ ] Tested on PowerShell 7
 - [ ] Tested on Windows PowerShell 5.1
-- [ ] Ran `DevKit.bat` successfully
+- [ ] Ran the relevant test suite (`Invoke-Pester` for `tools/`/`core/` changes, `cargo test` / `npx tsc --noEmit` for `app/`/`cli/`/`crates/` changes)
 
 ## Checklist
 - [ ] My code follows the project's style guidelines

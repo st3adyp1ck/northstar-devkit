@@ -1,72 +1,90 @@
 # Releasing Northstar DevKit
 
-A short checklist for cutting a new version.
+A short checklist for cutting a new version of the Tauri app (`app/`,
+`cli/`, `crates/devkit-host`).
 
-1. **Bump the version** in every file that hardcodes it (they're kept in
-   sync manually, not read from one file at runtime, to avoid adding a
-   startup file-read to every launch). As of 3.8.0 that's:
-   - `VERSION` (repo root - the single source of truth for what the
-     number *should* be)
-   - `DevKit.ps1` - the `.VERSION` comment-help field and the
-     `$DevKitVersion` fallback literal used if the `VERSION` file can't
-     be read
-   - `lib\DevKit-Common.ps1` - the `.VERSION` comment-help field
-   - `lib\DevKit-UI.ps1` - the `.VERSION` comment-help field and
-     `Show-DevKitStartupBanner`'s `$version` fallback literal
-   - `gui\DevKit-GUI.ps1` - the `$DevKitVersion` fallback literal
-   - `gui\DevKit-Widget.ps1` - the `$DevKitVersion` fallback literal
+## 1. Bump the version
 
-   Don't trust this list alone - new fallback sites have been added with
-   past releases without this checklist being updated. Before bumping,
-   grep for the *previous* version string across `*.ps1` to catch any
-   site this list is missing:
-   ```powershell
-   Get-ChildItem -Recurse -Filter *.ps1 | Select-String -SimpleMatch 'X.Y.Z'
-   ```
-2. **Update `CHANGELOG.md`** with a new `## [x.y.z] - YYYY-MM-DD` section.
-   Follow the existing Added / Fixed / Changed structure.
-3. **Run the full check locally** before tagging:
-   ```powershell
-   # Syntax (matches CI)
-   Get-ChildItem -Recurse -Filter *.ps1 | ForEach-Object {
-       $e=@(); [void][System.Management.Automation.PSParser]::Tokenize((Get-Content $_.FullName -Raw), [ref]$e)
-       if ($e.Count) { "SYNTAX ERROR: $($_.FullName)" }
-   }
+Keep these three in sync manually (not read from one file at runtime):
 
-   # Manifests
-   Get-ChildItem -Recurse -Filter _module.psd1 | ForEach-Object { Import-PowerShellDataFile $_.FullName | Out-Null }
+- `VERSION` (repo root)
+- `app/src-tauri/tauri.conf.json`'s `"version"` field - this is what
+  ends up in the built installer's filename and the updater's
+  `latest.json`
+- `crates/devkit-host` / `app/src-tauri` / `cli`'s `version.workspace = true`
+  fields read `[workspace.package].version` in the root `Cargo.toml` -
+  bump that once, it covers all three crates
 
-   # Tests
-   Invoke-Pester -Path tests/Unit
-   ```
-4. **Commit** the version bump and changelog together:
-   `git commit -m "Release vX.Y.Z"`.
-5. **Tag and push:**
-   ```
-   git tag vX.Y.Z
-   git push origin main --tags
-   ```
-6. **Cut a GitHub Release** from the tag, pasting the relevant
-   `CHANGELOG.md` section as the release notes. Attach a zip of the repo
-   (excluding `.git`) if you want a downloadable artifact for users who
-   don't clone via git.
+## 2. Update `CHANGELOG.md`
+
+New `## [x.y.z] - YYYY-MM-DD` section, following the existing Added /
+Fixed / Changed structure.
+
+## 3. Run the full check locally before tagging
+
+```powershell
+# PowerShell suite (still covers tools/lib, core/, tests/Unit - the RPC
+# sidecar's logic layer)
+Invoke-Pester -Path tests/Unit
+
+# Rust workspace
+cargo check --workspace
+cargo clippy --workspace --all-targets
+cargo test --workspace
+
+# Frontend
+cd app
+npx tsc --noEmit
+npx vite build
+```
+
+Optionally, smoke-test a real build before tagging:
+
+```powershell
+cd app
+pnpm tauri build
+```
+
+## 4. Commit and push
+
+```powershell
+git commit -m "Release vX.Y.Z"
+git push origin main
+```
+
+## 5. Tag and push the tag
+
+```powershell
+git tag vX.Y.Z
+git push origin vX.Y.Z
+```
+
+This triggers `.github/workflows/release.yml`: it builds the app on
+`windows-latest`, signs the updater artifacts with the
+`TAURI_SIGNING_PRIVATE_KEY` repo secret, and opens a **draft** GitHub
+Release with the NSIS installer, its `.sig`, and `latest.json`.
+
+## 6. Review and publish
+
+Open the draft release, sanity-check the attached installer/assets, then
+click **Publish release**. Only then does the in-app updater's endpoint
+(`releases/latest/download/latest.json`) actually resolve to it - a
+draft is invisible to installed copies of DevKit.
 
 ## Versioning
 
 Semantic versioning (`MAJOR.MINOR.PATCH`):
 
-- **MAJOR** - breaking changes to script parameters/behavior, or an
-  architecture change like the 3.0 manifest-driven menu rewrite.
-- **MINOR** - new tools, new menu options, new non-breaking features.
+- **MAJOR** - breaking changes, or an architecture change (e.g. the
+  WPF -> Tauri v2 rewrite).
+- **MINOR** - new panels/tools, new non-breaking features.
 - **PATCH** - bug fixes only.
 
 ## Testing scope
 
-This project has no CI-runnable integration tests against real Docker,
-git remotes, or network state - by design, since a hosted CI runner
-shouldn't have its real PATH mutated or its containers destroyed. `tests/
-Unit` covers pure-logic parsers and converters; everything else is
-verified manually per the checklist above, plus scripted smoke-tests
-through the interactive menu (see recent commit messages for examples of
-the exact input sequences used) when the menu-dispatch layer itself
-changes.
+No CI-runnable integration tests against real Docker, git remotes, or
+network state - by design, since a hosted CI runner shouldn't have its
+real PATH mutated or its containers destroyed. `tests/Unit` covers the
+PowerShell logic layer (pure-logic parsers/converters, still shared by
+the RPC sidecar); Rust has `cargo test` for `devkit-host`'s protocol
+layer; everything else is verified manually per the checklist above.

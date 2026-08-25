@@ -30,48 +30,57 @@
 
 ## ⬇️ Download
 
-### Option 1: Download ZIP (Easiest)
-<a href="https://github.com/st3adyp1ck/northstar-devkit/archive/refs/heads/main.zip">
-  <img src="https://img.shields.io/badge/Download-ZIP-blue?style=for-the-badge&logo=github" alt="Download ZIP">
+### Option 1: Installer (recommended)
+<a href="https://github.com/st3adyp1ck/northstar-devkit/releases">
+  <img src="https://img.shields.io/badge/Download-Installer-blue?style=for-the-badge&logo=github" alt="Download Installer">
 </a>
 
-1. Click the button above to download the latest version
-2. Extract the ZIP to a folder (e.g., `C:\Tools\DevKit`)
-3. Run `Install.bat` (or `Install.ps1`) and follow the steps — it registers DevKit with Windows, creates shortcuts, and offers Start with Windows
-4. Afterwards, launch from the Start Menu/Desktop icon (the widget) or `Widget.bat` from the folder
+1. Grab the latest `DevKit_x.y.z_x64-setup.exe` from [GitHub Releases](https://github.com/st3adyp1ck/northstar-devkit/releases)
+2. Run it — a minisign-signed NSIS installer, fully per-user, **no admin rights needed**
+3. Launch **DevKit** from the Start Menu or Desktop icon — it opens the companion widget
+4. **Uninstall:** Settings > Apps > DevKit, like any other Windows app
 
-### Option 2: Clone with Git
+The app checks for updates automatically (throttled to once per 24h) and via a **Check for Updates** button in the widget — download, install, and relaunch happen in place through a signed update feed.
+
+### Option 2: Build from source
 ```bash
 git clone https://github.com/st3adyp1ck/northstar-devkit.git
-cd northstar-devkit
-.\Install.bat
+cd northstar-devkit/app
+pnpm install
+pnpm tauri build
 ```
-Then launch from the Start Menu/Desktop icon (the widget) or `Widget.bat` from the folder.
+Requires **Rust** (stable toolchain) and **Node.js + pnpm** — no other external dependencies. This builds the whole Cargo workspace, so the installer lands at the repo root's `target/release/bundle/nsis/DevKit_<version>_x64-setup.exe`.
 
-### Option 3: Portable (no install)
-Prefer not to install? Everything still runs straight from the folder — double-click `Widget.bat` (the companion widget), `DevKit-GUI.bat` (the Control Center), or `DevKit.bat` (the classic terminal menu). Nothing is registered with Windows in this mode.
-
-> **No external dependencies.** DevKit runs entirely with built-in Windows PowerShell — zero external dependencies.
->
-> **Uninstall:** Settings > Apps > Northstar DevKit, or run `Uninstall.ps1` — it removes files, shortcuts, PATH, and the startup entry, and (optionally) your saved settings.
+> **The `devkit` CLI has no installer yet.** Build it from source instead — `cargo build --release -p devkit-cli` — and run the resulting `target/release/devkit.exe`.
 
 ---
 
 ## 🚀 Quick Start
 
-```batch
-:: 1. Download & extract
-:: 2. Run Install.bat and follow the steps (fully per-user, no admin needed)
-:: 3. Launch "Northstar DevKit" from the Start Menu/Desktop icon - the widget
-:: 4. Click DEVKIT in the widget's title bar for the full Control Center
-::    ...or run DevKit.bat for the classic terminal menu
-```
+1. Download the installer from [GitHub Releases](https://github.com/st3adyp1ck/northstar-devkit/releases) (or build from source — see above)
+2. Run it — per-user install, no admin needed
+3. Launch **DevKit** from the Start Menu/Desktop icon — it opens the companion widget
+4. Click **DEVKIT** in the widget's title bar for the full Control Center
 
-The **companion widget is the main face of DevKit** — a small always-on window with your system's vitals, running dev servers, git status, and one-click tools. Its title-bar **DEVKIT** button opens the **DevKit Control Center**, the full desktop app: every tool as a card in one branded window — pick a category on the left (or search), press **Run**, and the tool opens in a terminal window with its full interactive UI. For project-specific actions (Git, Next.js, Vite, etc.), DevKit prompts you with a picker: pick a previously-linked project, browse for a folder, use the current directory, or type a path — no more retyping the same path for every action. Whatever you pick becomes your **Active Project** and is shared between the widget, the app, and the terminal UI. See [New in 3.0](#-new-in-30) below.
+The **companion widget is the main face of DevKit** — a small always-on window with your system's vitals, running dev servers, git status, notes, and one-click tools. Its title-bar **DEVKIT** button opens the **DevKit Control Center**: every tool as a searchable card, with a dynamic form for whatever it needs and its real output streaming live into the dialog as it runs — no separate terminal window to babysit. For project-specific actions (Git, Next.js, Vite, etc.), DevKit prompts you with a picker: pick a previously-linked project, browse for a folder, use the current directory, or type a path — no more retyping the same path for every action. Whatever you pick becomes your **Active Project**, shared between the widget, the Control Center, and the `devkit` CLI.
 
 ---
 
+## 🎉 New in Tauri v2
+
+DevKit was rebuilt from the ground up — from a PowerShell/WPF app into a Tauri v2 desktop app. The 65 PowerShell tools underneath are untouched; everything around them is new:
+
+- **A real cross-window app.** The companion **widget** and the **Control Center** are now two Tauri windows — React 19 + TypeScript over a Rust backend — replacing the old WPF widget/GUI pair panel-for-panel, plus a new `devkit` terminal CLI.
+- **A long-lived PowerShell sidecar**, not a process-per-click. `core/Invoke-DevKitRpc.ps1` speaks NDJSON-RPC over stdin/stdout across three worker lanes plus a dedicated writer runspace, and the Rust side (`crates/devkit-host`) respawns it with backoff if it ever dies.
+- **Tool output streams live**, inline, into the Control Center's run dialog or the widget's Quick Actions panel — no more a separate terminal window popping up per tool.
+- **A new `devkit` CLI** — a ratatui terminal menu that replaces `DevKit.bat`, with arrow-key nav, `/` search, a `p`-suffix project override, digit-jump, and a native Windows file picker for tools that need one. Built from source only for now: `cargo build --release -p devkit-cli`.
+- **A signed installer and real auto-update**, built and published through a GitHub Actions release pipeline — push a `vX.Y.Z` tag, the pipeline builds and signs it, a human reviews and publishes the draft release, and the in-app updater picks it up within 24h (or immediately via "Check for Updates").
+
+See [AGENTS.md](AGENTS.md) for the full architecture writeup.
+
 ## 🎉 New in 4.0
+
+> **Historical note:** this section, and every "New in …" section down through [New in 3.0](#-new-in-30), documents the release history of the original **PowerShell/WPF** app — including its own, separately-numbered "4.0" release. That app has since been fully replaced by the Tauri v2 rewrite described above; none of the `.bat` launchers or WPF UI described below exist in the repo anymore.
 
 - **The widget is the app.** DevKit now opens as the little always-on companion window — from the Start Menu/Desktop icon or `Widget.bat` — with system vitals, dev servers, git status, and one-click tools up front, and the full Control Center one click away via the title-bar **DEVKIT** button. And it's a real Windows app now: a stepped installer (fully per-user, no admin needed) registers DevKit in Settings > Apps, and the matching uninstaller removes every trace — files, shortcuts, PATH, the startup entry, even your saved settings if you want them gone.
 - **A lightweight pass you can feel.** Hovering the widget's gauges no longer spikes your CPU/GPU, its background checks stopped re-reading 150 KB of script every four seconds (nvidia-smi was being spawned on a loop), and a widget hidden to the tray now sleeps completely — every timer stops, so it costs essentially nothing until you bring it back.
@@ -122,6 +131,14 @@ The **companion widget is the main face of DevKit** — a small always-on window
 
 ## ✨ Features
 
+### The App
+
+| 🪟 **Companion Widget** | 🗂️ **Control Center** | ⌨️ **`devkit` CLI** | 🔄 **Auto-Update** |
+|---|---|---|---|
+| Gauges, Node/Ports, Git (commit graph), GitHub, MCP, Notes/On-Deck, Files, Quick Actions, and a collapsible embedded terminal — always-on, one click from the tray | Every tool as a searchable card with a dynamic form and live streamed output | A ratatui terminal menu — arrow keys, `/` search, digit-jump (build from source: `cargo build --release -p devkit-cli`) | Checks GitHub Releases on launch and on demand, then downloads, installs, and relaunches in place |
+
+### The Tools
+
 <div align="center">
 
 | 🔌 **Ports** | 📦 **Node.js** | ▲ **Next.js** | ⚡ **Vite** |
@@ -146,76 +163,50 @@ The **companion widget is the main face of DevKit** — a small always-on window
 
 ## 🖥️ Usage
 
-### Desktop App (GUI)
-Launch `DevKit-GUI.bat`:
+### Control Center
+Open it via the widget's title-bar **DEVKIT** button:
 
-- **Navigate** by category (left rail) or **search** (top of the rail, `Ctrl+F`) — every tool appears as a card with a one-line summary and the full details on hover.
-- **Run** opens the tool in its own terminal window (Windows Terminal when available, classic console otherwise) with its complete interactive UI — long-running tools like dev servers simply live in that window until you close it.
-- Cards marked **PROJECT** run against your **Active Project** automatically; manage linked projects from the **Projects** page in the rail. Cards marked **CAUTION** change system state — their terminal window always asks for confirmation first.
-- Tools that need input (a port number, a file, a yes/no) ask with a small validated dialog before launching.
-- "Restart as Administrator" (Getting Started page) relaunches the app elevated for the maintenance tools that need it.
+- **Browse or search** the full tool catalog — every tool rendered as a card from its `_module.psd1` manifest, grouped in the left rail (Development, Version Control & Containers, System & Workflow, Maintenance & Agents, Network) with live search across the top.
+- Cards carry **Project** (runs against your Active Project), **Input** (needs parameters), and **Caution** (changes system state) badges at a glance.
+- **Run** opens a dialog with a dynamic form built from the tool's manifest — text/number fields, yes/no toggles, a project picker when needed — and streams the tool's real stdout/stderr into that same dialog live as it runs. Nothing pops open in a separate terminal window.
+- **Caution** tools ask for confirmation first (per the widget's **confirmDestructive** setting).
 
 ### Companion Widget
-The widget is DevKit's main face — launch it from the Start Menu/Desktop icon, or `Widget.bat` from the folder (it starts windowlessly, straight to the desktop and tray). It also opens from the gauge icon in the Control Center's title bar:
+The widget is DevKit's main face — it opens from the Start Menu/Desktop icon straight to the desktop and tray. Its title-bar **DEVKIT** button opens the Control Center:
 
-- **Metrics**: CPU / memory / GPU dials with temperatures where the machine exposes them (unavailable sensors show "n/a"), a **System Junk** dial with a one-click clean, and a **Disk Free** dial — plus a reboot-pending / long-uptime hint when Windows needs a restart.
-- **Click a dial to manage it**: each gauge slides out a management panel from the widget's edge — CPU shows a live list of what's eating your processor, MEM shows what's holding memory (with a one-click **Free Memory** button that safely trims idle working sets — nothing is closed), and GPU shows your adapter (utilization/temp/VRAM on NVIDIA) plus which processes are using it. Every process row is badged **SAFE TO CLOSE** / **CAUTION** / **LEAVE ALONE** (system processes have no kill button at all), so cleanup candidates are unmistakable.
-- **Cleanup without a terminal**: the junk dial's **Clean Now** runs entirely inside the widget — one Yes/No, then it clears temp files, the Recycle Bin, and (when the widget runs as administrator) Windows temp + the Windows Update cache, reporting exactly what each category freed and politely noting anything that needed admin. **Details...** shows the per-category breakdown. No command prompt, no typed confirmations, ever.
-- **Node watch**: every running `node` process with its memory, age, and listening ports — click a port to open it in your browser, or kill just that one process (after a confirm). Warns you when a dev port is stuck inside a Windows-reserved range (Hyper-V/winnat).
-- **Side tabs**: FILES, GIT, NOTES, and ON DECK slide out from the widget's edge (one at a time), each anchored across from its related section — files and git by the gauges, notes and on-deck by the drives — with TERMINAL lower by Quick Actions and a gradient divider line marking the strip. The **Files explorer** shows Material-style file-type icons; the **git panel** draws the commit graph with branch/tag/HEAD glyphs.
-- **Terminal tab**: slides out a REAL terminal — Windows Terminal (your DevKit profile when registered) hosted inside the panel, already in your project folder. Interactive CLIs (kimi, claude) just work, because it genuinely is a terminal. It stays open alongside any other panel — watch the git graph while you run commands.
-- **Git panel**: a drawn commit graph with colored lanes and merge curves, branch with ahead/behind, fetch/pull/push, and quick links to GitHub/Actions — for the project selected below. **Click any commit** to expand its details inline (full message, author, per-file change stats); click again to collapse.
-- **Project selector**: the same Active Project as the GUI and terminal UI, with an ambient badge showing its branch + uncommitted/ahead/behind/stash counts, and a warning when its `.env` drifts from the template ("Fix..." copies the template in a terminal).
-- **Quick actions**: Clear NPM Cache, Kill All Node, Kill Port..., Doctor, plus Editor / Explorer / Terminal / Run Script... launchers for the active project — each launches the real DevKit tool in a terminal window — and **Open DevKit Control Center** for the full toolkit (also reachable via the title-bar **DEVKIT** button).
-- **Agents**: the expandable **Claude Code** / **Kimi Code** boxes show that project's MCP servers alongside your user-scope ones, with Connected / Disconnected / Requires Auth badges and working **Manage...** dialogs (re-check, sign in, add/remove servers).
-- **Tray**: the widget keeps running in the system tray when you hide the window — and while hidden it genuinely sleeps: every refresh timer stops, so a tray-hidden widget uses essentially no CPU or GPU until you show it again (which triggers an immediate refresh). Left-click the icon to show/hide, right-click for the menu (Show, Open DevKit Control Center, Start with Windows, Exit). On Windows 11 look in the ^ overflow near the clock.
+- **Gauges**: CPU / Memory / GPU dials with temperatures where the machine exposes them ("n/a" when it doesn't), plus a Disk Free dial and a reboot-pending hint. Click a dial for a flyout of its top processes with a guarded kill button; the Memory flyout adds a one-click **Free Memory**.
+- **Node & Ports**: every running `node` process with its memory, age, and listening ports — click a port to open it in your browser, or kill just that one process. Flags ports stuck inside a Windows-reserved range (Hyper-V/winnat).
+- **Git**: a drawn commit graph with colored lanes and gradient curves where a branch flows into its parent, branch/tag pills, a HEAD ring, ahead/behind counts and stash count, and fetch/pull/push. Click any commit to expand its details inline (message, author, per-file stats).
+- **GitHub**: the active project's open pull requests and issues, read straight from the `gh` CLI, one click to open either in the browser.
+- **MCP**: expandable **Claude Code** / **Kimi Code** boxes listing that project's MCP servers alongside your user-scope ones, with Connected / Disconnected / Requires Auth badges.
+- **Notes/On-Deck**: quick per-project sticky notes, plus an on-deck list whose items advance Not Started → In Progress → Done with a click.
+- **Files**: a lightweight file explorer scoped to the active project.
+- **Quick Actions**: Clear NPM Cache, Kill All Node, Kill Port (with an inline port field), and Doctor — each streams live into the same inline console — plus the widget's own **Settings** (confirm-before-destructive, animations, update checks) and an `.env` drift warning when the active project is missing template keys.
+- **Terminal**: collapsed by default; expand it for a real embedded terminal (ConPTY-hosted `pwsh`/`powershell`), already in your project folder — interactive CLIs just work because it genuinely is a terminal.
+- **Project selector**: the same Active Project shared with the Control Center and the `devkit` CLI.
+- **Tray**: closing the widget just hides it to the tray — right-click the icon for **Show/Hide Widget**, **Open DevKit Control Center**, **Start with Windows**, and **Exit**.
 
-### Interactive Menu
-Launch `DevKit.bat` and navigate with your keyboard:
+### `devkit` CLI
+There's no installer for the CLI yet — build it from source:
 
-```
-=============================================
-       Northstar DevKit v4.0.0
-    Developer Toolkit by northstarcoding.com
-=============================================
-  Menu: Main Menu
-  Active Project: acme-storefront  (C:\dev\acme-storefront)
-
-  DevKit bundles your everyday Node/Next.js/Vite/Git/Docker tools into
-  one menu. New here? Pick [?] Getting Started below.
-
-  Development Tools:
-    [1] Port Tools     - Scan and Kill
-    [2] Node.js Tools  - Cache & Modules
-    [3] Next.js Tools  - Build Cache
-    [4] Vite Tools     - Dev Server
-
-  Version Control & Containers:
-    [5] Git Tools      - Repo Management
-    [6] Docker Tools   - Container Cleanup
-
-  System & Workflow:
-    [7] System Tools   - PATH & Environment
-    [8] Workflow       - IDE & Utils
-    [9] Diagnostics    - Health Check
-
-  Maintenance & Agents:
-    [12] Maintenance   - Cleanup, Repair, Tuning
-    [13] Agents & MCP  - AI CLI & MCP Servers
-
-  Projects & Network:
-    [10] Projects      - Link, Switch, Manage
-    [11] WiFi Tools    - Optimize and Scan
-
-    [/] Search tools
-    [?] Getting Started
-    [0] Exit
+```powershell
+cargo build --release -p devkit-cli
+.\target\release\devkit.exe
 ```
 
-Use the arrow keys to move and Enter to select, or just type a number like before — both work everywhere.
+It's an interactive ratatui terminal menu that replaces the old `DevKit.bat`, reading the same tool catalog the apps render:
+
+```
+↑/↓ move   Enter open/run   / search   p project   digits+Enter jump   Esc back/quit
+```
+
+- Arrow keys or a typed number both work; `/` jumps to search; typing digits (e.g. `12` then Enter) jumps straight to that entry.
+- Append `p` to a selection to run it against a different project for just that one run, without disturbing your Active Project.
+- A tool that needs a file prompts you with a real native Windows file picker (shells out to a hidden `System.Windows.Forms.OpenFileDialog`).
+- One-shot subcommands: `devkit doctor` (pings the sidecar) and `devkit catalog` (prints the tool catalog as JSON).
 
 ### Run Individual Scripts
-You can also run any tool directly from PowerShell or Command Prompt:
+Every tool is a plain PowerShell script — the widget, the Control Center, and the CLI all run these exact same files under the hood, and you can run them directly too:
 
 ```powershell
 # Kill a stuck port
@@ -234,6 +225,8 @@ You can also run any tool directly from PowerShell or Command Prompt:
 ---
 
 ## 📚 Documentation
+
+These are the same 65 scripts the widget, the Control Center, and the `devkit` CLI all run under the hood — invoke them directly any time:
 
 ### Port Tools
 ```powershell
@@ -353,8 +346,8 @@ You can also run any tool directly from PowerShell or Command Prompt:
 | Check all repos | `tools\git\Git-StatusAll.bat` |
 | Slow cafe WiFi | `tools\wifi\WiFi-Optimize.bat` |
 | Environment health check | `tools\diagnostics\DevKit-Doctor.bat` |
-| Retyping the same project path every time | `DevKit.bat` → any tool → link it once, it's remembered |
-| Can't remember which menu a tool is in | `DevKit.bat` → `/` → type a keyword |
+| Retyping the same project path every time | Pick it once in the Project Picker (widget or Control Center) — it becomes your Active Project and stays picked everywhere |
+| Can't remember which tool you need | Control Center → search box, or `devkit` → `/` |
 | Disk filling up | `tools\maintenance\Clear-DiskJunk.bat` |
 | Windows Update stuck | `tools\maintenance\Reset-WindowsUpdate.bat -DryRun` first, then for real |
 | "Files or folders are corrupted" | `tools\maintenance\Repair-SystemFiles.bat` |
@@ -379,39 +372,42 @@ You can also run any tool directly from PowerShell or Command Prompt:
 
 ```
 DevKit/
-├── Widget.bat              # Companion widget launcher (the main face of the app)
-├── DevKit.bat              # Classic terminal menu launcher
-├── DevKit.ps1              # Interactive menu (manifest-driven dispatcher)
-├── DevKit-GUI.bat          # DevKit Control Center (desktop GUI) launcher
-├── Install.ps1 / Install.bat  # Per-user installer wizard (no admin needed)
-├── Uninstall.ps1           # Full uninstaller (removes every trace)
-├── VERSION                 # Single source of truth for the version number
-├── CHANGELOG.md            # Release history
-├── README.md               # This file
-├── CONTRIBUTING.md         # Contribution guidelines
-├── CODE_OF_CONDUCT.md      # Community standards
-├── LICENSE                 # MIT License
-│
-├── gui/                    # Control Center + companion widget: WPF windows, brand
-│                           # theme, pure-logic cores, logo assets (Build-Assets.ps1)
-├── tools/                  # Everything the menus launch
-│   ├── lib/                # Shared PowerShell helpers (project picker, menu
-│   │                       # dispatcher, settings, confirmation gate, etc.)
-│   ├── ports/              # Port management          (+ _module.psd1 menu manifest)
-│   ├── node/               # Node.js utilities        (+ _module.psd1)
-│   ├── nextjs/             # Next.js tools            (+ _module.psd1)
-│   ├── vite/               # Vite tools               (+ _module.psd1)
-│   ├── git/                # Git tools                (+ _module.psd1)
-│   ├── docker/             # Docker tools             (+ _module.psd1)
-│   ├── system/             # System environment       (+ _module.psd1)
-│   ├── workflow/           # Developer workflow       (+ _module.psd1)
-│   ├── diagnostics/        # Health checks            (+ _module.psd1)
-│   ├── wifi/               # WiFi optimization        (+ _module.psd1)
-│   ├── maintenance/        # Windows maintenance/tuning (+ _module.psd1)
-│   └── agents/             # AI CLI & MCP management  (+ _module.psd1)
-├── tests/Unit/             # Pester tests (run via `Invoke-Pester -Path tests/Unit`)
-└── dev/                    # Maintainer-only tooling (Build-UsbPortable.ps1/.bat,
-                            # RELEASING.md release checklist)
+├── app/                      # Tauri v2 desktop app (React 19 + TypeScript, Rust backend)
+│   ├── src/                  # Frontend: two windows (widget, control-center) + shared UI/hooks/stores
+│   ├── src-tauri/            # Rust backend: rpc_call command, tray, ConPTY terminal, window mgmt
+│   ├── package.json          # pnpm scripts (dev, build, tauri)
+│   └── tauri.conf.json       # Windows, NSIS installer, updater config
+├── cli/                      # `devkit` - ratatui interactive terminal menu (builds from source)
+├── core/                     # PowerShell RPC sidecar + shared pure logic
+│   ├── Invoke-DevKitRpc.ps1    # NDJSON-RPC sidecar entry point (runspace pools + writer runspace)
+│   ├── RpcMethods.ps1          # ~40-method dispatch table
+│   ├── DevKit-WidgetCore.ps1 / DevKit-GuiCore.ps1 # pure logic (moved here from the old gui/)
+│   └── DevKit.Core.psm1        # module wrapper the sidecar and the CLI both import
+├── crates/devkit-host/       # Rust client that spawns/respawns the PowerShell sidecar
+├── tools/                    # Everything the widget, Control Center, and CLI launch
+│   ├── lib/                  # Shared PowerShell helpers (project picker, settings, etc.)
+│   ├── ports/                # Port management            (+ _module.psd1 manifest)
+│   ├── node/                 # Node.js utilities          (+ _module.psd1)
+│   ├── nextjs/               # Next.js tools              (+ _module.psd1)
+│   ├── vite/                 # Vite tools                 (+ _module.psd1)
+│   ├── git/                  # Git tools                  (+ _module.psd1)
+│   ├── docker/               # Docker tools               (+ _module.psd1)
+│   ├── system/               # System environment         (+ _module.psd1)
+│   ├── workflow/             # Developer workflow         (+ _module.psd1)
+│   ├── diagnostics/          # Health checks              (+ _module.psd1)
+│   ├── wifi/                 # WiFi optimization          (+ _module.psd1)
+│   ├── maintenance/          # Windows maintenance/tuning (+ _module.psd1)
+│   └── agents/               # AI CLI & MCP management    (+ _module.psd1)
+├── tests/Unit/               # Pester tests (run via `Invoke-Pester -Path tests/Unit`)
+├── dev/                      # Maintainer-only tooling (RELEASING.md release checklist)
+├── .github/workflows/        # CI (ci.yml) and the signed release pipeline (release.yml)
+├── Cargo.toml / Cargo.lock   # Rust workspace (app/src-tauri, cli, crates/devkit-host)
+├── VERSION                   # Single source of truth for the version number
+├── CHANGELOG.md              # Release history
+├── README.md                 # This file
+├── CONTRIBUTING.md           # Contribution guidelines
+├── CODE_OF_CONDUCT.md        # Community standards
+└── LICENSE                   # MIT License
 ```
 
 Linked projects and settings are stored outside the repo, at
@@ -422,14 +418,17 @@ nothing project-specific is written into the DevKit install folder.
 
 ## 🛠️ Requirements
 
+**To run the installed app:**
+
 - **Windows 10/11**
-- **PowerShell 5.1+** or **PowerShell 7+** (PowerShell 7 recommended)
-- Optional: **Windows Terminal** (tools open in it instead of the classic console when installed)
-- **Administrator privileges** recommended for:
-  - WiFi optimization
-  - Editing system PATH
-  - Restoring Machine environment variables
-- Optional: **Node.js**, **Git**, **Docker Desktop** (for respective tools)
+- **PowerShell 5.1+** or **PowerShell 7+** (PowerShell 7 recommended) — the sidecar and every tool run on it, nothing else to install
+- **Administrator privileges** recommended for certain tools (WiFi optimization, editing system PATH, restoring Machine environment variables) — DevKit prompts or self-elevates where needed
+- Optional: **Node.js**, **Git**, **Docker Desktop**, **GitHub CLI (`gh`)** — for the respective tools and the widget's GitHub panel
+
+**To build from source** (the app, or the `devkit` CLI):
+
+- **Rust** (stable toolchain)
+- **Node.js** + **pnpm**
 
 ---
 
@@ -457,6 +456,6 @@ Distributed under the MIT License. See [LICENSE](LICENSE) for details.
 
 *Empowering developers, one tool at a time.*
 
-[🌐 Website](https://www.northstarcoding.com) • [💬 Issues](https://github.com/st3adyp1ck/northstar-devkit/issues) • [⬇️ Download](https://github.com/st3adyp1ck/northstar-devkit/archive/refs/heads/main.zip)
+[🌐 Website](https://www.northstarcoding.com) • [💬 Issues](https://github.com/st3adyp1ck/northstar-devkit/issues) • [⬇️ Download](https://github.com/st3adyp1ck/northstar-devkit/releases)
 
 </div>

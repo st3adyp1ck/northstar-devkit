@@ -11,7 +11,7 @@ import "./FilesPanel.css";
 
 /**
  * Lazy-expanding directory tree, one level per "files.children" call (see
- * Get-DevKitDirChildren in gui/DevKit-WidgetCore.ps1 - deliberately
+ * Get-DevKitDirChildren in core/DevKit-WidgetCore.ps1 - deliberately
  * non-recursive). The root level is polled like the other panels; every
  * folder expanded below it is fetched once on first expand and cached in
  * local state so collapsing/re-expanding never re-fetches.

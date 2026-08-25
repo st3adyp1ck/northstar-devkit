@@ -5,21 +5,20 @@
 .DESCRIPTION
     Adds a single registry key under HKCU:\Software\Classes\Directory\Background\shell,
     so right-clicking empty space inside any folder in Explorer offers
-    "Open Northstar DevKit Here", launching DevKit.ps1 with that folder as
-    the starting directory (pick "[C] Use current directory" in any
-    project-picker prompt to link it immediately).
+    "Open Northstar DevKit Here", launching the devkit CLI (cli/) with that
+    folder as the starting directory.
 
     HKCU only - no administrator privileges required, and nothing outside
     the current user's own registry hive is touched. Fully reversible via
     Uninstall-ShellIntegration.ps1.
 
-    This is an opt-in setup script, like Setup-Path.bat - it is not run
-    automatically by anything and is not part of the interactive menu.
+    This is an opt-in setup script - it is not run automatically by
+    anything.
 
     Created by Northstar Software Development
     Website: https://www.northstarcoding.com
 .PARAMETER Force
-    Skip the confirmation prompt (used by Install.ps1's -Silent mode).
+    Skip the confirmation prompt.
 .EXAMPLE
     .\Install-ShellIntegration.ps1
 #>
@@ -35,9 +34,11 @@ Write-DevKitHeader "Install Shell Integration"
 
 # Two levels up: this script lives at tools\system\, the repo root is above tools\.
 $devKitRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-$devKitScript = Join-Path $devKitRoot "DevKit.ps1"
-if (-not (Test-Path $devKitScript)) {
-    Write-DevKitError "DevKit.ps1 not found at '$devKitScript'."
+$releaseExe = Join-Path $devKitRoot "target\release\devkit.exe"
+$debugExe = Join-Path $devKitRoot "target\debug\devkit.exe"
+$devKitExe = if (Test-Path $releaseExe) { $releaseExe } elseif (Test-Path $debugExe) { $debugExe } else { $null }
+if (-not $devKitExe) {
+    Write-DevKitError "devkit.exe not found - build the CLI first: cargo build --release -p devkit-cli"
     exit 1
 }
 
@@ -48,7 +49,7 @@ $keyPath = "HKCU:\Software\Classes\Directory\Background\shell\NorthstarDevKit"
 $commandKeyPath = "$keyPath\command"
 # %V expands to the background-clicked folder's path for this specific
 # registry location (Directory\Background\shell), per Windows shell docs.
-$commandLine = "`"$shellExe`" -NoExit -NoProfile -ExecutionPolicy Bypass -Command `"Set-Location -LiteralPath '%V'; & '$devKitScript'`""
+$commandLine = "`"$shellExe`" -NoExit -NoProfile -ExecutionPolicy Bypass -Command `"Set-Location -LiteralPath '%V'; & '$devKitExe'`""
 
 Write-Host "  This will add ONE registry key under your own user profile:" -ForegroundColor Yellow
 Write-Host "    $keyPath" -ForegroundColor Gray

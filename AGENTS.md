@@ -2,128 +2,169 @@
 
 ## Project Overview
 
-**Northstar DevKit** is a comprehensive PowerShell-based Windows toolkit for web developers. It provides utilities for port management, Node.js/Next.js/Vite cache clearing, Git repository management, Docker container cleanup, system environment management, and WiFi network optimization.
+**Northstar DevKit** is a Windows desktop toolkit for web developers. It
+provides utilities for port management, Node.js/Next.js/Vite cache
+clearing, Git repository management, Docker container cleanup, system
+environment management, AI-CLI/MCP management, and WiFi network
+optimization.
+
+As of the Tauri v2 rewrite (this branch), the toolkit is fronted by a real
+desktop app - Rust + Tauri v2 with a React 19 + TypeScript UI - and a
+terminal CLI (ratatui), instead of the pure-PowerShell/WPF app it used to
+be. The ~65 tool scripts themselves (`tools/`) are still 100% PowerShell,
+unchanged in logic, and are the actual implementation both new surfaces
+run - see "Technology Stack" below and the "App Architecture" section
+under Key Features by Module for how the pieces fit together. If you find
+a reference to `gui/`, `DevKit.ps1`, `DevKit.bat`, `DevKit-GUI.bat`,
+`Widget.bat`, `Install.ps1`, or XAML anywhere in this repo outside
+`CHANGELOG.md`'s historical entries, it's stale - that app was deleted.
 
 - **Created by:** Northstar Software Development
 - **Website:** https://www.northstarcoding.com
 - **License:** MIT
 - **Language:** English (all comments and documentation)
-- **Version:** 4.0.0
+- **Version:** 4.0.0 (`VERSION` at repo root; kept in sync by hand with
+  the Cargo workspace's `[workspace.package].version` and
+  `app/src-tauri/tauri.conf.json`'s `"version"` field - see
+  `dev/RELEASING.md`)
 
 ## Technology Stack
 
-- **Primary Language:** PowerShell 5.1+ or PowerShell 7+ (pwsh)
-- **Secondary:** Batch files (.bat) as wrappers for GUI/click execution
-- **Platform:** Windows 10/11
-- **No external dependencies:** Uses built-in Windows PowerShell cmdlets and system utilities
+- **App/CLI shell:** Rust (2021 edition) + Tauri v2 for the desktop app,
+  ratatui + crossterm for the CLI's terminal UI. Windows-only (ConPTY via
+  `portable-pty`, NSIS bundling, WebView2).
+- **App frontend:** React 19 + TypeScript, built with Vite 7. Zustand for
+  small global client stores, TanStack Query (via a thin
+  `usePolledRpc` wrapper) for server-state polling, Framer Motion for
+  animation, `@xterm/xterm` for the embedded terminal view.
+- **Bridge:** a long-lived NDJSON-RPC PowerShell sidecar
+  (`core/Invoke-DevKitRpc.ps1`) plus a shared Rust client crate
+  (`crates/devkit-host`) that both the Tauri app and the CLI depend on -
+  see "App Architecture" below for the full picture.
+- **Tool implementation:** PowerShell 5.1+ or PowerShell 7+ (pwsh
+  preferred) - unchanged from before the rewrite. `tools/` (the ~65 leaf
+  scripts across 12 categories, plus `tools/lib/` shared helpers) has no
+  external PowerShell dependencies and is not a "legacy" layer - it is
+  the thing both the CLI and the Control Center execute.
+- **Build tooling:** pnpm for the frontend (`app/`), Cargo for Rust (root
+  `Cargo.toml` workspace covers `app/src-tauri`, `cli/`,
+  `crates/devkit-host`). `tools/` itself has no package manager (no
+  `package.json`/`requirements.txt` at that layer) - it remains a
+  dependency-free PowerShell toolkit.
 
 ## Project Structure
 
 ```
 DevKit/
-├── Widget.bat              # MAIN ENTRY POINT: launches the companion widget
-│                           # windowlessly via gui/Start-Widget-Startup.vbs
-│                           # (delay arg 0). The widget IS the app's main face
-│                           # since 4.0 - installed shortcuts point here too.
-├── DevKit.bat              # Terminal menu launcher (secondary surface)
-├── DevKit.ps1              # Interactive menu - Main Menu + Projects menu are
-│                           # hand-written; the twelve tool-category submenus are
-│                           # generic, driven by each folder's tools/<cat>/_module.psd1
-├── DevKit-GUI.bat          # Control Center launcher (batch wrapper for
-│                           # gui/DevKit-GUI.ps1) - the full toolkit GUI,
-│                           # opened from the widget's DEVKIT title-bar button
-├── Install.ps1 / .bat      # Real stepped installer: per-user (no admin),
-│                           # copies to %LOCALAPPDATA%\Programs\NorthstarDevKit,
-│                           # registers Apps & Features (HKCU Uninstall key),
-│                           # widget-first shortcuts, PATH, optional
-│                           # start-with-Windows + opt-in integrations.
-│                           # Re-running over an install is the upgrade path.
-├── Uninstall.ps1           # Full uninstaller (the Apps & Features entry runs
-│                           # this): stops the widget, removes integrations/
-│                           # Run-key/PATH/shortcuts/ARP entry/install dir
-│                           # (guarded by the .northstar-installed marker so a
-│                           # source checkout can never be deleted) + app data.
-├── VERSION                 # Single source of truth for the version number
-├── CHANGELOG.md            # Release history
-├── README.md               # User documentation
-├── LICENSE                 # MIT License
-├── AGENTS.md               # This file
-├── .gitignore              # Git ignore rules
-├── desktop.ini             # Explorer folder icon (gui/Assets/logo.ico)
+├── AGENTS.md                 # This file
+├── CHANGELOG.md               # Release history - includes the retired WPF
+│                              # app's entries; that's normal, don't rewrite them
+├── CODE_OF_CONDUCT.md
+├── CONTRIBUTING.md
+├── LICENSE                    # MIT
+├── README.md                  # User documentation
+├── VERSION                    # Single source of truth for the version number
+├── Cargo.toml / Cargo.lock    # Rust workspace: app/src-tauri, cli, crates/devkit-host
+├── .gitignore
+├── desktop.ini                 # Explorer folder icon - NOTE: still points at
+│                              # gui\Assets\logo.ico, a path deleted along with
+│                              # the WPF app; stale, not yet repointed
 │
-├── gui/                    # Desktop apps (WPF front-ends - see below)
-│   ├── DevKit-GUI.ps1      # Entry point + code-behind: XAML load, nav/pages,
-│   │                       # dialogs, project registry UI, terminal launcher
-│   ├── DevKit-GUI.xaml     # Main window layout (loose XAML, parsed by XamlReader)
-│   ├── Theme.xaml          # Brand resource dictionary (palette/gradients/styles
-│   │                       # from the compass-rose logo); parsed into
-│   │                       # Application.Resources before any window XAML loads
-│   ├── DevKit-GuiCore.ps1  # Pure logic (Pester-tested): manifest catalog,
-│   │                       # search, argument resolution, terminal command builder
-│   ├── DevKit-Widget.ps1   # Companion widget: persistent metrics/MCP/status
-│   │                       # window + system-tray app (own process, survives
-│   │                       # DevKit closing; single-instance + summon event)
-│   ├── DevKit-Widget.xaml  # Widget window layout (same loose-XAML pattern)
-│   ├── DevKit-WidgetCore.ps1 # Widget pure logic (Pester-tested): system
-│   │                       # metrics sensors, node/port snapshot, Claude +
-│   │                       # Kimi MCP status collectors and parsers, git log
-│   │                       # parsing + graph lane layout, .env drift diff,
-│   │                       # the per-project notes/on-deck JSON stores, the
-│   │                       # Files flyout's enumeration/path helpers, and the
-│   │                       # file-name -> icon-key/color mapping
-│   ├── DevKit-WidgetIcons.ps1 # Built-in vector icon set (UI-side ONLY, never
-│   │                       # in the background runspaces): frozen cached
-│   │                       # DrawingImages for the Files flyout + git graph pills
-│   ├── Build-Assets.ps1    # Regenerates Assets/* from Assets/logo.png (dev-time
-│   │                       # only; outputs are committed)
-│   └── Assets/             # logo.png (master), logo-256.png, logo.ico
+├── .github/
+│   ├── workflows/ci.yml           # PSScriptAnalyzer + PS syntax check + Pester,
+│   │                              # on every push/PR to main - PowerShell only
+│   │                              # today, see "App Architecture" > CI below
+│   ├── workflows/release.yml      # vX.Y.Z tag -> builds+signs the Tauri app ->
+│   │                              # opens a DRAFT GitHub Release
+│   ├── ISSUE_TEMPLATE/
+│   └── PULL_REQUEST_TEMPLATE.md
 │
-├── tools/                  # ALL tool categories + the shared lib (4.0 layout -
-│                           # repo root stays clean; leaf scripts resolve lib as
-│                           # ..\lib relative to themselves, so they are unchanged)
-│   ├── lib/                    # Shared PowerShell helpers
-│   │   ├── DevKit-Common.ps1   # Common functions: path/package-manager helpers, the
-│   │   │                       # project-linking picker, the manifest menu dispatcher,
-│   │   │                       # settings, and the shared confirmation gate
-│   │   ├── DevKit-UI.ps1       # Animation/color engine: capability probe, gradient
-│   │   │                       # text, startup banner, spinner-wrapped scriptblocks
-│   │   ├── DevKit-McpCatalog.ps1  # Curated MCP server catalog + 'claude mcp add' builder
-│   │   ├── DevKit-McpList.ps1     # Parses 'claude mcp list' output, incl. user/project scope split
-│   │   └── DevKit-McpAddFlow.ps1  # Shared interactive add-from-catalog prompt flow
-│   │
-│   ├── ports/                  # Port management tools (+ _module.psd1)
-│   ├── node/                   # Node.js utilities (+ _module.psd1)
-│   ├── nextjs/                 # Next.js specific tools (+ _module.psd1)
-│   ├── vite/                   # Vite tools (+ _module.psd1)
-│   ├── git/                    # Git tools (+ _module.psd1)
-│   ├── docker/                 # Docker tools (+ _module.psd1)
-│   ├── system/                 # System environment tools (+ _module.psd1)
-│   ├── workflow/               # Developer workflow tools (+ _module.psd1)
-│   ├── diagnostics/            # Health check tools (+ _module.psd1)
-│   ├── wifi/                   # WiFi optimization tools (+ _module.psd1)
-│   ├── maintenance/            # Windows maintenance/tuning (+ _module.psd1)
-│   └── agents/                 # AI CLI & MCP management (+ _module.psd1)
-│                               # (per-script details: see "Key Features by Module")
+├── app/                        # The Tauri v2 desktop app
+│   ├── src/                        # React 19 + TypeScript frontend
+│   │   ├── windows/widget/             # WidgetApp.tsx + panels/ (Gauges,
+│   │   │                              # NodePorts, Git, GitHub, Mcp,
+│   │   │                              # NotesOnDeck, Files, QuickActions, Terminal)
+│   │   ├── windows/control-center/     # ControlCenterApp.tsx + ToolRunDialog.tsx
+│   │   ├── components/                 # Shared chrome: TitleBar, ProjectPicker,
+│   │   │   │                          # ConfirmDialog(Host), TerminalView, Gauge...
+│   │   │   └── primitives/                 # Button/Badge/Expander/GlassPanel -
+│   │   │                              # small style-only atoms, no app logic
+│   │   ├── hooks/                      # usePolledRpc, useVisibility,
+│   │   │                              # useConfirmDestructive, useUpdateCheck...
+│   │   ├── stores/                     # zustand: useSettingsStore,
+│   │   │                              # useProjectStore, useUpdaterStore
+│   │   └── lib/                        # ipc.ts (rpcCall + typed events), types.ts
+│   ├── src-tauri/                   # Rust backend
+│   │   ├── src/lib.rs                  # Builder setup: plugins, window/tray
+│   │   │                              # wiring, sidecar spawn, event forwarding
+│   │   ├── src/commands.rs             # rpc_call + window show/hide/toggle
+│   │   ├── src/terminal.rs             # ConPTY terminal sessions
+│   │   ├── src/tray.rs                 # System tray icon + menu
+│   │   ├── src/paths.rs                # Resolves pwsh + Invoke-DevKitRpc.ps1
+│   │   │                              # (dev checkout vs. bundled install)
+│   │   └── tauri.conf.json             # Two windows, NSIS bundle, updater config
+│   └── package.json / pnpm-lock.yaml / vite.config.ts / tsconfig*.json
+│
+├── cli/                        # `devkit` - the ratatui terminal CLI (no
+│   │                          # installer yet - source-built only)
+│   └── src/                        # main.rs, menu.rs, catalog.rs, sidecar_paths.rs
+│
+├── core/                       # The RPC sidecar + the pure-logic files it
+│   │                          # (and the CLI, via the sidecar) load
+│   ├── Invoke-DevKitRpc.ps1        # The sidecar process entry point
+│   ├── RpcMethods.ps1              # The ~40-method dispatch table
+│   ├── RpcProtocol.ps1             # NDJSON line-encoding helpers
+│   ├── DevKit.Core.psm1            # Dot-sources tools/lib/* + the two files
+│   │                              # below into one flat module
+│   ├── DevKit-WidgetCore.ps1       # Pure logic, moved here from gui/: metrics,
+│   │                              # git overview, notes/on-deck, files, MCP status
+│   ├── DevKit-GuiCore.ps1          # Pure logic, moved here from gui/: catalog
+│   │                              # loading, category grouping, arg resolution
+│   ├── Export-Catalog.ps1          # Dev-time: (re)writes core/catalog.json -
+│   │                              # the live app never reads that file itself
+│   └── catalog.json                # Committed static snapshot (offline
+│                                  # inspection / type generation only)
+│
+├── crates/devkit-host/         # Rust NDJSON-RPC client crate - owns the
+│   │                          # sidecar process, shared by app/ and cli/
+│   └── src/                        # host.rs, protocol.rs, lib.rs
+│
+├── tools/                      # ALL tool categories + the shared lib -
+│   │                          # UNCHANGED, still 100% PowerShell, still the
+│   │                          # real implementation (both the CLI and the
+│   │                          # Control Center run these same scripts - see
+│   │                          # "App Architecture" below)
+│   ├── lib/                        # DevKit-Common.ps1, DevKit-UI.ps1,
+│   │                              # DevKit-McpCatalog.ps1, DevKit-McpList.ps1,
+│   │                              # DevKit-McpAddFlow.ps1
+│   ├── ports/ node/ nextjs/ vite/ git/ docker/ system/ workflow/
+│   │   diagnostics/ wifi/ maintenance/ agents/   # each: script+.bat pairs
+│   │                              # plus one _module.psd1 manifest
+│   │                              # (per-category details: see "Key Features
+│   │                              # by Module")
 │
 ├── tests/
-│   └── Unit/               # Pester tests for pure-logic parsers/converters
+│   └── Unit/                   # Pester tests - unchanged coverage; two files'
+│                              # dot-source paths were updated (gui\ -> core\)
+│                              # when WidgetCore/GuiCore moved
 │
-└── dev/                    # Maintainer-only tooling (excluded from installs
-    │                       # and USB builds)
-    ├── Build-UsbPortable.ps1 / .bat  # Mirrors the repo into USB/ (gitignored,
-    │                       # regenerated on demand) with dev-only clutter
-    │                       # stripped (.git/.kimi/.github/tests/dev/editor
-    │                       # folders) - the result is what you copy to a flash
-    │                       # drive and run Install.ps1 from on another machine.
-    └── RELEASING.md        # Maintainer release checklist
+├── dev/                         # Maintainer-only tooling
+│   └── RELEASING.md                # Version-bump + local-test + tag + publish
+│                                  # checklist for cutting a Tauri release. The
+│                                  # portable-USB-build script that used to live
+│                                  # here (mirroring a WPF install to USB/) was
+│                                  # retired with the WPF app; the /USB/ entry
+│                                  # still in .gitignore is a leftover of that.
+│
+└── target/, app/node_modules/, app/dist/   # Rust/Node build output - gitignored
 ```
 
 Linked projects (`projects.json`) and settings (`settings.json`) live outside
-the repo at `%LOCALAPPDATA%\NorthstarDevKit\`, not in any of the folders above.
+the repo at `%LOCALAPPDATA%\NorthstarDevKit\`, same as before the rewrite.
 
 ## Code Style Guidelines
 
-### PowerShell Script Structure
+### PowerShell (`tools/`, `core/`)
 
 All PowerShell scripts follow this standardized structure:
 
@@ -152,7 +193,7 @@ param(
 # Script body with Write-Host for colored output
 ```
 
-### Naming Conventions
+#### Naming Conventions
 
 - **Scripts:** PascalCase with hyphens (e.g., `Kill-Port.ps1`, `WiFi-Optimize.ps1`)
 - **Functions:** PascalCase with approved PowerShell verbs (e.g., `Write-Header`, `Invoke-PortScan`)
@@ -160,7 +201,7 @@ param(
 - **Parameters:** PascalCase with sensible defaults
 - **Avoid reserved words:** Do not use `$Host` as a parameter name (use `$ExposeHost` instead)
 
-### Output Styling
+#### Output Styling
 
 Use consistent color coding for output:
 
@@ -180,7 +221,7 @@ actually halts the script (use Red + "ERROR:", even if it reads like a
 warning in plain English - e.g. "a rebase is already in progress" is an
 error because the script exits, not a warning the user can proceed past).
 
-### Error Handling
+#### Error Handling
 
 Always use try-catch blocks for operations that may fail:
 
@@ -193,6 +234,74 @@ try {
     exit 1
 }
 ```
+
+### TypeScript / React (`app/src`)
+
+- Two window entry points (`windows/widget/`, `windows/control-center/`),
+  each a single top-level `*App.tsx` composing self-contained panel/section
+  components. `GaugesPanel.tsx`'s own header comment calls it the
+  "reference panel implementation" - follow its shape for a new widget
+  panel: self-contained, no required props, owns its own polling via
+  `usePolledRpc`, owns its own loading/error/n-a states. Each component
+  ships its own plain `.css` file (BEM-ish class names like
+  `gauges-panel__row`, not CSS modules or a utility framework).
+- `components/primitives/` holds small style-only atoms (`Button`,
+  `Badge`, `Expander`, `GlassPanel`) with no app logic - reach for one of
+  these before hand-rolling a button/badge/panel shell.
+- All server-derived state goes through `hooks/usePolledRpc.ts` (a thin
+  TanStack Query `useQuery` wrapper) rather than ad hoc
+  `useEffect`+`fetch`: it polls one RPC method on an interval AND stops
+  polling while the window is hidden (`useVisibility.ts`, driven by the
+  `devkit://visibility` event `commands.rs` emits), so a tray-hidden
+  widget doesn't keep hitting the sidecar for nothing. Pass its `enabled`
+  flag explicitly for "nothing to ask about yet" (e.g. no project
+  selected) rather than inferring it from `params === undefined` - some
+  panels legitimately poll param-less methods.
+- Global client state (settings, active project, updater status) lives in
+  `stores/` as small zustand stores, not React context - see
+  `useSettingsStore.ts` for the pattern: state plus async actions that
+  call `rpcCall` and set state from the result or a caught
+  `RpcClientError`.
+- Every RPC call goes through `lib/ipc.ts`'s typed `rpcCall<T>(method,
+  params)` - never call the raw `invoke("rpc_call", ...)` Tauri API
+  directly from a component. Streamed events (`tool.run` output) go
+  through `onDevKitEvent`/`onToolRun`, keyed by `runId`.
+- Destructive actions (kill a process, run a "caution" tool, clear system
+  junk) go through `useConfirmDestructive()`, which mirrors
+  `Confirm-DevKitDestructiveAction`'s `preferences.confirmDestructive`
+  gate on the PowerShell side - see Security Considerations below.
+- Framer Motion for animation, gated by `<MotionConfig reducedMotion=...>`
+  derived from both the OS `prefers-reduced-motion` media query and the
+  in-app `preferences.enableAnimations` setting
+  (`useSyncAnimationsAttribute.ts`) - a new animated element should
+  respect both, not just the OS one.
+
+### Rust (`app/src-tauri`, `cli/`, `crates/devkit-host`)
+
+- Small, single-purpose modules with a `//!` doc comment at the top
+  explaining what the module owns and, where it's not obvious, why it's
+  separate from its neighbors (see `commands.rs`, `paths.rs`,
+  `terminal.rs`, `tray.rs`, `host.rs` for the pattern) - follow it for any
+  new module rather than growing an existing file past its stated scope.
+- `app/src-tauri/src/commands.rs` is deliberately thin: `rpc_call` is the
+  one generic passthrough to the sidecar. **Do not add a new
+  `#[tauri::command]` for a new panel/feature** - add a case to
+  `core/RpcMethods.ps1` and call it from the frontend through `rpcCall`
+  instead. New Rust commands are for things that genuinely are not
+  PowerShell's job: window/tray management, the ConPTY terminal, other
+  OS-level integration.
+- Error types are `thiserror` enums (see `HostError` in `host.rs`); Tauri
+  commands return `Result<T, String>` (the IPC boundary needs a
+  `Serialize` error type, so map at the command boundary, not deeper in
+  the call stack).
+- `crates/devkit-host` is the one shared RPC client - both
+  `app/src-tauri` and `cli/` depend on it (`devkit-host = { path = ... }`
+  in their `Cargo.toml`s). Keep sidecar-process concerns (spawn, respawn,
+  NDJSON framing) there rather than duplicating them in either consumer.
+- `cargo clippy --workspace --all-targets` and `cargo test --workspace`
+  are expected to pass clean (see Testing below); `devkit-host` carries
+  its own unit tests over the protocol/framing layer
+  (`crates/devkit-host/Cargo.toml`'s `[dev-dependencies]`).
 
 ## Key Features by Module
 
@@ -296,376 +405,264 @@ try {
   `Scan-McpServers.ps1` cross-references what's already configured (per scope) against the
   catalog and offers to add anything missing
 
-### Desktop GUI (`gui/`)
-- WPF front-end (`DevKit-GUI.bat` → `gui/DevKit-GUI.ps1`) themed on the company
-  compass-rose logo (gunmetal/silver UI, sapphire + ember accents), running on
-  both pwsh 7 and Windows PowerShell 5.1 with no external dependencies
-- **Purely additive architecture:** no leaf script, manifest, or the TUI is
-  modified. The GUI reuses `Get-DevKitModule` to load the same twelve
-  `_module.psd1` manifests and re-implements `Invoke-DevKitTool`'s argument
-  resolution with dialogs (`gui/DevKit-GuiCore.ps1`'s
-  `ConvertTo-DevKitToolArguments` mirrors its semantics exactly - project via
-  `ProjectArgName`/`Path`, YesNo-true-only, Optional, StaticArgs last). Adding
-  a tool to a manifest makes it appear in the GUI with zero GUI changes.
-- Tools **run in a real terminal window** (Windows Terminal via `wt.exe` when
-  installed, classic conhost otherwise; pwsh preferred, powershell fallback)
-  launched by `Get-DevKitTerminalCommand` with `-NoExit` so quick tools' output
-  stays readable. This is deliberate: the scripts' interactive features
-  (arrow-key menus via `[Console]::ReadKey`, the runspace spinner, Console API
-  probe) bypass PowerShell's host interface and would degrade under an embedded
-  PSHost. Never "embed a console" into the GUI at the cost of those features.
-- XAML is loose (no x:Class/compiled resources): a `Windows.Application` is
-  created FIRST and `Theme.xaml` is parsed into `Application.Resources`
-  before the window XAML is loaded - NOT string-merged into the window.
-  Application-scope is what lets the keyless styles (ScrollBar, ToolTip,
-  CheckBox) reach template-generated elements (every ScrollViewer's
-  scrollbars, ComboBox popups) and dialog windows; merging into
-  Window.Resources left them in stock light Windows chrome. All dynamic
-  content (nav, cards, dialogs) is built in code against `x:Name` handles +
-  theme style keys. WPF gotchas already handled:
-  STA self-relaunch, `GetNewClosure()` on every event handler that captures
-  locals, AllowsTransparency maximize/work-area fix, logo loaded from absolute
-  URIs. Keep markup compatible with .NET Framework 4.x WPF (PS 5.1) - nothing
-  newer-only.
-- `gui/DevKit-GuiCore.ps1` is UI-free and Pester-covered
-  (`tests/Unit/GuiCore.Tests.ps1`); keep any new pure logic there so it stays
-  testable.
+### App Architecture (`core/`, `crates/devkit-host`, `app/`, `cli/`)
 
-### Companion Widget (`gui/DevKit-Widget.ps1`)
-- **Since 4.0 the widget is the app's MAIN FACE.** Root `Widget.bat` and every
-  installed shortcut open it (windowlessly, via `gui/Start-Widget-Startup.vbs`);
-  the full toolkit GUI ("Control Center", `DevKit-GUI.bat`) opens from the
-  widget's title-bar DEVKIT button, the Quick Actions "Open DevKit Control
-  Center" button, or the tray menu. It is also launchable (detached, own
-  process) from the GUI's gauge button or `gui/DevKit-Widget.ps1` directly -
-  it keeps running after DevKit closes. Single-instance via a named mutex; a
-  second launch signals a named event that makes the running instance surface
-  its window, so the app icon always brings it up even where the shell hides
-  new tray icons.
-- **Performance architecture (4.0 lightweight pass - keep these invariants):**
-  the three background runspaces dot-source `tools\lib` + `DevKit-WidgetCore.ps1`
-  ONCE at creation via `New-DevKitWidgetRunspace` (jobs are bare collector
-  calls), which also keeps WidgetCore's `$script:` sensor caches alive between
-  jobs - never go back to per-job dot-sourcing (it re-parses ~150KB every
-  cycle AND wipes the caches). Gauge arcs are assigned from a frozen cached
-  0-100% geometry table (`Get-DevKitGaugeGeometry`) - never allocate geometry
-  per frame, and there is deliberately no easing/animation timer. The Files/
-  git-graph icons keep the same discipline: `Get-DevKitIconDrawing`
-  (DevKit-WidgetIcons.ps1) builds each glyph ONCE per key, freezes the whole
-  DrawingImage, and hands the shared instance to every tree row and pill -
-  per-use cost is one lightweight Image element, never new geometry. Gauge arcs
-  carry NO DropShadowEffect, and the ToolCard hover is an instant brush swap
-  with NO storyboard/transform animation (animating transforms over
-  effect-bearing children inside these AllowsTransparency windows forced a
-  full-window recomposite per frame - that was the "hover the gauges, CPU/GPU
-  spikes" bug). FastTimer/SlowTimer STOP when the window hides to the tray
-  (`Hide-DevKitWidget`) and resume + refresh on `Show-DevKitWidget` - a hidden
-  widget must cost ~nothing (only the trivial 750ms SummonTimer wait keeps
-  running, since it's the wake-up path). The node table's rebuild signature
-  uses bucketed values (25MB memory / 5-minute age) so a rebuild only happens
-  on real structural change.
-- Shows CPU/memory/GPU load with best-effort temperatures (ACPI thermal-zone
-  counter, MSAcpi WMI, driver-bundled nvidia-smi - every sensor degrades to
-  "n/a", never a fake number), a reboot-pending / long-uptime hint line
-  (documented registry sentinels + Win32_OperatingSystem.LastBootUpTime). The
-  three gauges are CLICKABLE (hand cursor, "Click to manage") - each slides
-  out a themed management PANEL (the shared `ProcFlyout`, re-titled per kind;
-  `Show-DevKitProcessDialog -Kind Cpu|Mem|Gpu` is now a toggle) that joins
-  the single-flyout carousel: CPU lists the top processes by usage with SAFE
-  TO CLOSE / CAUTION / LEAVE ALONE badges (`Get-DevKitProcessClassification`
-  in WidgetCore) and per-row kills (`Stop-DevKitProcessById` refuses
-  System-classified pids server-side too), MEM adds the used/total summary
-  and a "Free Memory" button (`Invoke-DevKitFreeMemory` - psapi
-  EmptyWorkingSet across non-System processes, reports freed MB), GPU shows
-  the adapter summary (nvidia-smi name/util/temp/VRAM when present) plus
-  per-process GPU usage parsed from the '\GPU Engine(*)' counters
-  (`ConvertFrom-DevKitGpuEngineInstance`). A proc panel refreshes every 3s
-  while open only (timer created per open, stopped on close), via the
-  Start-DevKitWorkJob kinds ProcCpu/ProcMem/ProcGpu/FreeMem/ProcKill, and
-  Hide-DevKitWidget closes any open panel since its result polls ride the
-  FastTimer.
-  Below the gauges: a System Junk radial dial (reclaimable temp + Windows
-  Update cache + Recycle Bin bytes, 100% arc = 10 GB, re-scanned in the
-  background every 30 minutes) with a FULLY in-widget clean behind a styled
-  Yes/No confirm - user temp + Recycle Bin always, Windows\Temp and the WU
-  download cache when elevated (per-category freed breakdown in the status
-  line, ember hint naming the admin-only areas it had to skip; only
-  DISM/WinSxS and service stop/start remain exclusive to the terminal
-  Clear-DiskJunk tool) - and a "Details..." dialog showing the per-category
-  scan breakdown. NO cleanup path opens a terminal or asks for typed input
-  anymore. A Disk Free dial next
-  to it (`System.IO.DriveInfo` on the system drive; arc = used space, number
-  = free, ember under 10% free), a columnar node-process table (NAME / PID /
-  MEM / AGE / PORTS, aligned via a shared pixel-width dictionary that the
-  header's always-visible 2px drag bars resize (sapphire on hover, session-
-  only widths); the list caps at 6 rows with a clickable "+N more"/"Show
-  less" footer that re-renders on click from the last snapshot; each port is
-  a click-to-open `http://localhost:<port>` link, each row a confirmed
-  per-pid kill button, plus other processes on the common dev ports and a
-  warning
-  when common dev ports sit inside Hyper-V/winnat-reserved ranges - parsed
-  from `netsh show excludedportrange` via lib's
-  `ConvertFrom-DevKitExcludedPortRanges`, cached 30 minutes), two rows of
-  quick actions that launch real DevKit tools in terminal windows (cache/port/
-  node/doctor + Editor/Explorer/Terminal/Run Script... for the active
-  project), and a project selector bound to the same Active Project the
-  GUI/TUI share (projects.json is watched for external changes) whose
-  permanent last row "+ Add new project..." links a folder via a
-  FolderBrowserDialog. Under the selector an ambient git badge shows the
-  active project's branch + dirty/ahead/behind/stash counts (refreshed every
-  2 minutes via the work runspace), and an ember hint appears when the
-  project's `.env` drifts from its template (key-name diff only - values are
-  secrets; "Fix..." opens the real Copy-EnvTemplate tool).
-- The window is ALWAYS work-area full height, docked or free - the mode only
-  sets horizontal placement (Left/Right/Free, persisted as
-  `preferences.widgetDockMode`). Invisible 6px grips on the content edges
-  drag-resize the width (clamped 340-700, persisted as
-  `preferences.widgetWidth`); a title-bar drag always moves the window, and
-  dropping it within 24 DIPs of a screen edge docks there while dropping a
-  docked widget anywhere else undocks it to Free. The Settings expander sits
-  in its own bottom grid row and expands upward over the content. Position
-  math uses WPF DIP work-area units, never WinForms pixels.
-- Side panels (4.0 panel architecture): the root grid is SEVEN columns -
-  TermWest | TabWest | FlyoutWest | Main(FIXED px) | FlyoutEast | TabEast |
-  TermEast. The vertical side-tab strip is SECTION-ANCHORED, not a centered
-  stack: the tabs sit on a full-height Canvas (SideTabCanvas) as two groups -
-  FILES+GIT, and NOTES+ON DECK (the small separators ride inside their
-  groups, the tall one at the NOTES+ON DECK group's top) - plus the TERMINAL
-  tab below them, and Update-DevKitSideTabLayout places each group ACROSS
-  FROM its body section in the UN-SCROLLED layout (FILES/GIT centered on the
-  CPU/MEM/GPU gauges card, NOTES/ON DECK on the SYSTEM JUNK/drives card,
-  TERMINAL on QUICK ACTIONS). Positions are FIXED while the body scrolls:
-  Get-DevKitAnchorCenterY reads each anchor with ContentScroll's live
-  VerticalOffset added back (scroll-offset-zero reading), there is NO
-  ScrollChanged hook and no timer, and recomputes happen only on structural
-  changes (window SizeChanged, BodyContent LayoutUpdated, ContentRendered).
-  Resolve-DevKitSideTabTops clamps: fixed stack order, a minimum gap between
-  groups (never overlap), never above/below the strip, and on very short
-  windows the gaps give first, then the stack compresses - never off-screen.
-  The math is Y-only, so both dock sides behave identically. A full-height
-  2px brand-gradient hairline (SideTabDivider, BrushAccentGradientVertical at
-  50% opacity) marks the strip's widget-facing edge; its alignment flips
-  with the dock side along with the strip (Set-DevKitWidgetDock), and the
-  strip column is 26px (24 tabs + 2 divider) - WidgetChromeWidth accounts
-  for it. The carousel rule:
-  at most one of GIT/NOTES/FILES/ON DECK/proc-panel is open at a time
-  (opening one instant-closes the others). The TERMINAL panel is the ONE
-  exception - fully independent, always outermost (its own dedicated
-  columns), so e.g. GIT and the terminal can be open side by side.
-  Geometry invariant: every Set-DevKit*Flyout sets its open flag BEFORE
-  computing targets and derives window width/left from the flags
-  (`Get-DevKitWidgetPanelExtra`), never from live animated values - that is
-  what lets an independent terminal slide and a carousel slide overlap and
-  still converge; do not regress to reading live geometry. Panel widths
-  persist as `preferences.filesFlyoutWidth` / `onDeckFlyoutWidth` /
-  `gitFlyoutWidth` / `procFlyoutWidth` / `terminalFlyoutWidth` via the
-  grip-drag machinery (Kinds Files/OnDeck/Git/Proc/Terminal).
-- The TERMINAL side tab (cyan `TerminalTabButtonWest/East` styles in
-  Theme.xaml, anchored across from the QUICK ACTIONS section below the
-  carousel groups - its panel is the independent one) hosts a REAL terminal
-  inside the panel (it replaced the old
-  embedded runspace REPL): opening the tab launches Windows Terminal
-  (`wt.exe -w new`, with the registered "Northstar DevKit" fragment profile
-  when present, else the default profile) when available, else a classic
-  pwsh/powershell console window (pwsh preferred), starting in the active
-  project's folder (DevKit root + dim note when none). The launched window's
-  chrome is stripped and the WIDGET BECOMES ITS OWNER (`GWL_HWNDPARENT`) -
-  deliberately NOT a SetParent'd HwndHost child, because a child HWND can
-  never render inside the widget's AllowsTransparency layered window - and a
-  40ms DispatcherTimer (TermSyncTimer, running ONLY while a session is
-  hosted and the widget is visible) glues it over the panel's
-  TermHostSurface via live PointToScreen rects, so slides/dock flips/grip
-  resizes/drags all track; interactive CLIs (kimi, claude) work because it
-  IS a normal terminal with real Win32 focus. The hosted window's
-  WS_EX_TOPMOST is kept identical to the widget's pin state (set on attach,
-  re-asserted every sync tick): an owned window that is not itself topmost
-  sinks BELOW a topmost owner - that was the "terminal invisible while
-  pinned" bug. Window discovery is a before/after EnumWindows diff on BOTH
-  CASCADIA and ConsoleWindowClass - never Process.MainWindowHandle, which
-  stays 0 when the machine's default-terminal delegation routes a bare shell
-  launch into Windows Terminal (the conhost fallback then hosts that WT
-  window and treats it as wt-kind). Lifecycle: the session belongs
-  to the panel - closing the panel closes it (WM_CLOSE, then a one-shot
-  kill-timer backstop: process-tree kill for the conhost shell; for WT only
-  after re-verifying owner+pid and only when its PID owns no other window),
-  a project switch while open RESTARTS
-  the session in the new root (Set-DevKitTermLocation), widget hide only
-  hides the window (the session survives), widget exit closes it. The sync
-  timer is also the watchdog (a session whose window vanished = "terminal
-  session ended" note + Restart button) and un-minimizes the window (WT's
-  own title-bar buttons survive the chrome strip). Honest limitations
-  (documented in the section comment): WT keeps its own tab strip; a
-  just-launched window can flash at its default position for ~0.2-1s before
-  the HWND poll glues it; a hard-KILLED widget (not tray Exit) can leave the
-  hosted window behind unowned; when neither wt.exe nor a PowerShell
-  executable exists (or no window appears within 15s) the panel shows an
-  honest "could not host a terminal here" note instead of a fake console.
-- The GIT side tab opens the GitHub flyout for the active project
-  (greyed out when none is selected): a 300px panel that grows the window
-  INTO the screen (a docked-right window shifts left first, restored on
-  close) showing branch + ahead/behind, a DRAWN commit graph (not text:
-  `Get-DevKitRepoOverview` parses `git log --all --topo-order -n 40` with
-  record/unit separators, `ConvertTo-DevKitGitGraphLayout` assigns lanes -
-  the first-parent trunk stays a straight vertical, side branches bend into
-  it - and `Render-DevKitGitGraph` draws gradient S-curve links, bright lane
-  nodes with a HEAD ring, and branch/tag pills on a Canvas - each pill now
-  leading with a small glyph from the built-in icon set: git-branch / git-tag
-  / git-head (frozen shared DrawingImages, so pills add no per-render geometry
-  allocations; lane/layout math is untouched), fetch/pull/push
-  buttons (last output line lands in a status line, ember on failure),
-  open-on-GitHub/Actions (origin URL run through Open-Repo's
-  `ConvertTo-DevKitBrowsableUrl`, never the raw value), and a Git Cleanup
-  tool shortcut. The content area is a Commits | PRs | Issues tab strip
-  (`Set-DevKitGitActiveTab`, lazy `gh`-backed fetches with per-tab staleness
-  tracking), and every section expands/collapses with the same header-click
-  + chevron treatment (the shared Expander template in Theme.xaml): the
-  Commits tab's UNCOMMITTED CHANGES and COMMIT GRAPH expanders carry live
-  count badges and are EXPANDED by default on every flyout open (the whole
-  tab scrolls; the graph's own ScrollViewer is horizontal-only). The default-
-  expansion is applied in code in `Set-DevKitGitFlyout`'s open path, NOT as
-  markup `IsExpanded="True"`: the theme's Expander template reveals content
-  via the Expanded EVENT's storyboard (ExpandSite starts Collapsed/ScaleY 0),
-  so markup-initial expansion never fires the event and the content stays
-  hidden forever. Clicking a commit row on the graph toggles an inline
-  details card under that row (full hash, author/date, FULL message, and a
-  `git show --numstat --shortstat` files summary): per-row transparent hit
-  rects on the canvas call `Show-DevKitCommitDetails`, which fetches via a
-  `CommitDetails` work-runspace job (`Get-DevKitCommitDetails` +
-  `ConvertFrom-DevKitGitShow` in WidgetCore, Pester-covered), re-rendering
-  the canvas with lower rows shifted down by the card's measured height.
-  Selection survives graph refreshes (re-injected on every render while the
-  hash is in the 40-commit window) and resets on project switch. Each open
-  PR/issue is a
-  collapsed-by-default accordion (`Add-DevKitPrRow`/`Add-DevKitIssueAccordion`)
-  whose body carries the meta line + an Open-on-GitHub button. All git and
-  junk work shares a third MTA runspace with a
-  busy flag + 30s timeout; a job declined while busy re-fires on completion
-  (project switches never leave stale graphs), and a result collected for a
-  since-switched project is discarded rather than rendered. The collectors
-  (`Get-DevKitSystemJunk`, `Clear-DevKitSystemJunk`, `Get-DevKitRepoOverview`,
-  `Invoke-DevKitGitAction`) live in `DevKit-WidgetCore.ps1` and degrade to
-  honest notes ("Not a git repository", "git not found"), never fake data.
-- A FILES side tab (beside GIT/NOTES/ON DECK in the same SideTabStack) opens
-  the Files flyout - a mini VS Code-style explorer of the active project's
-  root folder (greyed out when no project is selected). The dark TreeView
-  (FilesTreeView/FilesTreeViewItem + FilesContextMenu styles in Theme.xaml)
-  lazy-loads one directory level per expansion via `Get-DevKitDirChildren`
-  (folders first, then files, case-insensitive alpha; a dummy child keeps the
-  closed expander arrow, enumeration errors degrade to a greyed "access
-  denied" node, nothing ever auto-recurses), caches loaded children, and
-  restores expanded folders across a rebuild (the expansion set is live
-  root-relative paths maintained by the Expanded/Collapsed handlers). EVERY
-  open of the panel re-enumerates from disk through that same rebuild (the
-  Refresh button's exact path), so a reopened panel never shows a stale tree
-  cached from before it was closed.
-  Every row leads with a type icon from the built-in icon set
-  (`Get-DevKitFileIconInfo`'s pure name -> key/color mapping in
-  DevKit-WidgetCore.ps1 -> `Get-DevKitIconDrawing`'s frozen cached
-  DrawingImage in DevKit-WidgetIcons.ps1 - 40+ Material-style glyphs:
-  folder/folder-open, per-language pages in Material-palette colors, and
-  drawn specials for image/archive/sql/config/env/docker/git/lock/bat/exe/
-  txt/html/xml/ps1/vue). The icon Image is always header.Children[0]; the
-  Expanded/Collapsed handlers swap its Source between the frozen
-  'folder'/'folder-open' instances - a pointer swap, zero allocation.
-  Double-click toggles folders / shell-opens files; the toolbar offers New
-  File / New Folder / Refresh / Collapse All (acting on the selection, or
-  the root), and every node has a right-click menu (Open, Open in Explorer
-  via `explorer.exe /select`, Open in Editor - folders go through the real
-  Code-Here tool, files launch code/cursor directly, Copy/Cut/Paste, New
-  File/Folder Here, Rename..., Delete, Copy Full/Relative Path) with a
-  project-level menu on the empty background. Cut/Copy/Paste are an
-  INTERNAL clipboard (no Windows file-clipboard interop): collisions get
-  Explorer's " - Copy" suffix via `Get-DevKitCopyName`, cut dims the item
-  until pasted or Esc-cancelled, and a folder can never be pasted into
-  itself. Safety: every mutating op re-validates containment with
-  `Test-DevKitPathWithinRoot` (full-path normalized, so `..` escapes fail),
-  names are validated in-dialog by `Get-DevKitSafeChildName`, Delete goes to
-  the RECYCLE BIN (Microsoft.VisualBasic FileIO, SendToRecycleBin) behind
-  the styled Yes/No confirm, and failures land in the flyout's status line
-  (ember on error), never a crash. The panel shares the Git/Notes flyout
-  machinery wholesale - same slide animation and anim token, same dock-side
-  column/style/grip flips, same grip-drag resize (Kind 'Files', width
-  persisted as `preferences.filesFlyoutWidth`). Only one CAROUSEL flyout is
-  open at a time (the TERMINAL panel is the independent exception). The pure
-  logic (`Get-DevKitDirChildren`,
-  `Test-DevKitPathWithinRoot`, `Get-DevKitSafeChildName`,
-  `Get-DevKitCopyName`, `Get-DevKitRelativePath`, `Get-DevKitFileIconInfo`)
-  lives in `DevKit-WidgetCore.ps1` with Pester coverage; all WPF tree building stays
-  in `DevKit-Widget.ps1`.
-- The NOTES side tab opens the per-project sticky-notes flyout (notes.json
-  in `%LOCALAPPDATA%\NorthstarDevKit`, keyed by a canonical project path).
-  Notes render as COLLAPSED title cards by default - one line, ellipsis,
-  the title derived from the body's first line by `Get-DevKitNoteTitle`,
-  with the same two-step delete the editor has. Clicking a card expands it
-  into the full editor (borderless multiline TextBox with the debounced
-  autosave); saving via the editor's Done button or clicking/focusing away
-  (a LostFocus check plus a flyout-level PreviewMouseLeftButtonDown,
-  guarded by the `Test-DevKitWidgetWithin` visual-tree ancestry walk so
-  clicking the card's own buttons never counts as "away") collapses it
-  back, flushing pending edits first. Only one note is expanded at a time.
-  The notes.json schema is unchanged - no title field on disk, nothing
-  migrates, older widget builds read the same file.
-- A fourth ON DECK side tab (violet accent, OnDeckTabButtonWest/East in
-  Theme.xaml) opens a per-project to-do list (ondeck.json beside
-  notes.json, same canonical project keying, same corrupt/missing-file =
-  start-empty posture, saved on every mutation). An add-row (Add button or
-  Enter) lands new items at the top of NOT STARTED; three fixed sections
-  (NOT STARTED / IN PROGRESS / DONE) show live counts and a subtle "No
-  items" hint when empty. Each row has a status cycle button (glyph colored
-  by state) and a right-click status menu in the FilesContextMenu styling
-  (current status disabled) - the stored list is always kept section-
-  grouped by `Group-DevKitOnDeckItems`, so a status change moves the item
-  to its new section on the re-render with no manual reordering. Done rows
-  are dimmed + strikethrough, and the DONE header has a "Clear Done"
-  button. Delete is a single deliberate click on the row's small x (or the
-  context menu), never a plain row click. The panel reuses the same flyout
-  machinery (Kind 'OnDeck', width persisted as
-  `preferences.onDeckFlyoutWidth`) and reloads on project switch like the
-  other flyouts. The pure logic (`Get/Save-DevKitProjectOnDeck`,
-  `Add-DevKitOnDeckItem`, `Remove-DevKitOnDeckItem`,
-  `Set-DevKitOnDeckItemStatus`, `Clear-DevKitOnDeckDone`,
-  `Group-DevKitOnDeckItems`) lives in `DevKit-WidgetCore.ps1` with Pester
-  coverage in `tests/Unit/WidgetCore.Tests.ps1`.
-- Claude Code MCP status uses the documented `claude mcp list` health output
-  via `lib/DevKit-McpList.ps1` (never Claude's internal JSON); Kimi Code has
-  no headless status command, so its badges come from the documented
-  `~/.kimi-code/mcp.json` / `<project>/.kimi-code/mcp.json` files and say
-  CONFIGURED/DISABLED/REQUIRES AUTH (missing bearer-token env var) rather
-  than claiming live connection state. Both agents nest under one AGENTS
-  expander, and each panel's "Manage..." dialog summarizes the last report
-  and offers Connect / Re-check (the honest "connect": Claude's real
-  `claude mcp list` health check, Kimi's config re-read), Sign In /
-  Authenticate (launches the CLI in a terminal window), Scan & Fix MCP Gaps
-  and Add Server from Catalog (the real agents/ tools), Claude-only
-  Disconnect a Server, and Kimi-only Open Config File. MCP checks run in a
-  background runspace with a 45s timeout so the widget never freezes.
-- Tray: WinForms `NotifyIcon` + dark-rendered context menu (Show/Hide, Open
-  DevKit Control Center, reversible "Start with Windows" HKCU Run-key toggle,
-  Exit), balloon
-  hints, and a `TaskbarCreated` broadcast hook that re-registers the icon
-  after an Explorer restart. The Run entry points at
-  `gui/Start-Widget-Startup.vbs`, which launches non-blocking and confirms
-  success via a pid-file handshake (the widget writes
-  `%LOCALAPPDATA%\NorthstarDevKit\widget.pid` once its window is up),
-  retrying up to 3 times with a backoff instead of waiting on a process that
-  may be stuck behind a loader-error dialog; the widget self-heals the Run
-  value at startup when it points at a moved/deleted .vbs (registration
-  failures surface via balloon tip), and Install.ps1 repairs it after a
-  reinstall. Closing the widget window only hides it; Exit
-  lives in the tray menu.
-- `gui/DevKit-WidgetCore.ps1` is the UI-free, Pester-covered core
-  (`tests/Unit/WidgetCore.Tests.ps1`) - same separation as the GUI core.
-- WPF/WinForms pitfalls already handled here: STA relaunch, `GetNewClosure()`,
-  WPF DIP units for positioning (NOT WinForms pixel units - breaks on
-  DPI-scaled displays), and off-screen-aware UI behavior.
+This replaces the old WPF Desktop GUI / Companion Widget sections - read
+this before touching anything UI-related. The short version: a
+long-lived PowerShell sidecar does all the real work behind one generic
+Rust command; the Tauri app and the ratatui CLI are both thin clients of
+the same RPC surface, both reading the same manifest-driven catalog.
+
+#### The RPC sidecar (`core/Invoke-DevKitRpc.ps1`)
+
+A single long-lived `pwsh` process, spawned once by the Rust host and
+kept alive for the app's/CLI's lifetime (a cold `pwsh -File` costs
+300-800ms - too slow for a per-call model). It speaks one JSON object per
+line on stdin/stdout (NDJSON) - see `crates/devkit-host/src/protocol.rs`
+for the matching Rust-side types.
+
+**Threading model** - worth reading before changing this file, since the
+reason isn't obvious from the code alone: `[Console]::Out` is not
+thread-safe against concurrent writers in PowerShell, and one
+interleaved/corrupted line would break the framing for every request
+after it. Rather than rely on convention, the file makes "only one thing
+ever writes a line" true by construction:
+
+- **One writer runspace** owns `[Console]::Out` exclusively. It drains a
+  single `BlockingCollection<string>` queue and is the only code in the
+  whole process calling `WriteLine`/`Flush`.
+- **Three lane runspaces** (`metrics`, `slow`, `work`), each one
+  persistent runspace with `DevKit.Core` imported once, each draining its
+  own request queue and processing one request at a time, pushing its
+  response onto the writer's queue when done. (These are plain runspaces,
+  not `RunspacePool`s, despite sometimes being described that way - each
+  lane is exactly one worker.) This mirrors the old WPF widget's
+  `MetricsRunspace`/`McpRunspace`/`WorkRunspace` split, for the same
+  reason: a slow `gh pr list` call must never stall a metrics poll.
+- The **main thread** just reads stdin line-by-line and routes each
+  request to a lane by method-name prefix: `metrics.*` -> metrics lane;
+  `git.*`/`github.*`/`tool.*`/`maintenance.*` -> slow lane; everything
+  else -> work lane. `ping`/`shutdown` are handled inline with no lane
+  hop.
+
+If this ever proves fragile in practice, the file's own header comment
+documents the fallback: split the three lanes into three separate `pwsh`
+processes instead of three runspaces in one - simpler, more RAM, no
+shared-process invariants to get right.
+
+#### The method table (`core/RpcMethods.ps1`)
+
+Maps each `"namespace.verb"` method name (~40 of them today - e.g.
+`metrics.system`, `git.overview`, `notes.save`, `tool.run`) to a call
+into `DevKit.Core`: `tools/lib/*` plus `core/DevKit-WidgetCore.ps1` and
+`core/DevKit-GuiCore.ps1`. This file only adapts JSON params to
+PowerShell calls - it contains no tool logic of its own. **Adding a new
+panel or feature almost always means adding one `case` here** (the
+file's own header comment says the same) - not touching Rust, not
+touching the lane/writer plumbing.
+
+`catalog.get` (`Get-DevKitCatalogPayload`) is the method every UI depends
+on: it flattens `Get-DevKitGuiCatalog`'s manifest-driven groups (from
+`core/DevKit-GuiCore.ps1`) into the flat `{ modules: [...] }` shape both
+the Control Center and the CLI render directly, and computes a `caution`
+flag from each item's Help text containing `"Safety note:"`.
+
+`tool.run` is the Control Center's "Run" button: it spawns the target
+`tools/<folder>/<script>.ps1` as a **non-interactive** child process
+(`-NonInteractive`, stdin closed immediately) and streams its
+stdout/stderr back as `tool.output` events keyed by a `runId`, finishing
+with `tool.finished`. See "Two ways a tool actually runs" below - this is
+deliberately different from how the CLI runs the same script.
+
+`core/DevKit.Core.psm1` is what makes all of this possible without
+touching library code: it dot-sources `tools/lib/*` and the two
+ex-`gui/` files in a fixed order and re-exports everything as one flat
+module, imported once per lane runspace. Every file it loads still guards
+itself with a `$global:*Loaded` flag, so importing it multiple times
+(once per lane, plus again inside `Export-Catalog.ps1`) is safe.
+
+#### The Rust host client (`crates/devkit-host`)
+
+`PsHost` (in `host.rs`) owns the sidecar's `Child` process and
+multiplexes concurrent calls over its one stdout stream by request id.
+From the Rust side, the three PowerShell lanes are invisible - this
+client just sees one stream and demuxes.
+
+Two things worth knowing if you touch this file:
+
+- **Respawn with backoff**: `ensure_alive()` is idempotent and serializes
+  concurrent respawn attempts via the same mutex that guards the running
+  process; each failed attempt increases an exponential backoff (200ms
+  doubling, capped at 10s) before the next.
+- **Per-generation pending maps**: each spawn of the sidecar gets its own
+  `HashMap<id, oneshot::Sender>` (owned by that generation's
+  `RunningSidecar`, not shared on `Inner`). This closes a real race: a
+  dying generation's reader task can still be mid-drain (its EOF cleanup)
+  after a respawn has already started handing out new ids - a shared map
+  would let the old generation's cleanup wipe out the new generation's
+  in-flight entry. Giving each generation its own map makes that
+  impossible by construction - the same "correct by construction, not by
+  convention" philosophy as the PowerShell side's single writer runspace.
+
+`call()` transparently respawns a dead sidecar before retrying.
+`shutdown()` sends the RPC `shutdown` call, then waits up to 8s for the
+child to actually exit (covering the sidecar's own ~7s worst case: a 5s
+lane-drain deadline plus a 2s writer-drain deadline) before force-killing.
+
+#### The Tauri app (`app/`)
+
+Two windows, both created hidden and shown via `set_window_visible` (see
+`commands.rs` for why - `WebviewWindow::hide()`/`show()` alone don't
+reliably drive `document.visibilityState`, which the frontend's
+`useVisibility` hook needs to be able to trust):
+
+- **`widget`** (`app/src/windows/widget/WidgetApp.tsx`) - the always-on
+  companion, DevKit's main face. Panels top to bottom: Gauges
+  (CPU/Mem/GPU/Disk), Node/Ports, Git (a gradient-lane commit graph),
+  GitHub (PRs/Issues), MCP status, Notes/On-Deck, Files, Quick Actions,
+  and a collapsed-by-default embedded terminal (see below). Single-
+  instance via `tauri-plugin-single-instance` (a second launch surfaces
+  the existing window instead of spawning a duplicate) and a system tray
+  (`tray.rs`) with Show/Hide, Open Control Center, a Start-with-Windows
+  toggle (`tauri-plugin-autostart`), and Exit. Closing the window via its
+  titlebar hides it to the tray rather than quitting (`lib.rs`'s
+  `CloseRequested` handler) - only the tray's Exit item, or
+  `tauri-plugin-process`, actually ends the process.
+- **`control-center`** (`app/src/windows/control-center/ControlCenterApp.tsx`)
+  - the full catalog-driven tool browser. Renders the `catalog.get`
+  payload as a searchable, grouped card grid; clicking a card opens
+  `ToolRunDialog.tsx`, which builds a dynamic form from the item's
+  `prompts`/`requiresProject`/`staticArgs` (mirroring
+  `Read-DevKitTypedValue`'s validation contract exactly - see its own
+  code comments) and runs the tool via the headless `tool.run` path,
+  streaming its output live.
+
+Both windows go through the **single generic `rpc_call` Tauri command**
+(`commands.rs`) for everything sidecar-related - `host.call(&method,
+params)`. Adding a new RPC-backed feature never needs a new Tauri
+command: add the case to `core/RpcMethods.ps1`, add a typed call in
+`app/src/lib/ipc.ts` (or call `rpcCall` directly from a component), done.
+The only Rust commands outside `rpc_call` are window show/hide/toggle and
+the four ConPTY terminal commands below - things that are genuinely
+OS-level, not sidecar work.
+
+#### The embedded terminal (`app/src-tauri/src/terminal.rs`)
+
+A separate capability from the RPC sidecar entirely: `terminal_spawn`
+opens a real pseudo-console (`portable_pty`, ConPTY) running an
+interactive `pwsh.exe`, wired to an `@xterm/xterm` instance in the
+frontend (`components/TerminalView.tsx`) via `devkit://terminal` events
+(raw UTF-8 chunks, not base64 - `from_utf8_lossy` handles a chunk
+boundary splitting a multi-byte character rather than panicking). It
+replaces the old widget's "launch an external Windows Terminal window and
+glue it over the panel" approach with a PTY that actually lives inside
+the app. Sessions are tracked in a `TerminalRegistry` Tauri-managed
+state, keyed by session id; `terminal_write`/`terminal_resize`/
+`terminal_kill` round out the four commands. The widget's Terminal panel
+starts collapsed by default (`lazyMount` on its `<Expander>`), so it
+costs nothing until a viewer opens it.
+
+#### The CLI (`cli/`, binary `devkit`)
+
+`devkit` (package `devkit-cli`, binary `devkit.exe`) is a ratatui
+terminal menu that replaces the old `DevKit.ps1` TUI, driven by the exact
+same `catalog.get` payload the GUI renders (`cli/src/menu.rs`,
+`catalog.rs`). Arrow-key navigation, `/` search, `p` to switch the active
+project, a digit-accumulator jump (type a number then Enter to jump
+straight to that row - a generous 5-digit cap guards against a stuck
+key), and a native Windows file picker (shells out to a hidden `pwsh`
+process running `System.Windows.Forms.OpenFileDialog`, with
+`CREATE_NO_WINDOW` so it doesn't flash a console) for `RequiresFile`
+prompts. `devkit catalog` prints the parsed catalog as JSON; `devkit
+doctor` pings the sidecar and confirms it's alive.
+
+**There is no installer for the CLI yet** - it's built from source only
+(`cargo build --release -p devkit-cli`, producing
+`target/release/devkit.exe`); only the GUI app (`devkit-app.exe`) ships
+via the NSIS installer today.
+
+#### Two ways a tool actually runs - know this before adding one
+
+The Control Center and the CLI both execute the same
+`tools/<folder>/<script>.ps1` scripts, but NOT the same way:
+
+- **Control Center -> `tool.run` RPC**: the sidecar spawns the script
+  `-NonInteractive` with stdin closed immediately, and streams
+  stdout/stderr back as events. This is a deliberate, documented
+  trade-off - `ToolRunDialog.tsx`'s own comment calls it "the headless
+  execution path... most tools run headlessly with streamed output
+  instead of bouncing you to a terminal." It means a tool that genuinely
+  needs interactive keyboard input (`[Console]::ReadKey` menus, a live
+  y/n read from the console, `git rebase -i`, launching `claude`/`kimi`
+  interactively) will **not** work correctly through this path.
+- **CLI -> direct spawn**: `run_tool_flow` (`cli/src/menu.rs`) suspends
+  the ratatui alternate screen and spawns the script with
+  `Stdio::inherit()` on all three streams - a real interactive child
+  process, the same model the old `DevKit.ps1` TUI used.
+
+So: a script that needs real interactive stdin still works fine via the
+CLI, via its `.bat` wrapper, or via the embedded ConPTY terminal - just
+not via the Control Center's Run dialog. Keep this in mind when designing
+a new tool's interactivity, and don't assume working from one surface
+means it'll work from the other.
+
+#### Settings, auto-update, installer, CI
+
+- **Settings** (`preferences.confirmDestructive`, `enableAnimations`,
+  `updateCheckEnabled`, `lastUpdateCheckUtc`, dock/width prefs, ...)
+  persist through the same `%LOCALAPPDATA%\NorthstarDevKit\settings.json`
+  file the old app used (`Get-/Set-DevKitSettings` in
+  `tools/lib/DevKit-Common.ps1`, unchanged), read/written via the
+  `settings.get`/`settings.set` RPC methods and `stores/useSettingsStore.ts`.
+- **Auto-update**: a minisign keypair signs updater artifacts
+  (`tauri-plugin-updater`); the app checks
+  `https://github.com/st3adyp1ck/northstar-devkit/releases/latest/download/latest.json`
+  on launch (throttled to once per 24h via `preferences.lastUpdateCheckUtc`
+  - see `useUpdateCheck.ts`) and via a manual "Check for Updates" button
+  in Quick Actions, with a real download-progress -> install -> relaunch
+  flow (`useUpdaterStore.ts`, `UpdateDialog.tsx`).
+- **Installer**: `app/src-tauri/tauri.conf.json` configures an NSIS
+  installer - Windows-only, per-user (`installMode: currentUser`, no
+  admin needed) - built via `pnpm tauri build` from `app/`.
+  `tauri.conf.json`'s `bundle.resources` maps `../../core` and
+  `../../tools` into the installed app's resource directory; `paths.rs`
+  resolves the sidecar script there in a release build, versus walking up
+  from `CARGO_MANIFEST_DIR` to the repo checkout in a dev build. There is
+  no custom `Uninstall.ps1` any more - NSIS generates its own uninstaller
+  as part of the bundle.
+- **CI** (`.github/workflows/release.yml`): pushing a `vX.Y.Z` tag builds
+  and signs the app on `windows-latest` and opens a **draft** GitHub
+  Release - a human must click "Publish release" before the updater
+  endpoint goes live. `.github/workflows/ci.yml` currently runs only the
+  PowerShell side (PSScriptAnalyzer, a syntax check, Pester) on every
+  push/PR to `main`; the Rust and frontend checks in `dev/RELEASING.md`'s
+  checklist (`cargo clippy`/`cargo test`, `tsc`/`vite build`) are run
+  manually before cutting a release rather than in CI today - see
+  Testing below.
 
 ## Usage Patterns
 
-### Interactive Menu Mode
-```batch
-.\DevKit.bat
+### Launching the app
+
+The installed app's Start Menu/Desktop shortcut and tray icon open the
+**widget** window directly - it's DevKit's main face. The Control Center
+opens from the widget's title-bar "DEVKIT" button, its Quick Actions
+panel, or the tray menu.
+
+From a source checkout, for development:
+```powershell
+cd app
+pnpm install
+pnpm tauri dev      # spawns the sidecar from the repo root, opens both windows
 ```
-Launches the main interactive menu for navigation via keyboard input.
+
+### The CLI
+```powershell
+cargo build --release -p devkit-cli
+.\target\release\devkit.exe            # interactive ratatui menu
+.\target\release\devkit.exe catalog    # print the tool catalog as JSON
+.\target\release\devkit.exe doctor     # ping the sidecar
+```
 
 ### Direct PowerShell Execution
 ```powershell
@@ -695,12 +692,38 @@ Launches the main interactive menu for navigation via keyboard input.
   - WiFi optimization features (script checks and warns if not admin)
   - Editing system (Machine) PATH
   - Restoring Machine environment variables
-- Batch wrappers use `-NoProfile -ExecutionPolicy Bypass` for fast, predictable launches
+- Batch wrappers use `-NoProfile -ExecutionPolicy Bypass` for fast,
+  predictable launches; the RPC sidecar is launched the same way, plus
+  `-NoLogo -NonInteractive` (`crates/devkit-host/src/host.rs`), and
+  `tool.run` spawns each script identically (`core/RpcMethods.ps1`).
 - All scripts use `ErrorAction SilentlyContinue` where appropriate to prevent unnecessary failures
 - Force flags (`-Force`) are available to skip confirmation prompts for automation
-- Docker Nuke requires explicit, case-sensitive confirmation (type `NUKE`) to prevent accidents - implemented via the shared `Confirm-DevKitDestructiveAction` helper in `tools/lib/DevKit-Common.ps1`, which any new destructive script should call rather than hand-rolling its own y/n or typed-phrase prompt
-- `%LOCALAPPDATA%\NorthstarDevKit\settings.json`'s `preferences.confirmDestructive` (default `true`) gates that shared helper globally; it does not currently gate any script's own bespoke confirmation logic that predates the helper
-- **Never execute a destructive/mutating script's real path to "test" it - only its documented read-only/-DryRun/-WhatIf invocation.** Every script under `tools/maintenance/` and `tools/agents/` that mutates the system (deletes files, renames system folders, stops/starts services, writes the registry, runs SFC/DISM, mutates external CLI config) supports a safe, non-mutating invocation - use that one. This applies to a human tester and an AI agent equally: a 2026-07-11 incident had a build-time agent run `Reset-WindowsUpdate.ps1` for real (not `-DryRun`) while self-testing its own work; the safety system blocked it before any actual change landed, but it should never have been attempted in the first place. `Uninstall.ps1` is destructive by design - test it ONLY against a throwaway `-Destination`/`InstallDir` (plus a test `-ArpKeyName`), never against a real install or this repo (its `.northstar-installed` marker check exists exactly for that).
+- Docker Nuke requires explicit, case-sensitive confirmation (type `NUKE`)
+  to prevent accidents - implemented via the shared
+  `Confirm-DevKitDestructiveAction` helper in `tools/lib/DevKit-Common.ps1`,
+  which any new destructive script should call rather than hand-rolling
+  its own y/n or typed-phrase prompt. The app UI has a parallel gate for
+  RPC-driven destructive actions (process kill, junk clear, running a
+  "caution"-flagged tool from the Control Center):
+  `useConfirmDestructive()` (`app/src/hooks/useConfirmDestructive.ts`),
+  which reads the same setting described next.
+- `%LOCALAPPDATA%\NorthstarDevKit\settings.json`'s
+  `preferences.confirmDestructive` (default `true`) gates both of the
+  helpers above globally; it does not gate any script's own bespoke
+  confirmation logic that predates `Confirm-DevKitDestructiveAction`.
+- **Never execute a destructive/mutating script's real path to "test" it
+  - only its documented read-only/`-DryRun`/`-WhatIf` invocation.** Every
+  script under `tools/maintenance/` and `tools/agents/` that mutates the
+  system (deletes files, renames system folders, stops/starts services,
+  writes the registry, runs SFC/DISM, mutates external CLI config)
+  supports a safe, non-mutating invocation - use that one, whether you're
+  invoking it directly, through the CLI, or through the Control Center's
+  Run dialog (its prompt form fields include the same `-DryRun`/`-WhatIf`
+  switches). This applies to a human tester and an AI agent equally: a
+  2026-07-11 incident had a build-time agent run
+  `Reset-WindowsUpdate.ps1` for real (not `-DryRun`) while self-testing
+  its own work; the safety system blocked it before any actual change
+  landed, but it should never have been attempted in the first place.
 
 ## Testing
 
@@ -708,20 +731,41 @@ Launches the main interactive menu for navigation via keyboard input.
 converters where this project has actually had real bugs: package-manager
 detection (`Get-DevKitPackageManager`), PATH de-duplication, the `.env`
 template parser, the git-remote-to-browsable-URL converter, the WiFi
-scan parser, the GUI/widget cores (argument rendering, MCP/Kimi parsers,
+scan parser, the GUI/widget cores (`core/DevKit-GuiCore.ps1` /
+`core/DevKit-WidgetCore.ps1` - argument rendering, MCP/Kimi parsers,
 nvidia-smi parser, git log parser + graph lane layout, .env key diff, the
-file-name -> icon-key/color mapping),
-the winnat excluded-port-ranges parser, the .env key extractor, and the
-Convert-DevText converters. Run locally with:
+file-name -> icon-key/color mapping), the winnat excluded-port-ranges
+parser, the .env key extractor, and the Convert-DevText converters. Run
+locally with:
 
 ```powershell
 Invoke-Pester -Path tests/Unit
 ```
 
+Rust workspace (`app/src-tauri`, `cli`, `crates/devkit-host`):
+```powershell
+cargo check --workspace
+cargo clippy --workspace --all-targets
+cargo test --workspace        # devkit-host has unit tests over its NDJSON protocol/framing layer
+```
+
+Frontend (`app/`):
+```powershell
+cd app
+npx tsc --noEmit
+npx vite build
+```
+
+The Pester suite runs automatically in CI (`.github/workflows/ci.yml`) on
+every push/PR to `main`. The Rust and frontend checks above do not run in
+CI yet - they're run manually before cutting a release, per
+`dev/RELEASING.md`'s checklist.
+
 Everything else - anything that shells out to git/docker/npm, mutates
-PATH/env vars/DNS, or kills processes - is **not** covered by automated
-tests by design (a hosted CI runner shouldn't have its real PATH mutated
-or its containers destroyed), and is verified manually:
+PATH/env vars/DNS, kills processes, or drives the real desktop UI - is
+**not** covered by automated tests by design (a hosted CI runner
+shouldn't have its real PATH mutated or its containers destroyed), and is
+verified manually:
 
 1. Run scripts in a PowerShell window to observe output
 2. Verify colored output displays correctly (see the color convention above)
@@ -729,18 +773,23 @@ or its containers destroyed), and is verified manually:
 4. Confirm batch wrappers launch PowerShell correctly
 5. Test DryRun/-WhatIf modes where available (Docker, Git cleanup)
 6. Verify error handling with invalid inputs
-7. When changing `DevKit.ps1` or `tools/lib/DevKit-Common.ps1`'s menu dispatcher,
-   do a scripted pass through the interactive menu (pipe a sequence of
-   menu choices to `pwsh -File DevKit.ps1`) to confirm every category still
-   renders and dispatches correctly - this is how the 3.0 rewrite verified
-   menu parity across all twelve tool categories.
+7. When changing a `_module.psd1` manifest, `core/RpcMethods.ps1`'s
+   `catalog.get`, or `Get-DevKitGuiCategories`
+   (`core/DevKit-GuiCore.ps1`), confirm the catalog still parses via
+   `devkit catalog` (prints it as JSON) and/or
+   `tests/Unit/GuiCore.Tests.ps1`'s catalog-loading test, then spot-check
+   both the CLI and the Control Center actually render the change.
 
 ## Adding New Tools
 
-Since 3.0, adding a tool to an **existing** category (`tools/ports/`, `tools/node/`,
+Adding a tool to an **existing** category (`tools/ports/`, `tools/node/`,
 `tools/nextjs/`, `tools/vite/`, `tools/git/`, `tools/docker/`, `tools/system/`,
 `tools/workflow/`, `tools/diagnostics/`, `tools/wifi/`, `tools/maintenance/`,
-`tools/agents/`) is a manifest edit, not a `DevKit.ps1` edit:
+`tools/agents/`) is still a manifest edit only - the CLI and the Control
+Center both read `_module.psd1` manifests through the same `catalog.get`
+RPC method (`core/RpcMethods.ps1` -> `Get-DevKitCatalogPayload` ->
+`Get-DevKitGuiCatalog` in `core/DevKit-GuiCore.ps1`), so there's no UI
+code to touch for this case:
 
 1. Create the PowerShell script in the appropriate subdirectory under `tools/`
 2. Dot-source `tools/lib/DevKit-Common.ps1` for shared helpers (admin checks, path validation, safe deletion, etc.)
@@ -749,31 +798,45 @@ Since 3.0, adding a tool to an **existing** category (`tools/ports/`, `tools/nod
 5. Add an entry to that category's `_module.psd1` (see any existing one,
    e.g. `tools/ports/_module.psd1`, for the schema - `Key`/`Label`/`Script`,
    plus `RequiresProject`, `RequiresFile`, `Prompts`, or `StaticArgs` as
-   needed). **Do not edit `DevKit.ps1`** for this - the generic dispatcher
-   in `tools/lib/DevKit-Common.ps1` (`Start-DevKitModuleTools`) picks up the new
-   manifest entry automatically.
-6. Update `README.md` with documentation
-7. Update `AGENTS.md` with module details
-8. Follow existing naming conventions and output styling
-9. Test the tool thoroughly, including via the interactive menu (confirm
-   the new manifest entry parses and dispatches correctly)
+   needed - unchanged from before the rewrite). Nothing else needs
+   editing: `catalog.get` picks up the new entry automatically for both
+   the CLI and the Control Center.
+6. If the tool's Help text documents a destructive action, prefix it
+   `"Safety note:"` - `Get-DevKitCatalogPayload` turns that into the
+   `caution` flag automatically, which badges the tool and routes its Run
+   button through the confirm dialog in the Control Center. No extra
+   wiring needed.
+7. **If the tool needs real interactive stdin** (arrow-key menus, a live
+   y/n read from the console, launching another interactive CLI like
+   `claude`/`kimi`), it will work correctly via the CLI and via the
+   embedded terminal, but **not** via the Control Center's headless
+   `tool.run` path - see "Two ways a tool actually runs" above. Design
+   accordingly, or document the limitation in the tool's own help text.
+8. Update `README.md` with documentation
+9. Update `AGENTS.md` with module details
+10. Follow existing naming conventions and output styling
+11. Test the tool thoroughly: via its `.bat` wrapper, via `devkit` (the
+    CLI), and via the Control Center's Run dialog.
 
 ## Common Development Tasks
 
-### Adding a new module category
+### Adding a new top-level tool category
 1. Create a new subdirectory under `tools/` (e.g., `tools/docker/`, `tools/git/`)
 2. Add PowerShell scripts and batch wrappers
 3. Add a `_module.psd1` manifest listing the category's menu items (copy
    the shape of an existing one, e.g. `tools/node/_module.psd1`)
-4. Add exactly two lines to `DevKit.ps1`: a line in `Get-DevKitMainMenuEntries`
-   for the new `[N]` option, and a
-   `'N' { Start-DevKitModuleTools -FolderPath (Join-Path $ToolsDir "yourfolder") }`
-   case in the entry-point switch at the bottom of the file. That's the
-   entire integration - no new menu function needed.
-5. Add the new category to `Get-DevKitSearchableCategories` in `DevKit.ps1`
-   (a `Folder`/`MainMenuKey` pair) so `/` search picks it up too, and to
-   `Get-DevKitGuiCategories` in `gui/DevKit-GuiCore.ps1` so the Control
-   Center lists it
+4. Add the folder to a group in `Get-DevKitGuiCategories`
+   (`core/DevKit-GuiCore.ps1`). This is now the **only** place category
+   grouping lives - both the CLI (`cli/src/catalog.rs`'s `ordered_groups`)
+   and the Control Center (`ControlCenterApp.tsx`) derive their nav
+   groups from the `catalog.get` payload itself, so there's no separate
+   menu file or search-category list to keep in sync any more (the old
+   `DevKit.ps1` main-menu entry + `Get-DevKitSearchableCategories`
+   two-places-at-once pattern is gone along with `DevKit.ps1` itself).
+5. Optional/cosmetic: add a matching entry to `GROUP_ICON` in
+   `app/src/windows/control-center/ControlCenterApp.tsx` for a specific
+   glyph - an unmapped group still renders fine (falls back to a default
+   icon).
 6. Update documentation files
 
 ### Modifying existing tools
@@ -788,7 +851,10 @@ Since 3.0, adding a tool to an **existing** category (`tools/ports/`, `tools/nod
 - All paths use `Join-Path` or `Resolve-Path` for cross-platform compatibility
 - Scripts use `Push-Location` and `Pop-Location` wrapped in `try/finally` to maintain working directory context
 - Batch wrappers use `%~dp0` to locate `.ps1` files without changing the caller's working directory
-- No package management (no package.json, requirements.txt, etc.) - this is a standalone toolkit
+- `tools/` itself has no package management (no `package.json`,
+  `requirements.txt`, etc.) and remains a dependency-free PowerShell
+  toolkit at that layer; `app/` (pnpm) and the Rust workspace (Cargo) are
+  the app shell's own build tooling, not something `tools/` scripts rely on
 - Scripts use consistent header format with Northstar branding
 - Version 2.1 unified the toolkit under a shared helper module (`lib/DevKit-Common.ps1`), added package-manager auto-detection, completed batch-wrapper coverage, and fixed PowerShell 7 / path-validation / process-killing bugs
 - Version 3.0 (see `CHANGELOG.md` for full detail) added browsable project linking (`Select-DevKitProject`, the linked-projects registry, `[10] Projects` menu), rewrote all ten tool-category submenus as a manifest-driven dispatcher (`_module.psd1` + `Start-DevKitModuleTools`) instead of ten hand-written function pairs, added `/` search-and-jump, added a Pester test suite, and fixed roughly 150 confirmed bugs from a full-repo review - including one (`system/Env-Restore.ps1`) that had been completely broken (could not run at all) since before 3.0 existed
@@ -798,3 +864,21 @@ Since 3.0, adding a tool to an **existing** category (`tools/ports/`, `tools/nod
 - Version 3.7 (see `CHANGELOG.md`) added the companion widget (`gui/DevKit-Widget.ps1`, launched from the GUI's gauge button): a persistent desktop + system-tray app with live CPU/memory/GPU metrics and best-effort temperatures, a node-process/port watch, quick-action buttons that launch real DevKit tools, an Active Project selector, and expandable Claude Code / Kimi Code CLI + MCP status boxes with Connected/Disconnected/Requires Auth badges (Claude via `claude mcp list` health output, Kimi via its documented `mcp.json` files) - single-instance with a summon event, TaskbarCreated re-registration, and a reversible Start-with-Windows toggle.
 - Version 3.8 (see `CHANGELOG.md`) turned the widget into the primary surface: a drawn commit graph (lane layout + gradient S-curves + ref pills) replaced the monospace `git log --graph` text, and the widget gained a Disk Free dial, process ages + per-pid kill + click-to-open ports in the node table, an ambient git badge and .env-drift hint under the project selector, a reboot-pending hint, winnat reserved-port warnings, and four project launchers (Editor/Explorer/Terminal/Run Script...). Both WPF apps moved the theme from a Window.Resources string-merge to Application.Resources created before XAML load (fixes unthemed scrollbars/dialogs). Eight new tools shipped: Show-ExcludedPortRanges + Test-DevEndpoint (ports/), Get-GitStandup (git/), Start-PackageScript + Find-StaleNodeModules (node/), Edit-HostsFile (system/), Compare-EnvFiles + Convert-DevText (workflow/). It also fixed two long-standing HIGH bugs: the Agents "Manage..." dialog never attached its content (invisible modal), and the MCP libs' `$global:` load-guards crashed every second menu use in one session; plus Env-Restore no longer overwrites live secrets with the `***REDACTED***` marker, and bun >= 1.2's `bun.lock` is detected everywhere.
 - Version 4.0 (see `CHANGELOG.md`) made the widget the app's main face and the toolkit a real installed app: root `Widget.bat` + installer-created shortcuts open the widget directly (the DEVKIT title-bar button opens the Control Center GUI); `Install.ps1` became a stepped per-user installer that registers the app in Settings > Apps (HKCU Uninstall key), and new `Uninstall.ps1` removes every trace (widget process, integrations, Run key, PATH, shortcuts, ARP entry, install dir guarded by the `.northstar-installed` marker, and app data unless kept). All twelve tool categories plus `lib/` moved under `tools/` (leaf scripts unchanged - they resolve lib relative to themselves), maintainer tooling moved to `dev/`, and `Setup-Path.bat` was deleted (the installer covers it). It also shipped the lightweight/performance pass: runspaces bootstrap the shared libs once instead of re-parsing ~150KB per cycle (which had also been wiping WidgetCore's sensor caches every cycle), gauge arcs render from a frozen cached geometry table with no easing timer and no DropShadowEffects, the ToolCard hover lost its transform storyboard (the reported gauges-hover CPU/GPU spike), the node table rebuilds only on bucketed changes, junk scans dropped to a 30-minute cadence, and ALL refresh timers now stop while the widget is hidden to the tray.
+- The **Tauri v2 rewrite** (this branch, `feat/tauri-v2`, 2026-08) replaced
+  the entire `gui/` WPF app - `DevKit-GUI.ps1`/`.xaml`,
+  `DevKit-Widget.ps1`/`.xaml`, `Theme.xaml`, `Install.ps1`/`Uninstall.ps1`,
+  and the `DevKit.ps1`/`DevKit.bat`/`DevKit-GUI.bat`/`Widget.bat` entry
+  points, all deleted - with a Tauri v2 desktop app (Rust + React 19 +
+  TypeScript, two windows: widget and control-center) plus a new ratatui
+  CLI (`cli/`, binary `devkit`), bridged to the unchanged `tools/` scripts
+  by a long-lived NDJSON-RPC PowerShell sidecar
+  (`core/Invoke-DevKitRpc.ps1`) and a Rust client crate
+  (`crates/devkit-host`). The two pure-logic files the WPF app depended on
+  (`DevKit-WidgetCore.ps1`, `DevKit-GuiCore.ps1`) moved from `gui/` to
+  `core/` and are otherwise unchanged; every `tools/*` script and manifest
+  is unchanged. It shipped alongside a real NSIS installer, a
+  minisign-signed auto-updater against GitHub Releases, and a GitHub
+  Actions release pipeline (`.github/workflows/release.yml`). See the
+  "App Architecture" section above for the full picture, and
+  `CHANGELOG.md` for the authoritative dated record once this branch
+  lands.

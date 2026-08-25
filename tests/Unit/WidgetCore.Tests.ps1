@@ -1,7 +1,7 @@
 #!/usr/bin/env pwsh
 <#
 .SYNOPSIS
-    Pester tests for the companion widget's pure logic (gui/DevKit-WidgetCore.ps1)
+    Pester tests for the companion widget's pure logic (core/DevKit-WidgetCore.ps1)
 .DESCRIPTION
     Covers the nvidia-smi output parser, the 'claude mcp list' line parser
     (which drives the Connected/Disconnected/Requires Auth badges), the Kimi
@@ -17,7 +17,7 @@ BeforeAll {
     $global:DevKitCommonLoaded = $false
     . (Join-Path $script:RepoRoot 'tools\lib\DevKit-Common.ps1')
     $global:DevKitWidgetCoreLoaded = $false
-    . (Join-Path $script:RepoRoot 'gui\DevKit-WidgetCore.ps1')
+    . (Join-Path $script:RepoRoot 'core\DevKit-WidgetCore.ps1')
 }
 
 Describe "ConvertFrom-DevKitNvidiaSmiOutput" {

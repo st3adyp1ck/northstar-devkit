@@ -2,7 +2,7 @@
 <#
 .SYNOPSIS
     Pester tests for the widget's per-project sticky-notes store
-    (Get/Save-DevKitProjectNotes in gui/DevKit-WidgetCore.ps1)
+    (Get/Save-DevKitProjectNotes in core/DevKit-WidgetCore.ps1)
 .DESCRIPTION
     Exercises the JSON round-trip against a temp store file: array-shape
     guarantees (including the single-note member-unroll trap), project key
@@ -17,7 +17,7 @@ BeforeAll {
     $global:DevKitCommonLoaded = $false
     . (Join-Path $script:RepoRoot 'tools\lib\DevKit-Common.ps1')
     $global:DevKitWidgetCoreLoaded = $false
-    . (Join-Path $script:RepoRoot 'gui\DevKit-WidgetCore.ps1')
+    . (Join-Path $script:RepoRoot 'core\DevKit-WidgetCore.ps1')
 
     function New-TestNote {
         param([string]$Text, [string]$Color = 'amber')

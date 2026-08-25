@@ -1,7 +1,7 @@
 #!/usr/bin/env pwsh
 <#
 .SYNOPSIS
-    Pester tests for the DevKit GUI pure-logic core (gui/DevKit-GuiCore.ps1)
+    Pester tests for the DevKit GUI pure-logic core (core/DevKit-GuiCore.ps1)
 .DESCRIPTION
     Covers the GUI's argument resolution (which must mirror Invoke-DevKitTool
     semantics exactly), the shell-quoting helpers, the terminal launch
@@ -16,7 +16,7 @@ BeforeAll {
     # when several test files run in one Pester process.
     $global:DevKitCommonLoaded = $false
     . $script:CommonModule
-    . (Join-Path (Join-Path $script:RepoRoot "gui") "DevKit-GuiCore.ps1")
+    . (Join-Path (Join-Path $script:RepoRoot "core") "DevKit-GuiCore.ps1")
 }
 
 Describe "ConvertTo-DevKitToolArguments" {

@@ -23,12 +23,12 @@ First off, thanks for taking the time to contribute! 🎉
 
 ## Development Guidelines
 
-- **Language**: All scripts are PowerShell. Target PowerShell 5.1+ compatibility.
+- **Language**: The tool scripts under `tools/` are all PowerShell. Target PowerShell 5.1+ compatibility. The desktop app (`app/`) is Rust + TypeScript/React (Tauri v2); the terminal menu (`cli/`) and the RPC sidecar host (`crates/devkit-host`) are Rust.
 - **Style**: Follow the existing script structure in `AGENTS.md`.
-- **Shared helpers**: Dot-source `lib/DevKit-Common.ps1` for common tasks (path validation, safe `node_modules` deletion, package-manager detection, banners, etc.).
-- **No new dependencies**: DevKit is meant to be dependency-free and use built-in Windows tools.
-- **Menu integration**: Adding a tool to an **existing** category (`ports/`, `node/`, etc.) means adding the script, a `.bat` wrapper, and an entry in that category's `_module.psd1` (see `AGENTS.md`'s "Adding New Tools" for the schema). **Do not edit `DevKit.ps1`** for this - the generic dispatcher (`Start-DevKitModuleTools` in `lib/DevKit-Common.ps1`) picks up the new manifest entry automatically. `DevKit.ps1` only needs a two-line edit when adding a brand-new top-level module category (see `AGENTS.md`'s "Adding a new module category").
-- **Single source of truth**: Avoid duplicating logic between `DevKit.ps1` and standalone scripts. The menu should call the standalone script whenever possible.
+- **Shared helpers**: Dot-source `tools/lib/DevKit-Common.ps1` for common tasks (path validation, safe `node_modules` deletion, package-manager detection, banners, etc.).
+- **No new dependencies for tools**: The PowerShell tool scripts are meant to be dependency-free and use built-in Windows tools.
+- **Menu integration**: Adding a tool to an **existing** category (`ports/`, `node/`, etc.) means adding the script, a `.bat` wrapper, and an entry in that category's `_module.psd1` (see `AGENTS.md`'s "Adding New Tools" for the schema). That manifest is the single source of truth for the tool catalog - there's no `DevKit.ps1` menu to edit any more. Both the CLI (`cli/`) and the desktop app's Control Center (`app/`) discover tools the same way: they call the `catalog.get` RPC method (handled in `core/RpcMethods.ps1`, which reads every `tools/*/_module.psd1` at request time), so a manifest edit shows up in both front ends automatically with no other code changes. A brand-new top-level category needs a couple of registration lines beyond the manifest - see `AGENTS.md`'s "Adding a new module category".
+- **Single source of truth**: Avoid duplicating tool logic. `cli/` and `app/` are thin front ends over the same `tools/*.ps1` scripts (invoked via RPC through `core/RpcMethods.ps1`) - put real logic in the script, not in the Rust or TypeScript layers.
 
 ## Code of Conduct
 
