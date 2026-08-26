@@ -68,6 +68,43 @@
   color: var(--ember-400);
 }
 
+/* "The numbers you're looking at are real, but no longer live." Sits in the
+   panel header next to the title, so it can't be mistaken for a reading. */
+.gauges-panel__stale {
+  color: var(--ember-400);
+}
+
+/* Honest replacement for the gauge row when the sidecar never answered:
+   four "n/a" dials would read as a machine with no sensors, which is the
+   exact bug this panel used to have. */
+.gauges-panel__offline {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--danger-soft);
+  border: 1px solid color-mix(in srgb, var(--ember-500) 30%, transparent);
+  border-radius: var(--radius-md);
+}
+
+.gauges-panel__offline-title {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--ember-400);
+}
+
+.gauges-panel__offline-detail {
+  font-size: var(--text-2xs);
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  word-break: break-word;
+}
+
+.gauges-panel__offline-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
 .gauges-panel__flyout {
   margin-top: var(--space-3);
   border-top: 1px solid var(--surface-border);

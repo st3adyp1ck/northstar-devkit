@@ -26,6 +26,71 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      # Runs FIRST, before the ~15-minute build, so a botched bump fails in
+      # under a minute. The updater compares installed clients against the
+      # version baked in from tauri.conf.json: ship a v4.0.1 tag while
+      # tauri.conf.json still says 4.0.0 and the installer is named
+      # DevKit_4.0.0_x64-setup.exe, latest.json advertises 4.0.0, and every
+      # installed client either ignores the release or is re-offered a
+      # version it already has. Mirrors the verify-version job in ci.yml,
+      # plus the tag comparison that only applies here.
+      - name: Verify the version triple matches the tag
+        shell: pwsh
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          function Get-CargoWorkspaceVersion {
+            param([string]$Path)
+            $section = ''
+            foreach ($line in Get-Content -LiteralPath $Path) {
+              $t = $line.Trim()
+              if ($t -match '^\[(.+?)\]\s*$') { $section = $Matches[1]; continue }
+              if ($section -eq 'workspace.package' -and $t -match '^version\s*=\s*"([^"]+)"') {
+                return $Matches[1]
+              }
+            }
+            return $null
+          }
+
+          $trimChars = @([char]0xFEFF, ' ', "`t", "`r", "`n")
+          $tag = ($env:TAG_NAME -replace '^v', '').Trim()
+          $sources = [ordered]@{
+            'git tag'                        = $tag
+            'VERSION'                        = (Get-Content -LiteralPath 'VERSION' -Raw).Trim($trimChars)
+            'Cargo.toml (workspace.package)' = Get-CargoWorkspaceVersion -Path 'Cargo.toml'
+            'app/src-tauri/tauri.conf.json'  = (Get-Content -LiteralPath 'app/src-tauri/tauri.conf.json' -Raw | ConvertFrom-Json).version
+          }
+
+          Write-Host 'Declared versions:'
+          foreach ($kv in $sources.GetEnumerator()) {
+            Write-Host ('  {0,-32} {1}' -f $kv.Key, $(if ($kv.Value) { $kv.Value } else { '<not found>' }))
+          }
+          Write-Host ''
+
+          $failed = $false
+          foreach ($kv in $sources.GetEnumerator()) {
+            if ([string]::IsNullOrWhiteSpace($kv.Value)) {
+              Write-Host "::error::Could not read a version from $($kv.Key)."
+              $failed = $true
+            } elseif ($kv.Value -notmatch '^\d+\.\d+\.\d+$') {
+              Write-Host "::error::$($kv.Key) declares '$($kv.Value)', which is not a MAJOR.MINOR.PATCH version."
+              $failed = $true
+            }
+          }
+
+          if (-not $failed) {
+            $distinct = @($sources.Values | Sort-Object -Unique)
+            if ($distinct.Count -ne 1) {
+              Write-Host "::error::Tag and version triple disagree ($($distinct -join ', ')). Do NOT release: retag after bumping all three - see dev/RELEASING.md."
+              $failed = $true
+            }
+          }
+
+          if ($failed) { exit 1 }
+          Write-Host "Tag and version triple agree: $tag"
+
       - name: Install pnpm
         uses: pnpm/action-setup@v6
         with:
@@ -38,12 +103,33 @@ jobs:
           cache: pnpm
           cache-dependency-path: app/pnpm-lock.yaml
 
+      # No Swatinem/rust-cache here on purpose: unlike a PR run, a release
+      # build is worth paying for from scratch. Nothing that ends up signed
+      # and shipped should come out of a warm cache.
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install frontend dependencies
         working-directory: app
         run: pnpm install --frozen-lockfile
+
+      # The installer ships the devkit CLI at <installroot>\devkit.exe (a
+      # bundle resource in tauri.conf.json), which is what makes
+      # tools/system/Install-ShellIntegration.ps1 and
+      # Register-DevKitTerminalProfile.ps1 work on an installed app - both
+      # probe that exact path first.
+      #
+      # tauri.conf.json's beforeBuildCommand does this too, so in the happy
+      # path the build below is a cache hit. It is spelled out here anyway so
+      # that a CLI compile error shows up as its own red step with its own
+      # log, instead of as a cryptic "beforeBuildCommand failed".
+      - name: Build and stage the devkit CLI
+        shell: pwsh
+        run: |
+          cargo build --release -p devkit-cli
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          New-Item -ItemType Directory -Force -Path app/src-tauri/bin | Out-Null
+          Copy-Item -Force target/release/devkit.exe app/src-tauri/bin/devkit.exe
 
       - name: Build, sign, and publish
         uses: tauri-apps/tauri-action@v1

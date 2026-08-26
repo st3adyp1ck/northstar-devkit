@@ -7,6 +7,7 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { recordRpcFailure } from "./errorCapture";
 
 export class RpcClientError extends Error {
   constructor(message: string) {
@@ -19,7 +20,13 @@ export async function rpcCall<T>(method: string, params?: Record<string, unknown
   try {
     return await invoke<T>("rpc_call", { method, params: params ?? null });
   } catch (err) {
-    throw new RpcClientError(typeof err === "string" ? err : String(err));
+    const failure = new RpcClientError(typeof err === "string" ? err : String(err));
+    // Feeds the Error Center's "app" section. Deliberately fire-and-forget
+    // and non-throwing (see lib/errorCapture.ts): the caller's rejection is
+    // unchanged - same RpcClientError, same timing - so every existing
+    // try/catch and react-query error path behaves exactly as before.
+    recordRpcFailure(method, failure);
+    throw failure;
   }
 }
 

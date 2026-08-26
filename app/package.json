@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "dev:mcp": "tauri dev --features mcp"
   },
   "dependencies": {
     "react": "^19.1.0",
@@ -33,6 +34,7 @@
     "vite": "^7.0.4",
     "@tauri-apps/cli": "^2",
     "vitest": "^3",
-    "@testing-library/react": "^16"
+    "@testing-library/react": "^16",
+    "tauri-plugin-mcp": "^0.3.1"
   }
 }

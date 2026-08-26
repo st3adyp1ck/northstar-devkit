@@ -1,39 +1,140 @@
-.github-panel__list {
+/**
+ * Pull request / issue rows for the Git flyout.
+ *
+ * The old layout was one cramped line built for a 300px sidebar column:
+ * number, ellipsised title, author, done. Each list is now a whole tab of a
+ * much wider and FULL-HEIGHT surface, so a row is two lines - the title on
+ * top, the things you filter by (branches, labels) underneath - with the
+ * metadata that answers "is this mine / is it moving" held in a right-hand
+ * column that lines up down the whole list.
+ */
+
+/* One tab's body: a thin status strip over a list that takes the rest. */
+.gh-pane {
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  max-height: 260px;
-  overflow-y: auto;
+  min-height: 0;
+  gap: var(--space-1);
 }
 
-.github-panel__row {
+.gh-status {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  width: 100%;
-  padding: var(--space-1) var(--space-2);
-  border-radius: var(--radius-sm);
-  background: transparent;
-  border: none;
-  color: inherit;
-  font: inherit;
-  text-align: left;
+  padding-bottom: 2px;
 }
 
-.github-panel__row:hover {
+.gh-list {
+  container-type: inline-size;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-height: 0;
+  /* Floating-widget cap only - in the tray the tab panel has a real height
+     to hand over, and GitPanel.css lifts this there. */
+  max-height: min(38vh, 380px);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.gh-row {
+  all: unset;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard);
+}
+
+/* A PR row carries one extra leading column: the lane it is drawn in on the
+   Graph tab. */
+.gh-row--pr {
+  grid-template-columns: auto auto auto minmax(0, 1fr) auto;
+  gap: 6px var(--space-2);
+}
+
+.gh-row__wire {
+  width: 3px;
+  height: 22px;
+  border-radius: var(--radius-pill);
+  background: var(--pr-color, var(--accent));
+  box-shadow: 0 0 6px color-mix(in srgb, var(--pr-color, var(--accent)) 50%, transparent);
+}
+
+/* No lane color means this PR is NOT on the graph (its head branch isn't in
+   the last 40 commits, or its base isn't either). Say it with an empty
+   channel rather than borrowing some other PR's color. */
+.gh-row__wire--none {
+  background: repeating-linear-gradient(
+    to bottom,
+    var(--surface-border-strong) 0 2px,
+    transparent 2px 5px
+  );
+  box-shadow: none;
+}
+
+/* Lit from the Graph tab - the same highlight its ribbon is wearing there. */
+.gh-row--lit {
   background: var(--surface-hover);
 }
 
-.github-panel__number {
+.gh-row:hover {
+  background: var(--surface-hover);
+}
+
+.gh-row:focus-visible {
+  outline: none;
+  background: var(--surface-hover);
+  box-shadow: inset 0 0 0 1px var(--accent-strong);
+}
+
+.gh-row--selected {
+  background: var(--surface-active);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.gh-row__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
   flex-shrink: 0;
-  min-width: 30px;
+}
+
+.gh-row__dot--open {
+  background: var(--success);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--success) 60%, transparent);
+}
+
+.gh-row__dot--draft {
+  background: transparent;
+  border: 1.5px solid var(--text-tertiary);
+}
+
+.gh-row__num {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
   font-size: var(--text-2xs);
   color: var(--text-tertiary);
   font-variant-numeric: tabular-nums;
 }
 
-.github-panel__title {
-  flex: 1;
+.gh-row__main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.gh-row__title {
   min-width: 0;
   font-size: var(--text-xs);
   color: var(--text-primary);
@@ -42,22 +143,88 @@
   white-space: nowrap;
 }
 
-.github-panel__author {
+.gh-row__sub {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.gh-row__branches {
   flex-shrink: 0;
-  max-width: 92px;
-  font-size: var(--text-2xs);
+  max-width: 190px;
+  font-family: var(--font-mono);
+  font-size: 10px;
   color: var(--text-tertiary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.github-panel__flag {
+.gh-row__meta {
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  font-size: 10px;
+  color: var(--text-tertiary);
 }
 
-.github-panel__truncated {
-  margin-top: var(--space-2);
-  font-size: var(--text-2xs);
-  color: var(--text-tertiary);
+.gh-row__review {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.gh-row__review--ok {
+  background: color-mix(in srgb, var(--success) 18%, transparent);
+  color: var(--success);
+}
+
+.gh-row__review--block {
+  background: var(--danger-soft);
+  color: var(--danger-strong);
+}
+
+.gh-row__comments {
+  font-variant-numeric: tabular-nums;
+}
+
+.gh-row__author {
+  max-width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gh-row__when {
+  width: 72px;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Narrow pane: shed the columns that are context, keep the ones that identify. */
+@container (max-width: 360px) {
+  .gh-row__when {
+    display: none;
+  }
+
+  .gh-row__branches {
+    max-width: 120px;
+  }
+}
+
+@container (max-width: 280px) {
+  .gh-row__author {
+    display: none;
+  }
 }

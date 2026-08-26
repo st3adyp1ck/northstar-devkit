@@ -88,6 +88,22 @@
   display: flex;
   align-items: center;
   gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+/* Spells out the difference between the three ways to leave a running tool,
+   because only one of them actually ends it. Sits directly under the row so
+   the buttons stay adjacent to their explanation. */
+.tool-run-dialog__stop-hint {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-2xs);
+  line-height: 1.5;
+  color: var(--text-tertiary);
+}
+
+.tool-run-dialog__stop-hint strong {
+  color: var(--text-secondary);
+  font-weight: 600;
 }
 
 .tool-run-dialog__console {
@@ -118,4 +134,25 @@
 
 .tool-run-dialog__console-err {
   color: var(--ember-400);
+}
+
+/* Shown when the tool.run RPC errored but the run may still be alive and
+   the dialog is still watching for its tool.finished. */
+.tool-run-dialog__watching {
+  margin-top: var(--space-3);
+  background: color-mix(in srgb, var(--signal-amber) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--signal-amber) 36%, transparent);
+  color: var(--signal-amber);
+  font-size: var(--text-2xs);
+  line-height: 1.5;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+}
+
+.tool-run-dialog__history {
+  margin-top: var(--space-3);
+}
+
+.tool-run-dialog__history-body {
+  padding: 0 var(--space-3) var(--space-3) var(--space-3);
 }

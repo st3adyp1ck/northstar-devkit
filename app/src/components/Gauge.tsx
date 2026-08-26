@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import clsx from "clsx";
+import { Sparkline } from "./Sparkline";
 import "./Gauge.css";
 
 interface GaugeProps {
@@ -10,6 +11,15 @@ interface GaugeProps {
   tone?: "sapphire" | "ember" | "amber" | "cyan";
   size?: number;
   onClick?: () => void;
+  /**
+   * Recent readings in poll order, oldest first, drawn as a trend line under
+   * the label in this gauge's own tone. `null` entries are sensor gaps and
+   * break the line rather than plotting as 0. Omit entirely for a metric
+   * that doesn't move fast enough to be worth a trace (Disk Free).
+   */
+  history?: ReadonlyArray<number | null>;
+  /** Capacity of the caller's ring buffer, so a partly-filled one grows from the left. */
+  historyCapacity?: number;
 }
 
 const TONE_VAR: Record<NonNullable<GaugeProps["tone"]>, string> = {
@@ -39,7 +49,16 @@ function gaugeDurationMs(): number {
  * spikes CPU/GPU" bug: no per-frame layout/paint work beyond updating one
  * `stroke-dashoffset`, and the loop stops entirely once the value settles.
  */
-export function Gauge({ label, percent, sub, tone = "sapphire", size = 92, onClick }: GaugeProps) {
+export function Gauge({
+  label,
+  percent,
+  sub,
+  tone = "sapphire",
+  size = 92,
+  onClick,
+  history,
+  historyCapacity,
+}: GaugeProps) {
   const [display, setDisplay] = useState(percent ?? 0);
   const rafRef = useRef<number | null>(null);
 
@@ -87,36 +106,52 @@ export function Gauge({ label, percent, sub, tone = "sapphire", size = 92, onCli
       onClick={onClick}
       style={{ width: size, cursor: onClick ? "pointer" : "default" }}
     >
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          fill="none"
-          stroke="var(--surface-border)"
-          strokeWidth={6}
-        />
-        {percent !== null && (
+      {/* The readout is centered against the DIAL, not the button: anything
+          added below (the label, the sub, the sparkline) would otherwise
+          drag the "centered" value down off the arc. */}
+      <span className="devkit-gauge__dial">
+        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
           <circle
             cx={size / 2}
             cy={size / 2}
             r={radius}
             fill="none"
-            stroke={color}
+            stroke="var(--surface-border)"
             strokeWidth={6}
-            strokeLinecap="round"
-            strokeDasharray={circumference}
-            strokeDashoffset={offset}
-            transform={`rotate(-90 ${size / 2} ${size / 2})`}
-            style={{ filter: `drop-shadow(0 0 6px ${color})` }}
           />
-        )}
-      </svg>
-      <div className="devkit-gauge__center">
-        <span className="devkit-gauge__value">{percent === null ? "n/a" : `${Math.round(percent)}%`}</span>
-      </div>
+          {percent !== null && (
+            <circle
+              cx={size / 2}
+              cy={size / 2}
+              r={radius}
+              fill="none"
+              stroke={color}
+              strokeWidth={6}
+              strokeLinecap="round"
+              strokeDasharray={circumference}
+              strokeDashoffset={offset}
+              transform={`rotate(-90 ${size / 2} ${size / 2})`}
+              style={{ filter: `drop-shadow(0 0 6px ${color})` }}
+            />
+          )}
+        </svg>
+        <span className="devkit-gauge__center">
+          <span className="devkit-gauge__value">{percent === null ? "n/a" : `${Math.round(percent)}%`}</span>
+        </span>
+      </span>
       <div className="devkit-gauge__label">{label}</div>
       {sub && <div className="devkit-gauge__sub">{sub}</div>}
+      {history && (
+        <span className="devkit-gauge__spark">
+          <Sparkline
+            values={history}
+            capacity={historyCapacity}
+            color={color}
+            height={28}
+            ariaLabel={`${label} recent history`}
+          />
+        </span>
+      )}
     </button>
   );
 }

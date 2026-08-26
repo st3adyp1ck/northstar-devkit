@@ -1,0 +1,562 @@
+/**
+ * ---------- widget flyout trays ----------
+ * The original WPF widget's pull-tabs, rebuilt: a vertical rail of tabs on
+ * the docked sidebar's inner edge, and a pane of projected glass that slides
+ * out BESIDE the panel column (the OS window widens; commands::set_widget_flyout).
+ *
+ * Everything derives from --accent, so each of the 10 themes projects its
+ * tray in its own light.
+ *
+ * SIZE UNITS. --flyout-rail-w, --rail-icon-size and --flyout-w are all
+ * already divided by --ui-scale by whoever publishes them (see .widget-app
+ * in WidgetApp.css, and the stack's width below): the widget root carries a
+ * CSS `zoom`, so a raw px value here would RENDER at px * uiScale while Rust
+ * - which knows nothing about zoom - reserves the unscaled logical px. The
+ * division is what makes the two agree at every scale.
+ */
+
+/* ---------- tab rail ---------- */
+.flyout-rail {
+  /* The rail's own background, published so solid-theme glyphs can knock
+     their detail out of the fill against the surface they actually sit on. */
+  --rail-icon-knockout: color-mix(in srgb, var(--surface-app) 90%, var(--accent));
+  flex: 0 0 var(--flyout-rail-w, 44px);
+  width: var(--flyout-rail-w, 44px);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  background: color-mix(in srgb, var(--surface-app) 90%, var(--accent));
+  transition: opacity var(--duration-base) var(--ease-standard);
+}
+
+/* Docked Left -> the rail sits on the column's RIGHT edge, so the hairline
+   that separates it from the column runs down its left, and vice versa. */
+.flyout-rail--dock-left {
+  border-left: 1px solid color-mix(in srgb, var(--accent) 16%, var(--surface-border));
+}
+
+.flyout-rail--dock-right {
+  border-right: 1px solid color-mix(in srgb, var(--accent) 16%, var(--surface-border));
+}
+
+/* Takes ALL the height the brand plate doesn't, and centres the tabs inside
+   it. Centring the group rather than the whole rail is what keeps the tabs
+   optically centred with a plate pinned below them, and keeps them centred
+   as trays are added or removed. */
+.flyout-rail__tabs {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: var(--space-2) 0;
+}
+
+.flyout-rail__tab {
+  position: relative;
+  width: 100%;
+  /* Proportional to the strip, so a wider rail gets taller tabs and the
+     glyphs keep the same optical breathing room at any railWidth. */
+  height: calc(var(--flyout-rail-w, 44px) * 0.84);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-standard),
+    background var(--duration-fast) var(--ease-standard);
+}
+
+.flyout-rail__tab:hover {
+  color: var(--accent-strong);
+  background: var(--surface-hover);
+}
+
+.flyout-rail__tab:focus-visible {
+  outline: none;
+  color: var(--accent-strong);
+  box-shadow: var(--shadow-focus-ring);
+}
+
+/* The open tray's tab reads "lit". */
+.flyout-rail__tab--active {
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+}
+
+/* Glyph box. One settings value (railIconSize) drives every icon in the
+   rail; RailIcon's optional `size` prop overrides it inline for previews. */
+.rail-icon {
+  flex: none;
+  display: block;
+  width: var(--rail-icon-size, 18px);
+  height: var(--rail-icon-size, 18px);
+}
+
+/* Hairline accent light on the pane-facing edge of each tab. */
+.flyout-rail__light {
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(to bottom, transparent, var(--accent), transparent);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 60%, transparent);
+  opacity: 0;
+  transition: opacity var(--duration-base) var(--ease-standard);
+}
+
+.flyout-rail--dock-left .flyout-rail__light {
+  right: 0;
+}
+
+.flyout-rail--dock-right .flyout-rail__light {
+  left: 0;
+}
+
+.flyout-rail__tab:hover .flyout-rail__light,
+.flyout-rail__tab:focus-visible .flyout-rail__light {
+  opacity: 0.5;
+}
+
+.flyout-rail__tab--active .flyout-rail__light {
+  opacity: 1;
+  animation: flyout-rail-breathe 2.4s ease-in-out infinite;
+}
+
+@keyframes flyout-rail-breathe {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flyout-rail__tab--active .flyout-rail__light {
+    animation: none;
+    opacity: 1;
+  }
+}
+
+/* App-level twin of the media query above - see tokens.css's data-animations block. */
+:root[data-animations="off"] .flyout-rail__tab--active .flyout-rail__light {
+  animation: none;
+  opacity: 1;
+}
+
+/* ---------- DEVKIT plate ----------
+   Square, full rail width, flush to the foot of the strip: the base section
+   of the chassis rather than a button parked on top of it. Seated on a lit
+   seam, raised by an inset highlight, and pressed physically (it drops a
+   pixel into an inset shadow). Everything scales off the rail width so a
+   58px rail gets a proportionally bigger plate and legend. */
+.flyout-rail__brand {
+  position: relative;
+  flex: 0 0 auto;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: calc(var(--flyout-rail-w, 44px) * 0.07);
+  padding: calc(var(--flyout-rail-w, 44px) * 0.2) 2px calc(var(--flyout-rail-w, 44px) * 0.17);
+  border: none;
+  border-top: 1px solid color-mix(in srgb, var(--accent) 34%, var(--surface-border));
+  background:
+    linear-gradient(to top, color-mix(in srgb, var(--accent) 20%, transparent), transparent 76%),
+    color-mix(in srgb, var(--surface-raised) 84%, var(--accent));
+  color: var(--accent-strong);
+  cursor: pointer;
+  overflow: hidden;
+  box-shadow: var(--shadow-glass-highlight);
+  transition: background var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard);
+}
+
+.flyout-rail__brand:hover {
+  color: var(--text-primary);
+  background:
+    linear-gradient(to top, color-mix(in srgb, var(--accent) 32%, transparent), transparent 72%),
+    color-mix(in srgb, var(--surface-raised) 70%, var(--accent));
+  box-shadow: var(--shadow-glass-highlight), var(--shadow-glow-accent);
+}
+
+.flyout-rail__brand:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus-ring);
+}
+
+.flyout-rail__brand:active {
+  transform: translateY(1px);
+  box-shadow: var(--shadow-inset);
+}
+
+/* The lit edge the plate is seated on. */
+.flyout-rail__brand-seam {
+  position: absolute;
+  top: 0;
+  left: 14%;
+  right: 14%;
+  height: 2px;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(to right, transparent, var(--accent), transparent);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 70%, transparent);
+  opacity: 0.8;
+  transition: opacity var(--duration-fast) var(--ease-standard);
+}
+
+.flyout-rail__brand:hover .flyout-rail__brand-seam {
+  opacity: 1;
+}
+
+/* The rose carries the plate, so it runs a touch larger than a tray glyph. */
+.flyout-rail__brand-mark {
+  width: calc(var(--rail-icon-size, 18px) * 1.2);
+  height: calc(var(--rail-icon-size, 18px) * 1.2);
+}
+
+/* Silkscreened legend: sized off the rail so six characters always fit, at
+   any railWidth, without a media query or a measurement. */
+.flyout-rail__brand-label {
+  max-width: 100%;
+  font-size: calc(var(--flyout-rail-w, 44px) * 0.17);
+  line-height: 1;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  overflow: hidden;
+}
+
+/* ---------- pane region ----------
+   Closed, this claims no width at all. Open (and once the column is pinned -
+   see useWidgetFlyout's columnWidth), it takes every pixel the widened
+   window hands over, which is what makes the pane appear to be drawn out of
+   the sidebar edge instead of popping into existence. The stack inside keeps
+   its full pixel width the whole time and is simply clipped, so nothing in a
+   tray ever gets laid out at 0 width. */
+.widget-flyout {
+  position: relative;
+  flex: 0 0 0px;
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  z-index: 15;
+}
+
+.widget-flyout--expanded {
+  flex: 1 1 auto;
+}
+
+/* The stack hugs the rail, so the pane is revealed from the sidebar outward. */
+.widget-flyout--dock-left {
+  justify-content: flex-start;
+}
+
+.widget-flyout--dock-right {
+  justify-content: flex-end;
+}
+
+/* Never shrinks below its configured width (so a tray's contents are laid
+   out at full size even while the region is still 0-wide mid-resize, which
+   is what keeps xterm from reflowing scrollback into a sliver), but does
+   grow if the user drags the sidebar wider while a tray is open.
+
+   Divided by --ui-scale for the same reason the rail is: --flyout-w is the
+   number handed to Rust, in logical px, and the zoomed webview would
+   otherwise render it at flyoutWidth * uiScale - narrower than the window
+   Rust widened by, leaving a strip of bare app surface beside the glass. */
+.widget-flyout__stack {
+  position: relative;
+  flex: 1 0 auto;
+  width: calc(var(--flyout-w, 380px) / var(--ui-scale, 1));
+  height: 100%;
+  min-height: 0;
+  /* Translucent so the app's scanline layer reads through the pane too - one
+     holographic surface, not a card parked next to one. */
+  background:
+    linear-gradient(to bottom, color-mix(in srgb, var(--accent) 8%, transparent), transparent 42%),
+    var(--surface-panel);
+  box-shadow: var(--shadow-lg);
+}
+
+/* The pane is the FOCUSED surface: its seam against the sidebar burns hotter
+   than the inline panels' edge light. */
+.widget-flyout__stack::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  z-index: 3;
+  pointer-events: none;
+  background: linear-gradient(to bottom, transparent, var(--accent), transparent);
+  box-shadow: 0 0 16px 1px color-mix(in srgb, var(--accent) 50%, transparent);
+}
+
+.widget-flyout--dock-left .widget-flyout__stack::before {
+  left: 0;
+}
+
+.widget-flyout--dock-right .widget-flyout__stack::before {
+  right: 0;
+}
+
+/* Diagonal sheen across the whole sheet. */
+.widget-flyout__stack::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background: linear-gradient(
+    118deg,
+    color-mix(in srgb, var(--accent) 8%, transparent) 0%,
+    transparent 34%,
+    transparent 68%,
+    color-mix(in srgb, var(--accent) 5%, transparent) 100%
+  );
+}
+
+/* ---------- resize handle ----------
+   Rides the lit seam on the pane's INNER edge - the one edge that stays put
+   in screen space while the window grows outward, so the handle never runs
+   away from the pointer. */
+.widget-flyout__resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 7px;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.widget-flyout--dock-left .widget-flyout__resizer {
+  left: 0;
+}
+
+.widget-flyout--dock-right .widget-flyout__resizer {
+  right: 0;
+}
+
+.widget-flyout__grip {
+  width: 2px;
+  height: 34px;
+  border-radius: var(--radius-pill);
+  background: var(--accent-strong);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 70%, transparent);
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-standard),
+    height var(--duration-fast) var(--ease-standard);
+}
+
+.widget-flyout__resizer:hover .widget-flyout__grip,
+.widget-flyout__resizer:focus-visible .widget-flyout__grip,
+.widget-flyout--resizing .widget-flyout__grip {
+  opacity: 1;
+  height: 56px;
+}
+
+.widget-flyout__resizer:focus-visible {
+  outline: none;
+}
+
+/* Live width, so the drag is a number and not a guess - the OS window trails
+   the pointer by a beat and the readout is what stays honest in that gap. */
+.widget-flyout__readout {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 7;
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-pill);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--surface-border));
+  background: var(--surface-panel-solid);
+  box-shadow: var(--shadow-md);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+.widget-flyout--dock-left .widget-flyout__readout {
+  left: var(--space-3);
+}
+
+.widget-flyout--dock-right .widget-flyout__readout {
+  right: var(--space-3);
+}
+
+.widget-flyout__readout-unit {
+  color: var(--text-tertiary);
+}
+
+/* ---------- panes ----------
+   Stacked, all mounted, cross-faded. `visibility` (not `display`) so an
+   inactive pane keeps its box - xterm measures itself off that box - and it
+   flips only AFTER the fade-out has run, via the transition delay. */
+.widget-flyout__pane {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: visibility 0s linear var(--duration-base);
+}
+
+.widget-flyout__pane--active {
+  visibility: visible;
+  pointer-events: auto;
+  transition-delay: 0s;
+}
+
+/* A drag must not be interrupted by the pane under it deciding it wants the
+   pointer (xterm, in particular, captures aggressively). */
+.widget-flyout--resizing .widget-flyout__pane {
+  pointer-events: none;
+}
+
+.widget-flyout__head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-2) var(--space-3) var(--space-4);
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 20%, var(--surface-border));
+}
+
+.widget-flyout__head-icon {
+  display: flex;
+  align-items: center;
+  color: var(--accent-strong);
+  flex-shrink: 0;
+}
+
+.widget-flyout__title {
+  margin: 0;
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.widget-flyout__close {
+  margin-left: auto;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-standard),
+    background var(--duration-fast) var(--ease-standard);
+}
+
+.widget-flyout__close:hover {
+  color: var(--text-primary);
+  background: var(--surface-hover);
+}
+
+.widget-flyout__close:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus-ring);
+}
+
+.widget-flyout__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* ---------- full-height pane (terminal) ----------
+   TerminalPanel.css pins its body to a fixed 320px, which was right for a
+   panel squeezed into the scrolling column and is wrong now that the tray
+   gives it the whole height. Overridden here rather than there because that
+   file belongs to another agent - see the report's follow-up note. */
+.widget-flyout__pane--fill .widget-flyout__body {
+  overflow: hidden;
+  padding: var(--space-2);
+}
+
+.widget-flyout__pane--fill .widget-flyout__body > * {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.widget-flyout__pane--fill .terminal-panel__body {
+  height: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* ---------- fallback: in-window overlay drawer ----------
+   Used only while set_widget_flyout is refusing calls, so the window never
+   widens. The pane then floats over the panel column instead of beside it -
+   less true to the original, but the tray still works, and the moment Rust
+   starts answering again the next open is back beside the column. */
+.widget-flyout--overlay {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  flex: none;
+  width: auto;
+  max-width: calc(100% - var(--space-6));
+  z-index: 25;
+  transition: transform var(--duration-base) var(--ease-standard);
+}
+
+.widget-flyout--overlay.widget-flyout--dock-left {
+  right: var(--flyout-rail-w, 44px);
+}
+
+.widget-flyout--overlay.widget-flyout--dock-right {
+  left: var(--flyout-rail-w, 44px);
+}
+
+.widget-flyout--overlay .widget-flyout__stack {
+  width: min(calc(var(--flyout-w, 380px) / var(--ui-scale, 1)), 100%);
+  background:
+    linear-gradient(to bottom, color-mix(in srgb, var(--accent) 8%, transparent), transparent 42%),
+    var(--surface-panel-solid);
+}
+
+.widget-flyout--overlay.widget-flyout--closed {
+  pointer-events: none;
+}
+
+.widget-flyout--overlay.widget-flyout--closed.widget-flyout--dock-left {
+  transform: translateX(100%);
+}
+
+.widget-flyout--overlay.widget-flyout--closed.widget-flyout--dock-right {
+  transform: translateX(-100%);
+}

@@ -1,0 +1,232 @@
+/* Command palette - the one overlay that sits above every other surface
+   (SettingsDialog is 220), because Ctrl+K is a global escape hatch that
+   should work no matter what's already on screen. */
+
+.command-palette__overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: max(8vh, var(--space-8)) var(--space-4) var(--space-4);
+  background: var(--surface-overlay);
+  backdrop-filter: blur(4px);
+  z-index: 240;
+}
+
+.command-palette__positioner {
+  width: min(640px, 96vw);
+  max-height: min(560px, 78vh);
+  display: flex;
+}
+
+.command-palette {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  box-shadow: var(--shadow-lg), var(--shadow-glow-accent);
+  overflow: hidden;
+}
+
+.command-palette__inner {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* ---------- search row ---------- */
+
+.command-palette__search {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--surface-border);
+  flex-shrink: 0;
+}
+
+.command-palette__search-icon {
+  font-size: var(--text-sm);
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+
+.command-palette__input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--text-lg);
+}
+
+.command-palette__input::placeholder {
+  color: var(--text-tertiary);
+}
+
+.command-palette__input:focus {
+  outline: none;
+}
+
+/* The input is the palette's only focus target, so the global focus-visible
+   halo would just draw a ring around the whole header - suppress it here. */
+.command-palette__input:focus-visible:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.command-palette__kbd {
+  flex-shrink: 0;
+  padding: 1px var(--space-2);
+  background: var(--surface-raised);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  line-height: 1.5;
+}
+
+/* Degraded-but-usable note: one of the three sources (the tool catalog)
+   couldn't be fetched, while projects and actions are built locally and
+   still list. Warning-toned, not danger - the palette is working, it just
+   knows less than usual. */
+.command-palette__notice {
+  margin: var(--space-3) var(--space-4) 0;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warning) 32%, transparent);
+  border-radius: var(--radius-sm);
+}
+
+.command-palette__error {
+  margin: var(--space-3) var(--space-4) 0;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--danger-strong);
+  background: var(--danger-soft);
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
+  border-radius: var(--radius-sm);
+}
+
+/* ---------- results ---------- */
+
+.command-palette__list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-2);
+  scroll-padding-block: var(--space-6);
+}
+
+.command-palette__empty {
+  padding: var(--space-8) var(--space-5);
+  text-align: center;
+  font-size: var(--text-sm);
+  color: var(--text-tertiary);
+}
+
+.command-palette__group {
+  padding: var(--space-3) var(--space-3) var(--space-1);
+  font-size: var(--text-2xs);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.command-palette__option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+
+.command-palette__option--active {
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.command-palette__option-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.command-palette__option-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.command-palette__hit {
+  background: transparent;
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+
+.command-palette__option-sub {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.command-palette__option-meta {
+  flex-shrink: 0;
+  max-width: 40%;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--text-tertiary);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* ---------- footer ---------- */
+
+.command-palette__footer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-2) var(--space-4);
+  border-top: 1px solid var(--surface-border);
+  font-size: var(--text-2xs);
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.command-palette__footer .command-palette__kbd {
+  margin-right: 2px;
+}
+
+/* Narrow hosts (the widget): the per-row meta column is the first thing to
+   go - the title and description carry the row on their own. */
+@media (max-width: 520px) {
+  .command-palette__option-meta {
+    display: none;
+  }
+
+  .command-palette__overlay {
+    padding-top: var(--space-6);
+  }
+}

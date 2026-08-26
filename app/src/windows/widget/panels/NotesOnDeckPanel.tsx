@@ -56,6 +56,13 @@ export function NotesOnDeckPanel() {
     data: notes,
     isLoading: notesLoading,
     refetch: refetchNotes,
+    // notes.save replaces the project's WHOLE note list (see
+    // Set-DevKitProjectNotes: "$Notes is the full replacement list"), so a
+    // read failure is not cosmetic here - adding a note against an
+    // unknown list would persist `[theNewNote]` over the real contents and
+    // there is no undo. `notesFailed` gates both the empty state and Add.
+    failed: notesFailed,
+    errorMessage: notesError,
   } = usePolledRpc<ProjectNote[]>("notes.get", params, 10000, !!active);
   const {
     data: items,
@@ -79,6 +86,13 @@ export function NotesOnDeckPanel() {
 
   async function addNote() {
     if (!active || !noteDraft.trim()) return;
+    // Defense in depth behind the disabled Add button: notes.save sends the
+    // FULL replacement list, so writing while the existing notes are unknown
+    // destroys them. Never save against an assumed-empty list.
+    if (notesFailed || notes === undefined) {
+      setError("Can't add a note until the existing notes load - the save would replace them.");
+      return;
+    }
     const current = noteList;
     const text = noteDraft.trim();
     const newNote: ProjectNote = {
@@ -186,12 +200,26 @@ export function NotesOnDeckPanel() {
               placeholder="New note..."
               className="notes-panel__input"
             />
-            <Button size="sm" variant="primary" onClick={addNote} disabled={!noteDraft.trim()}>
+            <Button
+              size="sm"
+              variant="primary"
+              onClick={addNote}
+              // Blocked until the current list is actually known - see the
+              // full-replacement note on notesFailed above.
+              disabled={!noteDraft.trim() || notesFailed || notes === undefined}
+              title={notesFailed ? "Can't add a note until the existing notes load" : undefined}
+            >
               Add
             </Button>
           </div>
           {notesLoading && !notes ? (
             <div className="panel-empty">Loading notes...</div>
+          ) : notesFailed ? (
+            // Deliberately NOT "No notes yet." - that reads as "this project
+            // has none" and invites an Add that would overwrite them.
+            <div className="panel-empty panel-empty--danger" role="alert">
+              Couldn&apos;t read notes{notesError ? ` - ${notesError}` : "."}
+            </div>
           ) : noteList.length === 0 ? (
             <div className="panel-empty">No notes yet.</div>
           ) : (

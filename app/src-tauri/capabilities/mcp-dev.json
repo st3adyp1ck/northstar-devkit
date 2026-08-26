@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "mcp-dev",
+  "description": "Dev-only: lets the webview forward console.* output and observed IPC traffic to the MCP bridge's ring buffers, so query_logs and manage_ipc can see them. Kept in its own file rather than merged into default.json because the whole bridge is a development tool - deleting this file is how you turn the webview half off. Tauri capabilities cannot be gated on build profile, so this grant exists in release builds too; it is inert there because attach_mcp_bridge() never registers the plugin outside debug builds, leaving mcp.push_log/push_ipc as commands that simply do not exist.",
+  "windows": ["widget", "control-center"],
+  "permissions": ["mcp:default"]
+}

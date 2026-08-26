@@ -1,51 +1,253 @@
 name: CI
 
+# Verifies the whole tree on windows-latest: the PowerShell sidecar/tool
+# layer, the Rust workspace (app/src-tauri, cli, crates/devkit-host), the
+# React frontend, and the version triple that the in-app updater depends on.
+#
+# Deliberately does NOT build the Tauri installer - a full `tauri build` is
+# far too slow for a PR gate, and .github/workflows/release.yml already does
+# it on every version tag. The four jobs below run in parallel.
+
 on:
   push:
     branches: [main, master]
   pull_request:
     branches: [main, master]
 
+# A follow-up push to the same branch/PR cancels the previous run. These are
+# four Windows runners; stale runs are pure runner-minute burn.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  validate-powershell:
+  # --------------------------------------------------------------------
+  # The version triple must agree or the UPDATER silently breaks. The
+  # in-app updater compares the running build against the version baked in
+  # from tauri.conf.json, so a stale value there means installed clients
+  # either never see a published release or are re-offered one they already
+  # have. VERSION and the Cargo workspace version are the two that people
+  # actually remember to bump; tauri.conf.json is the one that matters.
+  # --------------------------------------------------------------------
+  verify-version:
+    name: Version triple
     runs-on: windows-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
+
+      - name: VERSION == Cargo workspace == tauri.conf.json
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          function Get-CargoWorkspaceVersion {
+            param([string]$Path)
+            $section = ''
+            foreach ($line in Get-Content -LiteralPath $Path) {
+              $t = $line.Trim()
+              if ($t -match '^\[(.+?)\]\s*$') { $section = $Matches[1]; continue }
+              if ($section -eq 'workspace.package' -and $t -match '^version\s*=\s*"([^"]+)"') {
+                return $Matches[1]
+              }
+            }
+            return $null
+          }
+
+          $trimChars = @([char]0xFEFF, ' ', "`t", "`r", "`n")
+          $sources = [ordered]@{
+            'VERSION'                        = (Get-Content -LiteralPath 'VERSION' -Raw).Trim($trimChars)
+            'Cargo.toml (workspace.package)' = Get-CargoWorkspaceVersion -Path 'Cargo.toml'
+            'app/src-tauri/tauri.conf.json'  = (Get-Content -LiteralPath 'app/src-tauri/tauri.conf.json' -Raw | ConvertFrom-Json).version
+          }
+
+          Write-Host 'Declared versions:'
+          foreach ($kv in $sources.GetEnumerator()) {
+            Write-Host ('  {0,-32} {1}' -f $kv.Key, $(if ($kv.Value) { $kv.Value } else { '<not found>' }))
+          }
+          Write-Host ''
+
+          $failed = $false
+
+          foreach ($kv in $sources.GetEnumerator()) {
+            if ([string]::IsNullOrWhiteSpace($kv.Value)) {
+              Write-Host "::error::Could not read a version from $($kv.Key)."
+              $failed = $true
+            } elseif ($kv.Value -notmatch '^\d+\.\d+\.\d+$') {
+              Write-Host "::error::$($kv.Key) declares '$($kv.Value)', which is not a MAJOR.MINOR.PATCH version."
+              $failed = $true
+            }
+          }
+
+          if (-not $failed) {
+            $distinct = @($sources.Values | Sort-Object -Unique)
+            if ($distinct.Count -ne 1) {
+              Write-Host "::error::Version triple disagrees ($($distinct -join ', ')). Bump all three - see dev/RELEASING.md. A stale app/src-tauri/tauri.conf.json version silently breaks the in-app updater."
+              $failed = $true
+            }
+          }
+
+          # The three member crates must keep delegating to
+          # [workspace.package].version - a hardcoded version in any of them
+          # would drift without this job ever noticing.
+          foreach ($manifest in @('app/src-tauri/Cargo.toml', 'cli/Cargo.toml', 'crates/devkit-host/Cargo.toml')) {
+            if (-not (Select-String -LiteralPath $manifest -Pattern '^\s*version\.workspace\s*=\s*true\s*$' -Quiet)) {
+              Write-Host "::error file=$manifest::$manifest must declare 'version.workspace = true' so it inherits the workspace version."
+              $failed = $true
+            }
+          }
+
+          if ($failed) { exit 1 }
+          Write-Host "Version triple agrees: $($sources['VERSION'])"
+
+  # --------------------------------------------------------------------
+  # PowerShell: the RPC sidecar (core/), the ~65 tool scripts (tools/), and
+  # the Pester suite over the pure-logic layer.
+  # --------------------------------------------------------------------
+  validate-powershell:
+    name: PowerShell
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
 
       - name: Install PSScriptAnalyzer
         shell: pwsh
         run: Install-Module PSScriptAnalyzer -Force -SkipPublisherCheck
 
-      - name: Run PSScriptAnalyzer
+      - name: Run PSScriptAnalyzer (advisory)
         shell: pwsh
         run: |
-          $results = Invoke-ScriptAnalyzer -Path . -Recurse -Severity Warning -ErrorAction SilentlyContinue
-          if ($results) {
-            $results | Format-Table -AutoSize
-            Write-Host "PSScriptAnalyzer found issues."
+          # DELIBERATELY ADVISORY, and now explicitly so rather than by
+          # accident. The tools are interactive console programs, so roughly
+          # 1090 of the ~1290 current findings are PSAvoidUsingWriteHost -
+          # Write-Host IS the output contract here, not a defect. Findings are
+          # summarised for review; the enforced gate is the NEXT step, which
+          # fails the job on Error/ParseError severity.
+          #
+          # (The old version of this step also passed -Severity Warning, which
+          # filters to Warning *only* and therefore hid every Error-severity
+          # finding it was nominally there to surface.)
+          $results = @(Invoke-ScriptAnalyzer -Path . -Recurse -Severity Error, Warning -ErrorAction SilentlyContinue)
+          if ($results.Count -gt 0) {
+            $results |
+              Group-Object RuleName |
+              Sort-Object Count -Descending |
+              Format-Table Count, @{ Name = 'Rule'; Expression = { $_.Name } } -AutoSize |
+              Out-String -Width 200 |
+              Write-Host
+            Write-Host "PSScriptAnalyzer: $($results.Count) advisory finding(s). Not failing the build - see the next step for the enforced gate."
           } else {
-            Write-Host "No issues found."
+            Write-Host 'PSScriptAnalyzer: no findings.'
           }
 
-      - name: Syntax Check all PowerShell files
+      - name: PSScriptAnalyzer gate (Error / ParseError severity)
         shell: pwsh
         run: |
-          $files = Get-ChildItem -Path . -Recurse -Filter "*.ps1"
-          $failed = @()
-          foreach ($file in $files) {
-            $errors = @()
-            [void][System.Management.Automation.PSParser]::Tokenize((Get-Content $file.FullName -Raw), [ref]$errors)
-            if ($errors.Count -gt 0) {
-              Write-Host "SYNTAX ERROR in $($file.FullName)" -ForegroundColor Red
-              $errors | ForEach-Object { Write-Host "  Line $($_.Token.StartLine): $($_.Message)" }
-              $failed += $file.FullName
-            }
+          $ErrorActionPreference = 'Stop'
+          $repoRoot = (Get-Location).Path
+
+          # PSAvoidUsingComputerNameHardcoded is excluded because it fires
+          # three times in tools/wifi/WiFi-Optimize.ps1 on
+          # `Measure-DevKitPingLatency -ComputerName 8.8.8.8 / 1.1.1.1` -
+          # public DNS resolvers used as latency probes, not a leaked internal
+          # hostname. That is the ONLY excluded rule. Anything else at
+          # Error or ParseError severity fails this job.
+          $scan = @{
+            Path        = '.'
+            Recurse     = $true
+            Severity    = @('ParseError', 'Error')
+            ExcludeRule = @('PSAvoidUsingComputerNameHardcoded')
+            ErrorAction = 'SilentlyContinue'
           }
-          if ($failed.Count -gt 0) {
+          $results = @(Invoke-ScriptAnalyzer @scan)
+
+          if ($results.Count -gt 0) {
+            foreach ($r in $results) {
+              $rel = ''
+              if ($r.ScriptPath -and $r.ScriptPath.StartsWith($repoRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+                $rel = $r.ScriptPath.Substring($repoRoot.Length).TrimStart('\', '/').Replace('\', '/')
+              }
+              if ($rel) {
+                Write-Host "::error file=$rel,line=$($r.Line)::[$($r.RuleName)] $($r.Message)"
+              } else {
+                Write-Host "::error::[$($r.RuleName)] $($r.ScriptName):$($r.Line) $($r.Message)"
+              }
+            }
+            Write-Host "PSScriptAnalyzer gate: $($results.Count) blocking finding(s)."
             exit 1
           }
-          Write-Host "All $($files.Count) PowerShell files passed syntax validation." -ForegroundColor Green
+          Write-Host 'PSScriptAnalyzer gate: clean.'
+
+      - name: Syntax check all PowerShell files
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $repoRoot = (Get-Location).Path
+
+          # Previously this only globbed *.ps1, which skipped
+          # core/DevKit.Core.psm1 - the module every sidecar lane imports -
+          # and every tools/*/_module.psd1 menu manifest. Both are now covered.
+          # Skip vendored/generated trees in case a run happens after a build.
+          $skip = '[\\/](node_modules|target|dist|USB|\.kimi|\.git)[\\/]'
+          $files = @(
+            Get-ChildItem -Path . -Recurse -File |
+              Where-Object { $_.Extension -in '.ps1', '.psm1', '.psd1' } |
+              Where-Object { $_.FullName -notmatch $skip }
+          )
+
+          function Get-RepoRelative {
+            param([string]$FullName)
+            if ($FullName.StartsWith($repoRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+              return $FullName.Substring($repoRoot.Length).TrimStart('\', '/').Replace('\', '/')
+            }
+            return $FullName
+          }
+
+          $failed = [System.Collections.Generic.List[string]]::new()
+
+          foreach ($file in $files) {
+            $tokens = $null
+            $errors = $null
+            # Language.Parser::ParseFile is the modern AST parser: it reads the
+            # file directly (no Get-Content encoding round-trip) and reports a
+            # real line/column extent per error.
+            [void][System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$tokens, [ref]$errors)
+            if ($errors -and @($errors).Count -gt 0) {
+              $rel = Get-RepoRelative $file.FullName
+              Write-Host "SYNTAX ERROR in $rel"
+              foreach ($e in $errors) {
+                Write-Host "  Line $($e.Extent.StartLineNumber): $($e.Message)"
+                Write-Host "::error file=$rel,line=$($e.Extent.StartLineNumber)::$($e.Message)"
+              }
+              $failed.Add($rel)
+            }
+          }
+
+          # A .psd1 must additionally load as a PowerShell *data* file. The
+          # tools/*/_module.psd1 manifests are read at runtime with
+          # Import-PowerShellDataFile, and a construct that parses fine as
+          # script but is illegal in the restricted data language would
+          # otherwise only surface as a dead menu inside the sidecar.
+          foreach ($file in ($files | Where-Object { $_.Extension -eq '.psd1' })) {
+            try {
+              $null = Import-PowerShellDataFile -LiteralPath $file.FullName -ErrorAction Stop
+            } catch {
+              $rel = Get-RepoRelative $file.FullName
+              Write-Host "INVALID DATA FILE: $rel"
+              Write-Host "  $($_.Exception.Message)"
+              Write-Host "::error file=$rel::Import-PowerShellDataFile failed: $($_.Exception.Message)"
+              $failed.Add($rel)
+            }
+          }
+
+          if ($failed.Count -gt 0) {
+            Write-Host "$($failed.Count) file(s) failed validation."
+            exit 1
+          }
+
+          $counts = $files | Group-Object Extension | Sort-Object Name
+          Write-Host "All $($files.Count) PowerShell files passed syntax validation ($(($counts | ForEach-Object { "$($_.Count) $($_.Name)" }) -join ', '))."
 
       - name: Install Pester
         shell: pwsh
@@ -60,3 +262,83 @@ jobs:
           $config.Run.Exit = $true
           $config.Output.Verbosity = "Detailed"
           Invoke-Pester -Configuration $config
+
+  # --------------------------------------------------------------------
+  # Rust: app/src-tauri (the Tauri host), cli (the ratatui CLI), and
+  # crates/devkit-host (the NDJSON-RPC client shared by both).
+  # --------------------------------------------------------------------
+  rust:
+    name: Rust workspace
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build and stage the devkit CLI
+        # MUST run before any other cargo command that touches the `devkit`
+        # package. tauri.conf.json bundles the CLI as a resource, and
+        # tauri-build's build script hard-fails with ResourcePathNotFound if a
+        # configured resource is missing - which `cargo check` triggers too,
+        # since build scripts run under check. This mirrors, step for step,
+        # what tauri.conf.json's beforeBuildCommand does in a real build.
+        run: |
+          cargo build --release -p devkit-cli
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          New-Item -ItemType Directory -Force -Path app/src-tauri/bin | Out-Null
+          Copy-Item -Force target/release/devkit.exe app/src-tauri/bin/devkit.exe
+
+      - name: cargo check --workspace
+        run: cargo check --workspace
+
+      - name: cargo clippy --workspace --all-targets
+        run: cargo clippy --workspace --all-targets
+
+      - name: cargo test --workspace
+        run: cargo test --workspace
+
+  # --------------------------------------------------------------------
+  # Frontend: React 19 + TypeScript + Vite. Same pnpm/Node setup as
+  # release.yml so the two cannot drift.
+  # --------------------------------------------------------------------
+  frontend:
+    name: Frontend
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: app
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: TypeScript typecheck
+        run: npx tsc --noEmit
+
+      - name: Vite production build
+        run: npx vite build

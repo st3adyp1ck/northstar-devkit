@@ -1,0 +1,502 @@
+/* Error Center - same overlay family as ConfirmDialog (z-index 200) and
+   SettingsDialog (220), pitched BELOW the confirm dialog on purpose: every
+   clear in here raises a confirm prompt, and that prompt has to land on top
+   of this surface, not behind it. */
+
+.error-center__overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--surface-overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 190;
+  backdrop-filter: blur(4px);
+  padding: var(--space-4);
+}
+
+.error-center__positioner {
+  width: min(760px, 96vw);
+  max-height: min(720px, 92vh);
+  display: flex;
+}
+
+.error-center {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+
+.error-center__inner {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* ---------- header ---------- */
+
+.error-center__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-4) var(--space-3);
+  border-bottom: 1px solid var(--surface-border);
+  flex-shrink: 0;
+}
+
+.error-center__heading {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.error-center__title {
+  font-size: var(--text-lg);
+  font-weight: 700;
+}
+
+.error-center__subtitle {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+.error-center__close {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 12px;
+  flex-shrink: 0;
+  transition: background var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
+}
+
+.error-center__close:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+/* ---------- toolbar ---------- */
+
+.error-center__toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--surface-border);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.error-center__search {
+  flex: 1;
+  min-width: 140px;
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface-sunken);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--text-sm);
+}
+
+.error-center__search::placeholder {
+  color: var(--text-tertiary);
+}
+
+.error-center__search:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.error-center__segmented {
+  display: inline-flex;
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.error-center__segment {
+  padding: var(--space-1) var(--space-3);
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  transition: background var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
+}
+
+.error-center__segment + .error-center__segment {
+  border-left: 1px solid var(--surface-border);
+}
+
+.error-center__segment:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.error-center__segment--active {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+/* ---------- notices ---------- */
+
+.error-center__notice {
+  margin: var(--space-3) var(--space-4) 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  background: var(--surface-sunken);
+  border: 1px solid var(--surface-border);
+}
+
+.error-center__notice--danger {
+  color: var(--danger-strong);
+  background: var(--danger-soft);
+  border-color: color-mix(in srgb, var(--danger) 35%, transparent);
+}
+
+/* ---------- body / sections ---------- */
+
+.error-center__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.error-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* The app's own errors are deliberately the smaller area of the two. */
+.error-section--compact {
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--surface-border);
+}
+
+.error-section__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.error-section__title {
+  margin: 0;
+  font-size: var(--text-2xs);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.error-section__hint {
+  font-size: var(--text-2xs);
+  color: var(--text-tertiary);
+  opacity: 0.8;
+}
+
+.error-section__spacer {
+  flex: 1;
+}
+
+.error-section__rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.error-section__empty {
+  padding: var(--space-4);
+  text-align: center;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  background: var(--surface-sunken);
+  border: 1px dashed var(--surface-border);
+  border-radius: var(--radius-md);
+}
+
+.error-section--compact .error-section__empty {
+  padding: var(--space-3);
+}
+
+.error-section__unavailable {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent);
+}
+
+.error-section__unavailable-text {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.45;
+}
+
+.error-section__skeletons {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.error-section__skeleton {
+  height: 44px;
+}
+
+.error-section--compact .error-section__skeleton {
+  height: 36px;
+}
+
+/* ---------- rows ---------- */
+
+.error-row {
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+  overflow: hidden;
+  transition: border-color var(--duration-fast) var(--ease-standard);
+}
+
+.error-row:hover {
+  border-color: var(--surface-border-strong);
+}
+
+.error-row--expanded {
+  border-color: var(--accent);
+}
+
+.error-row__head {
+  display: flex;
+  align-items: stretch;
+}
+
+.error-row__summary {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  background: transparent;
+  border: none;
+  text-align: left;
+  color: var(--text-primary);
+  transition: background var(--duration-fast) var(--ease-standard);
+}
+
+.error-row--compact .error-row__summary {
+  padding: var(--space-2) var(--space-3);
+  gap: var(--space-2);
+}
+
+.error-row__summary:hover {
+  background: var(--surface-hover);
+}
+
+.error-row__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-pill);
+  flex-shrink: 0;
+  background: var(--text-tertiary);
+}
+
+.error-row__dot--critical {
+  background: var(--signal-red);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--signal-red) 22%, transparent);
+}
+
+.error-row__dot--error {
+  background: var(--danger);
+}
+
+.error-row__dot--warning {
+  background: var(--warning);
+}
+
+.error-row__text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.error-row__title {
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.error-row--compact .error-row__title {
+  font-size: var(--text-xs);
+}
+
+.error-row__sub {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-2xs);
+  color: var(--text-tertiary);
+  min-width: 0;
+}
+
+.error-row__origin {
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 40%;
+}
+
+.error-row__count {
+  flex-shrink: 0;
+}
+
+.error-row__chevron {
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+  transition: transform var(--duration-fast) var(--ease-standard);
+}
+
+.error-row__chevron--open {
+  transform: rotate(180deg);
+}
+
+.error-row__dismiss {
+  width: 30px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-left: 1px solid transparent;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  transition: background var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
+}
+
+.error-row__dismiss:hover {
+  background: var(--danger-soft);
+  border-left-color: var(--surface-border);
+  color: var(--danger-strong);
+}
+
+/* framer-motion animates this wrapper's height - it must clip. */
+.error-row__drawer {
+  overflow: hidden;
+}
+
+/* ---------- detail ---------- */
+
+.error-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border-top: 1px solid var(--surface-border);
+  background: color-mix(in srgb, var(--surface-raised) 60%, transparent);
+}
+
+.error-detail__fields {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--space-2) var(--space-4);
+}
+
+.error-detail__field {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.error-detail__label {
+  font-size: var(--text-2xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.error-detail__value {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  user-select: text;
+}
+
+.error-detail__value--mono {
+  font-family: var(--font-mono);
+}
+
+.error-detail__body {
+  margin: 0;
+  max-height: 260px;
+  overflow: auto;
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  border: 1px solid var(--surface-border);
+  box-shadow: var(--shadow-inset);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  /* body sets user-select:none app-wide - a stack trace you can't select is useless. */
+  user-select: text;
+}
+
+.error-detail__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+/* Narrow windows (the widget can be ~380px): the toolbar stacks. */
+@media (max-width: 560px) {
+  .error-center__toolbar {
+    align-items: stretch;
+  }
+
+  .error-center__search {
+    flex-basis: 100%;
+  }
+
+  .error-detail__fields {
+    grid-template-columns: 1fr;
+  }
+}

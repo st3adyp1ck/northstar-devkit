@@ -44,6 +44,7 @@ $filesToLoad = @(
     (Join-Path $script:ToolsLibDir 'DevKit-McpAddFlow.ps1')
     (Join-Path $script:ModuleRoot 'DevKit-WidgetCore.ps1')
     (Join-Path $script:ModuleRoot 'DevKit-GuiCore.ps1')
+    (Join-Path $script:ModuleRoot 'DevKit-Errors.ps1')
 )
 
 foreach ($file in $filesToLoad) {

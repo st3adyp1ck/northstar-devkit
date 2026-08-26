@@ -1,5 +1,6 @@
 import { usePolledRpc } from "../../../hooks/usePolledRpc";
 import { useProjectStore } from "../../../stores/useProjectStore";
+import { asArray } from "../../../lib/arrays";
 import { GlassPanel } from "../../../components/primitives/GlassPanel";
 import { Badge } from "../../../components/primitives/Badge";
 import { Expander } from "../../../components/primitives/Expander";
@@ -40,7 +41,7 @@ const CLIENTS: { key: keyof McpReport; label: string }[] = [
 
 export function McpPanel() {
   const active = useProjectStore((s) => s.active);
-  const { data, isLoading } = usePolledRpc<McpReport>(
+  const { data, pending, failed, stale, errorMessage } = usePolledRpc<McpReport>(
     "mcp.report",
     { projectPath: active?.path ?? "" },
     20000,
@@ -53,32 +54,42 @@ export function McpPanel() {
           <ServerIcon />
         </span>
         <h2 className="panel-header__title">MCP Servers</h2>
-        {isLoading && !data && <span className="panel-header__hint">checking…</span>}
+        {pending && <span className="panel-header__hint">checking…</span>}
+        {stale && <span className="panel-header__hint mcp-panel__stale">last known — sidecar not answering</span>}
       </div>
-      <div className="mcp-panel__list">
-        {CLIENTS.map(({ key, label }) => {
-          const status = data?.[key];
-          return (
-            <Expander
-              key={key}
-              title={label}
-              actionSlot={
-                status?.CliInstalled ? (
-                  <Badge tone="accent">{status.Version ?? "installed"}</Badge>
-                ) : (
-                  <Badge tone="neutral">not installed</Badge>
-                )
-              }
-            >
-              <div className="mcp-panel__body">
-                <ClientBody status={status} />
-              </div>
-            </Expander>
-          );
-        })}
-      </div>
+      {/* A dead sidecar used to render as two innocent "not installed"
+          badges: with no report, `data?.[key]` is undefined for BOTH
+          clients and every downstream check reads that as "absent". That
+          is the machine-with-no-MCP-tooling story, not the truth. */}
+      {failed ? (
+        <div className="panel-empty panel-empty--danger" role="alert">
+          Couldn&apos;t check MCP clients{errorMessage ? ` - ${errorMessage}` : "."}
+        </div>
+      ) : (
+        <div className="mcp-panel__list">
+          {CLIENTS.map(({ key, label }) => {
+            const status = data?.[key];
+            return (
+              <Expander key={key} title={label} actionSlot={<ClientBadge status={status} />}>
+                <div className="mcp-panel__body">
+                  <ClientBody status={status} />
+                </div>
+              </Expander>
+            );
+          })}
+        </div>
+      )}
     </GlassPanel>
   );
+}
+
+function ClientBadge({ status }: { status: McpClientStatus | undefined }) {
+  // Undefined here can only mean "the report hasn't landed yet" - the
+  // failed case never reaches this - so it must not borrow the
+  // "not installed" badge that a real, answered report earns.
+  if (!status) return <Badge tone="neutral">checking…</Badge>;
+  if (!status.CliInstalled) return <Badge tone="neutral">not installed</Badge>;
+  return <Badge tone="accent">{status.Version ?? "installed"}</Badge>;
 }
 
 function ClientBody({ status }: { status: McpClientStatus | undefined }) {
@@ -91,12 +102,15 @@ function ClientBody({ status }: { status: McpClientStatus | undefined }) {
   if (status.ErrorMessage) {
     return <div className="panel-empty panel-empty--danger">{status.ErrorMessage}</div>;
   }
-  if (status.Servers.length === 0) {
+  // Wire-shape guard: a client with exactly one configured server can
+  // arrive as a bare object rather than a 1-element list (lib/arrays.ts).
+  const servers = asArray(status.Servers);
+  if (servers.length === 0) {
     return <div className="panel-empty">No MCP servers configured</div>;
   }
   return (
     <div className="mcp-panel__servers">
-      {status.Servers.map((s) => (
+      {servers.map((s) => (
         <ServerRow key={`${s.Scope}:${s.Name}`} server={s} />
       ))}
     </div>

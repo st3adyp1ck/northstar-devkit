@@ -39,6 +39,10 @@ tauri-plugin-window-state = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-process = "2"
+# Registered and driven ENTIRELY from Rust (see commands::register_global_hotkey)
+# so the frontend needs no `global-shortcut:*` ACL grants in
+# capabilities/default.json - the webview only ever calls our own command.
+tauri-plugin-global-shortcut = "2"
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
@@ -52,3 +56,34 @@ which = "7"
 dunce = "1"
 uuid = { version = "1", features = ["v4"] }
 devkit-host = { path = "../../crates/devkit-host" }
+
+# Dev-only agent bridge: lets an MCP client (Claude Code) screenshot the
+# widget, read the DOM, click, and replay IPC against a running dev session.
+# Optional and off by default - gated behind the `mcp` feature below, so it is
+# absent from the dependency graph entirely unless explicitly requested. The
+# plugin also refuses to open its socket in release builds on its own, which
+# is the backstop if someone ever builds --release --features mcp.
+#
+# Pinned to a rev, not a branch: the socket grants arbitrary JS execution
+# and input injection inside our own app, so upstream changes get reviewed
+# before they land rather than arriving silently on the next `cargo update`.
+#
+# NOTE: this is P3GLEG/tauri-plugin-mcp from git, NOT the crates.io crate of
+# the same name - that one is moeru-ai/airi's MCP *client* plugin and is a
+# completely unrelated project. Do not "clean this up" into a version dep.
+tauri-plugin-mcp = { git = "https://github.com/P3GLEG/tauri-plugin-mcp", rev = "c7d271a06469bdf4744bfdeadca7458a1f3d02e5", optional = true }
+
+[features]
+# Opt-in agent bridge. OFF by default, so a plain `cargo build`/`tauri build`
+# never compiles the plugin or its transitive tree (screen capture, input
+# injection, socket server) into the shipped binary at all - the release
+# profile here is lto + codegen-units=1, so that is real build time as well as
+# real binary size.
+#
+# Turn it on for a dev session with `pnpm dev:mcp` (see app/package.json),
+# which is just `tauri dev --features mcp`.
+#
+# Three things move together when this flag flips; if you rename it, update all
+# three: the #[cfg(feature = "mcp")] gate in src/lib.rs, the capabilities glob
+# in build.rs, and the dev script in app/package.json.
+mcp = ["dep:tauri-plugin-mcp"]

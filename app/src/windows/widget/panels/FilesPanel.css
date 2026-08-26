@@ -59,3 +59,10 @@
   display: flex;
   flex-direction: column;
 }
+
+/* "This tree is real, but it's from the last poll that worked." Quiet
+   header text, not an alarm - the 15s poll repaints it the moment the
+   sidecar answers again. */
+.files-panel__stale {
+  color: var(--ember-400);
+}

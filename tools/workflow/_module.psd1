@@ -1,6 +1,6 @@
 @{
     Name        = "Workflow Tools"
-    Description = "Everyday shortcuts scoped to a linked project: open it in VS Code or Cursor, open its Git remote (GitHub, GitLab, Bitbucket, Azure DevOps) in a browser, or copy a detected .env template into it. Each tool prompts you to pick a project first and runs with its default (non-interactive, non-dry-run) flags from this menu; less common options - recent-projects picker, Cursor preference, a specific remote/branch/PR/issues/actions page, interactive value prompts, dry run - are only available via direct command-line invocation."
+    Description = "Everyday shortcuts, most of them scoped to a linked project: open it in VS Code or Cursor, open its Git remote (GitHub, GitLab, Bitbucket, Azure DevOps) in a browser, copy a detected .env template into it, or diff .env against that template. Two items need no project at all: the offline dev-text converter, and Close Out Session - the one-action end-of-day cleanup that stops dev processes, frees dev ports, clears temp/junk, and hands memory back to the OS. Project-scoped tools prompt you to pick a project first and run with their default (non-interactive, non-dry-run) flags from this menu; less common options - recent-projects picker, Cursor preference, a specific remote/branch/PR/issues/actions page, interactive value prompts, dry run, and every Close Out Session opt-in switch - are only available via direct command-line invocation."
     Items       = @(
         @{
             Key             = '1'
@@ -35,6 +35,19 @@
             Label  = 'Dev Text Converter (base64/url/jwt/guid/hash)'
             Script = 'Convert-DevText.ps1'
             Help   = "The 'google-this' converter box, with nothing leaving your machine: Base64 encode/decode, URL encode/decode, Unix timestamp (seconds or milliseconds, auto-detected) to local time, current time to Unix timestamp, new GUID, SHA-256 hash of a string, and JWT header/payload decoding (base64url only - the signature is NEVER verified and the tool says so, so never trust decoded content for authentication). Run with no -Mode for an interactive picker, or pass -Mode and -Input for scripted use; -Clipboard copies the result (the tool's only side effect). Pure .NET, no external dependencies, never touches files or the network."
+        }
+        @{
+            Key    = '6'
+            Label  = 'Close Out Session (End-of-Day Cleanup)'
+            Script = 'Close-OutSession.ps1'
+            Help   = "Ends a work session in one action, with no project selected and none needed. A default run stops every running node.exe, frees the common dev ports (1337, 3000-3003, 4200, 5000, 5173/5174, 5500, 8000, 8080/8081, 9000) but only when a recognized dev runtime (node, bun, deno, python, dotnet, java, php, ruby, go, ...) is holding them, deletes the CONTENTS of your user TEMP folder, and trims every accessible process's working set back to the OS via psapi's EmptyWorkingSet - a trim, not a kill, so nothing loses state. It streams a per-step trail and ends with a SUMMARY of what was stopped, what was freed, how much disk and memory came back, and anything skipped and why. Idempotent: run it twice and the second run reports 'nothing to do' for nearly every step. Safety note: this really does stop processes and delete files, so it is gated by the shared Confirm-DevKitDestructiveAction prompt - the Control Center's caution dialog passes -Force for you once you confirm, and a non-interactive run without -Force declines and changes nothing. What it will NOT do: touch source files, git working trees, uncommitted changes, .env files, node_modules, or build output; empty the Recycle Bin (opt in with -IncludeRecycleBin); prune anything in Docker (-IncludeDocker, and even then only stopped containers, dangling images, and build cache - never volumes, never tagged images); clean the package manager cache (-IncludePackageCache); free the database ports 3306/5432/6379/27017 (-IncludeDatabasePorts); stop a port owner that is not a recognized dev runtime (-KillAnyPortOwner); clear a project's framework caches (-ProjectPath, which clears only .next, node_modules\.cache, node_modules\.vite and .turbo - never node_modules itself, never dist); or stop DevKit's own process tree, ever. Windows\Temp and the Windows Update download cache are only cleared in an elevated session and are skipped with a notice otherwise. Run item 7 (the dry-run preview) first if you want to see exactly what a real run would touch."
+        }
+        @{
+            Key        = '7'
+            Label      = 'Close Out Session - Dry Run Preview'
+            Script     = 'Close-OutSession.ps1'
+            Help       = "The same end-of-day cleanup as item 6, in preview: it reports exactly which node processes it would stop, which dev ports it would free (and who is holding the ones it would leave alone), and how much temp/junk it would delete, then stops without stopping, deleting, or changing anything at all. Fully read-only - it only ever measures and lists, the dry-run flag overrides every other switch including -Force, and it never prompts. Use this first to decide whether to run the real thing."
+            StaticArgs = @{ DryRun = $true }
         }
     )
 }

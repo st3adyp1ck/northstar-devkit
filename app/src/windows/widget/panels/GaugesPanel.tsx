@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import { AnimatePresence, motion } from "framer-motion";
 import { usePolledRpc } from "../../../hooks/usePolledRpc";
@@ -22,35 +22,119 @@ import "./GaugesPanel.css";
 
 type GaugeKind = "cpu" | "mem" | "gpu" | "disk" | null;
 
+/** 30 samples x the 2s poll below = roughly the last minute of readings. */
+const HISTORY_CAPACITY = 30;
+
+/** One poll's worth of the three metrics that move fast enough to trend. */
+interface MetricSample {
+  cpu: number | null;
+  mem: number | null;
+  gpu: number | null;
+}
+
 /**
  * Reference panel implementation - CPU/Mem/GPU/Disk gauges polled every 2s
  * (matching the old widget's cycle), with a click-through flyout listing
  * top processes and a guarded kill button. Every other widget panel should
  * follow this file's shape: self-contained, no required props, own polling
  * via usePolledRpc, own loading/error/n-a states.
+ *
+ * Note the three states it distinguishes, because they used to collapse
+ * into one lie: `pending` is "no readings YET", `failed` is "we asked and
+ * couldn't get an answer" (previously rendered as four innocent "n/a"
+ * gauges - a dead sidecar looked exactly like a machine with no sensors),
+ * and `stale` is "these numbers are real but no longer live".
  */
 export function GaugesPanel() {
-  const { data: metrics, isLoading } = usePolledRpc<SystemMetrics>("metrics.system", undefined, 2000);
+  const {
+    data: metrics,
+    dataUpdatedAt,
+    pending,
+    failed,
+    stale,
+    errorMessage,
+    refetch,
+  } = usePolledRpc<SystemMetrics>("metrics.system", undefined, 2000);
   const [openGauge, setOpenGauge] = useState<GaugeKind>(null);
+  const [history, setHistory] = useState<MetricSample[]>([]);
+  const [retrying, setRetrying] = useState(false);
+  const lastSampleAt = useRef(0);
+
+  // One entry per SUCCESSFUL poll, keyed off dataUpdatedAt rather than the
+  // `metrics` object: react-query's structural sharing hands back the very
+  // same reference when a reading is deeply unchanged, so watching the
+  // object would silently drop every flat stretch and distort the trace.
+  // A failed poll appends nothing at all - the line stops growing instead
+  // of inventing a zero.
+  useEffect(() => {
+    if (!metrics || !dataUpdatedAt || dataUpdatedAt === lastSampleAt.current) return;
+    lastSampleAt.current = dataUpdatedAt;
+    setHistory((prev) => {
+      const next = prev.concat({
+        cpu: metrics.CpuPercent ?? null,
+        mem: metrics.MemoryPercent ?? null,
+        gpu: metrics.GpuPercent ?? null,
+      });
+      return next.length > HISTORY_CAPACITY ? next.slice(next.length - HISTORY_CAPACITY) : next;
+    });
+  }, [metrics, dataUpdatedAt]);
+
+  const cpuHistory = useMemo(() => history.map((s) => s.cpu), [history]);
+  const memHistory = useMemo(() => history.map((s) => s.mem), [history]);
+  const gpuHistory = useMemo(() => history.map((s) => s.gpu), [history]);
 
   const diskFree = metrics?.DiskFreeBytes ?? null;
   const diskTotal = metrics?.DiskTotalBytes ?? null;
   const diskPercent = diskFree !== null && diskTotal ? Math.round((1 - diskFree / diskTotal) * 100) : null;
-  const stillLoading = isLoading && !metrics;
+
+  async function retry() {
+    setRetrying(true);
+    try {
+      await refetch();
+    } finally {
+      setRetrying(false);
+    }
+  }
+
+  // Nothing ever arrived and the last attempt failed: say so. Four "n/a"
+  // dials here would describe a perfectly healthy, sensorless machine.
+  if (failed) {
+    return (
+      <GlassPanel className="gauges-panel">
+        <div className="panel-header panel-header--minimal">
+          <h2 className="panel-header__title">System</h2>
+        </div>
+        <div className="gauges-panel__offline">
+          <div className="gauges-panel__offline-title">
+            No sensor readings &mdash; the DevKit sidecar isn&apos;t answering.
+          </div>
+          {errorMessage && <div className="gauges-panel__offline-detail">{errorMessage}</div>}
+          <div className="gauges-panel__offline-actions">
+            <Button size="sm" variant="ghost" loading={retrying} onClick={() => void retry()}>
+              Retry
+            </Button>
+          </div>
+        </div>
+      </GlassPanel>
+    );
+  }
 
   return (
     <GlassPanel className="gauges-panel">
       <div className="panel-header panel-header--minimal">
         <h2 className="panel-header__title">System</h2>
-        {stillLoading && <span className="panel-header__hint">reading sensors…</span>}
+        {pending && <span className="panel-header__hint">reading sensors…</span>}
+        {stale && <span className="panel-header__hint gauges-panel__stale">last known — sidecar not answering</span>}
       </div>
-      <div className={clsx("gauges-panel__row", stillLoading && "gauges-panel__row--loading")}>
+      <div className={clsx("gauges-panel__row", pending && "gauges-panel__row--loading")}>
         <Gauge
           label="CPU"
           percent={metrics?.CpuPercent ?? null}
           sub={metrics?.CpuTempC != null ? `${metrics.CpuTempC}°C` : "n/a"}
           tone="sapphire"
           onClick={() => setOpenGauge("cpu")}
+          history={cpuHistory}
+          historyCapacity={HISTORY_CAPACITY}
         />
         <Gauge
           label="Memory"
@@ -58,6 +142,8 @@ export function GaugesPanel() {
           sub={metrics ? `${metrics.MemoryUsedGB}/${metrics.MemoryTotalGB} GB` : undefined}
           tone="cyan"
           onClick={() => setOpenGauge("mem")}
+          history={memHistory}
+          historyCapacity={HISTORY_CAPACITY}
         />
         <Gauge
           label="GPU"
@@ -65,7 +151,12 @@ export function GaugesPanel() {
           sub={metrics?.GpuTempC != null ? `${metrics.GpuTempC}°C` : "n/a"}
           tone="amber"
           onClick={() => setOpenGauge("gpu")}
+          history={gpuHistory}
+          historyCapacity={HISTORY_CAPACITY}
         />
+        {/* No trace for Disk Free on purpose: it barely moves over a
+            minute, so a sparkline there would be a flat line pretending to
+            be information. */}
         <Gauge
           label="Disk Free"
           percent={diskPercent}
@@ -128,11 +219,9 @@ const CLASSIFICATION_BADGES: Record<string, { tone: "neutral" | "success" | "war
 
 function ProcessFlyout({ kind, onClose }: { kind: Exclude<GaugeKind, null | "disk">; onClose: () => void }) {
   const method = kind === "mem" ? "process.topMemory" : kind === "gpu" ? "metrics.gpuProcesses" : "process.topCpu";
-  const { data, refetch } = usePolledRpc<TopCpuProcessRow[] | TopMemoryResult | GpuProcessUsage>(
-    method,
-    { count: 12 },
-    3000,
-  );
+  const { data, refetch, pending, failed, errorMessage } = usePolledRpc<
+    TopCpuProcessRow[] | TopMemoryResult | GpuProcessUsage
+  >(method, { count: 12 }, 3000);
   const [actionError, setActionError] = useState<string | null>(null);
   const [freeing, setFreeing] = useState(false);
   const [freeNote, setFreeNote] = useState<string | null>(null);
@@ -234,6 +323,14 @@ function ProcessFlyout({ kind, onClose }: { kind: Exclude<GaugeKind, null | "dis
       </div>
       {actionError && <div className="gauges-panel__hint">{actionError}</div>}
       {freeNote && <div className="gauges-panel__hint gauges-panel__hint--ok">{freeNote}</div>}
+      {/* An empty list means "nothing running"; a failed poll must never be
+          allowed to look like that. */}
+      {failed && (
+        <div className="gauges-panel__hint">
+          Couldn&apos;t read the process list.{errorMessage ? ` ${errorMessage}` : ""}
+        </div>
+      )}
+      {pending && !failed && rows.length === 0 && <div className="panel-empty">Reading processes…</div>}
       <div className="gauges-panel__flyout-list">
         {rows.map((row) => {
           const badge = CLASSIFICATION_BADGES[row.Classification] ?? CLASSIFICATION_BADGES.Caution;

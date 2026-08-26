@@ -1,0 +1,234 @@
+/* Project manager - same overlay family as ConfirmDialog / ToolRunDialog /
+   SettingsDialog. z-index sits ABOVE ToolRunDialog (100) and BELOW
+   ConfirmDialog (200) on purpose: the Unlink action opens a confirm prompt
+   that must land on top of this dialog, not behind it. */
+
+.project-manager__overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+  background: var(--surface-overlay);
+  backdrop-filter: blur(4px);
+  z-index: 150;
+}
+
+.project-manager__positioner {
+  width: min(720px, 96vw);
+  max-height: min(640px, 90vh);
+  display: flex;
+}
+
+.project-manager {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+
+.project-manager__inner {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.project-manager__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  border-bottom: 1px solid var(--surface-border);
+  flex-shrink: 0;
+}
+
+.project-manager__title {
+  font-size: var(--text-lg);
+  font-weight: 700;
+}
+
+.project-manager__subtitle {
+  margin-top: 2px;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+.project-manager__error {
+  margin: var(--space-3) var(--space-4) 0;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--danger-strong);
+  background: var(--danger-soft);
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
+  border-radius: var(--radius-sm);
+}
+
+.project-manager__empty {
+  padding: var(--space-8) var(--space-5);
+  text-align: center;
+  font-size: var(--text-sm);
+  color: var(--text-tertiary);
+  line-height: 1.6;
+}
+
+.project-manager__list {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.project-manager__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface-sunken);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md);
+  transition: border-color var(--duration-fast) var(--ease-standard),
+    background var(--duration-fast) var(--ease-standard);
+}
+
+.project-manager__row:hover {
+  border-color: var(--surface-border-strong);
+}
+
+.project-manager__row--active {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--surface-border));
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface-sunken));
+}
+
+.project-manager__row--missing {
+  border-color: color-mix(in srgb, var(--danger) 35%, var(--surface-border));
+}
+
+.project-manager__pin {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+  transition: color var(--duration-fast) var(--ease-standard),
+    background var(--duration-fast) var(--ease-standard);
+}
+
+.project-manager__pin:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.project-manager__pin--on {
+  color: var(--accent-strong);
+}
+
+.project-manager__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.project-manager__name-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.project-manager__name {
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  text-align: left;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-bottom: 1px dashed transparent;
+  transition: border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
+}
+
+.project-manager__name:hover {
+  color: var(--accent-strong);
+  border-bottom-color: var(--surface-border-strong);
+}
+
+.project-manager__rename-input {
+  min-width: 0;
+  flex: 1 1 160px;
+  height: 24px;
+  padding: 0 var(--space-2);
+  background: var(--surface-raised);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.project-manager__rename-input:focus {
+  outline: none;
+}
+
+.project-manager__path {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-manager__row--missing .project-manager__path {
+  color: var(--danger-strong);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--danger) 55%, transparent);
+}
+
+.project-manager__actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* Narrow hosts (the widget is 380px min wide): stack the row instead of
+   letting the action buttons squeeze the path into nothing. */
+@media (max-width: 560px) {
+  .project-manager__row {
+    flex-wrap: wrap;
+  }
+
+  .project-manager__body {
+    flex: 1 1 100%;
+    order: 2;
+  }
+
+  .project-manager__actions {
+    order: 3;
+    flex: 1 1 100%;
+    justify-content: flex-end;
+  }
+}

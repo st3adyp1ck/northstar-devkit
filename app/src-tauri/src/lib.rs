@@ -3,7 +3,7 @@ mod paths;
 mod terminal;
 mod tray;
 
-use commands::{emit_visibility, set_window_visible};
+use commands::{emit_visibility, set_window_visible, surface_widget};
 use tauri::{Emitter, Manager, RunEvent, WindowEvent};
 use tracing_subscriber::prelude::*;
 
@@ -53,7 +53,27 @@ fn init_logging() -> Option<tracing_appender::non_blocking::WorkerGuard> {
         return None;
     }
 
-    let file_appender = tracing_appender::rolling::daily(&log_dir, "devkit.log");
+    // Daily rotation with a 14-file retention cap. `rolling::daily` (the
+    // one-liner this replaces) has NO max_log_files, so the logs folder grew
+    // one file per day forever on a machine that keeps DevKit in the tray -
+    // a few hundred stale files after a year, none of them ever read.
+    // The `filename_prefix` + no-suffix pairing reproduces `rolling::daily`'s
+    // exact naming (`devkit.log.<date>`), which also means the pruner - which
+    // only ever deletes files matching the configured prefix/suffix - cleans
+    // up files written before this cap existed.
+    let file_appender = match tracing_appender::rolling::RollingFileAppender::builder()
+        .rotation(tracing_appender::rolling::Rotation::DAILY)
+        .filename_prefix("devkit.log")
+        .max_log_files(14)
+        .build(&log_dir)
+    {
+        Ok(appender) => appender,
+        Err(e) => {
+            eprintln!("devkit: could not open rolling log in {}: {e}", log_dir.display());
+            tracing_subscriber::fmt().with_env_filter(make_env_filter()).init();
+            return None;
+        }
+    };
     let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
     let file_layer = tracing_subscriber::fmt::layer()
         .with_writer(non_blocking)
@@ -70,8 +90,63 @@ fn init_logging() -> Option<tracing_appender::non_blocking::WorkerGuard> {
     Some(guard)
 }
 
+/// Attaches the dev-only MCP bridge so an AI agent can drive a running
+/// `pnpm tauri dev` session - screenshot the widget, read the DOM, click,
+/// and replay `invoke` calls against the real command handlers. See the
+/// dependency comment in Cargo.toml for why it is pinned to a rev.
+///
+/// A no-op unless the optional `mcp` feature is enabled (`pnpm dev:mcp`).
+/// With it off the crate is not in the dependency graph at all, so there is
+/// nothing to compile out; with it on in a release build the plugin still
+/// refuses to open its socket unless `allow_release_builds` is set.
+///
+/// TCP rather than the default IPC transport because the two halves do not
+/// agree on Windows - the TypeScript server hardcodes the pipe name
+/// `\\.\pipe\tmp\tauri-mcp.sock` and ignores both its configured path and
+/// TAURI_MCP_IPC_PATH, while the Rust side namespaces whatever `socket_path`
+/// it was handed. Loopback TCP plus the generated `.token` sidecar avoids
+/// that mismatch entirely.
+///
+/// `capture_rust_logs` is deliberately left at its default (off): it installs
+/// a global `log` logger, and init_logging() above already owns global
+/// subscriber state. JS console capture is unaffected by that flag, so
+/// `query_logs` still sees the frontend.
+fn attach_mcp_bridge<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
+    #[cfg(feature = "mcp")]
+    let builder = builder.plugin(tauri_plugin_mcp::init_with_config(
+        tauri_plugin_mcp::PluginConfig::new("DevKit".to_string())
+            .tcp_localhost(4000)
+            // Both windows are the same index.html distinguished by a query
+            // param; "widget" is the one an agent almost always means, so it
+            // is the fallback target when a tool names no window.
+            .default_webview_label("widget".to_string())
+            // Tauri keeps no runtime registry of #[tauri::command] handlers,
+            // so `manage_ipc(action="commands")` can otherwise only report
+            // traffic it has already observed. Keep in sync with the
+            // invoke_handler! list in run_app().
+            .expose_commands([
+                "rpc_call",
+                "sidecar_status",
+                "sidecar_restart",
+                "toggle_window",
+                "show_window",
+                "set_widget_dock",
+                "slide_widget",
+                "set_widget_flyout",
+                "widget_geometry",
+                "register_global_hotkey",
+                "terminal_spawn",
+                "terminal_write",
+                "terminal_resize",
+                "terminal_kill",
+            ]),
+    ));
+
+    builder
+}
+
 fn run_app() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         // Must be registered before any other plugin/setup work per the
         // plugin's own docs: it needs to intercept a second launch as early
         // as possible.
@@ -79,10 +154,15 @@ fn run_app() {
             // A second launch (e.g. clicking the Start Menu icon again)
             // surfaces the widget instead of spawning a duplicate process -
             // mirrors the old widget's named-mutex + named-event behavior.
-            if let Some(w) = app.get_webview_window("widget") {
-                let _ = set_window_visible(&w, true);
+            // Through `surface_widget`, so it also un-minimizes and slides a
+            // collapsed sidebar back out; a bare `set_window_visible` here
+            // answered the second launch with an 18px rail.
+            if let Err(e) = surface_widget(app) {
+                tracing::warn!(error = %e, "second launch could not surface the widget");
             }
-        }))
+        }));
+
+    attach_mcp_bridge(builder)
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
@@ -92,6 +172,12 @@ fn run_app() {
         ))
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        // No `with_shortcut`/`with_handler` here on purpose: NOTHING is
+        // registered at startup. The frontend calls `register_global_hotkey`
+        // once settings load and again whenever the preference changes, and
+        // that command owns the whole binding lifecycle - which is also why
+        // capabilities/default.json needs no `global-shortcut:*` grants.
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(terminal::TerminalRegistry::default())
         .invoke_handler(tauri::generate_handler![
             commands::rpc_call,
@@ -101,6 +187,9 @@ fn run_app() {
             commands::show_window,
             commands::set_widget_dock,
             commands::slide_widget,
+            commands::set_widget_flyout,
+            commands::widget_geometry,
+            commands::register_global_hotkey,
             terminal::terminal_spawn,
             terminal::terminal_write,
             terminal::terminal_resize,
@@ -135,12 +224,44 @@ fn run_app() {
             // Forward every sidecar event (streamed tool output, push
             // notifications from long-running RPC calls) to the frontend
             // as a single Tauri event; `lib/ipc.ts` demuxes by `runId`.
+            //
+            // NOT `while let Ok(evt) = events.recv().await`: a tokio
+            // broadcast receiver that falls behind the 1024-slot ring
+            // returns `Err(RecvError::Lagged(n))`, which is NOT a closed
+            // channel - the receiver stays perfectly usable and resumes at
+            // the oldest still-buffered event. Treating it as termination
+            // meant one chatty tool (a build spewing thousands of
+            // `tool.output` lines) permanently killed `devkit://event` for
+            // the whole session: output stopped mid-run, `tool.finished`
+            // never arrived, the Run button spun forever, and every later
+            // run was dead until the app restarted. Log and CONTINUE on
+            // Lagged; only `Closed` ends the forwarder.
             let mut events = host.subscribe_events();
             let emit_handle = handle.clone();
             tauri::async_runtime::spawn(async move {
-                while let Ok(evt) = events.recv().await {
-                    if let Err(e) = emit_handle.emit("devkit://event", &evt) {
-                        tracing::warn!(error = %e, "failed to forward sidecar event");
+                loop {
+                    match events.recv().await {
+                        Ok(evt) => {
+                            if let Err(e) = emit_handle.emit("devkit://event", &evt) {
+                                tracing::warn!(error = %e, "failed to forward sidecar event");
+                            }
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(dropped)) => {
+                            // Tell the UI too - a run whose output has holes
+                            // in it should say so rather than look complete.
+                            tracing::warn!(dropped, "sidecar event stream lagged; events dropped");
+                            let _ = emit_handle.emit(
+                                "devkit://event",
+                                serde_json::json!({
+                                    "event": "host.lagged",
+                                    "data": { "dropped": dropped },
+                                }),
+                            );
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                            tracing::info!("sidecar event channel closed; forwarder stopping");
+                            break;
+                        }
                     }
                 }
             });
@@ -169,29 +290,41 @@ fn run_app() {
                 let _ = window.hide();
                 emit_visibility(window, window.label(), false);
             }
-            // Hard floor on the widget's size, enforced at the event level:
-            // the config's minWidth/minHeight SHOULD cover this, but a
-            // user-reported real-machine case still shrank the undecorated
-            // window below them (tao's custom resize borders + restored
-            // window-state interact unreliably here), which breaks the UI
-            // layout. Re-clamp after any resize that lands under the floor.
-            if window.label() == "widget" {
-                if let WindowEvent::Resized(size) = event {
-                    let scale = window.scale_factor().unwrap_or(1.0);
-                    // Absolute floor only - per-mode minimums are governed
-                    // by set_min_size in commands::set_widget_dock (docked:
-                    // 380 wide, work-area height; floating: 480x560). This
-                    // backstop must sit at the LOWEST legitimate width or
-                    // it would fight a narrowed docked sidebar forever.
-                    let min_w = (380.0 * scale) as u32;
-                    let min_h = (560.0 * scale) as u32;
-                    if size.width < min_w || size.height < min_h {
-                        let _ = window.set_size(tauri::PhysicalSize::new(
-                            size.width.max(min_w),
-                            size.height.max(min_h),
-                        ));
-                    }
+            if window.label() != "widget" {
+                return;
+            }
+            // The geometry helpers all speak `WebviewWindow`; `on_window_event`
+            // hands us the plain `Window` behind it.
+            let Some(widget) = window.app_handle().get_webview_window("widget") else {
+                return;
+            };
+            match event {
+                // Where a user dragging a window edge becomes state: while a
+                // flyout tray is out the delta is credited to the TRAY and the
+                // sidebar column keeps its width, otherwise to the sidebar.
+                // The docked floor (a quarter of the work area) and the
+                // re-pinning of the docked edge both fall out of the re-derive
+                // this performs - see commands::on_widget_resized.
+                WindowEvent::Resized(size) => {
+                    commands::on_widget_resized(&widget, *size);
                 }
+                // tao writes a docked window's min/max `PhysicalSize`
+                // straight into WM_GETMINMAXINFO and never rescales it, so
+                // the dock has to be re-applied by hand whenever the widget
+                // lands on a different monitor or its scale factor changes -
+                // otherwise a sidebar docked on a 4K/150% panel keeps that
+                // panel's work-area height as BOTH its min and its max after
+                // the panel is unplugged. `Moved` is the cheap monitor probe
+                // (a docked window only moves when something moved it);
+                // `ScaleFactorChanged` is the DPI half and is forced, since
+                // the work area can be identical across a scale change.
+                WindowEvent::Moved(_) => {
+                    commands::revalidate_widget_geometry(&widget, false);
+                }
+                WindowEvent::ScaleFactorChanged { .. } => {
+                    commands::revalidate_widget_geometry(&widget, true);
+                }
+                _ => {}
             }
         })
         .build(tauri::generate_context!())

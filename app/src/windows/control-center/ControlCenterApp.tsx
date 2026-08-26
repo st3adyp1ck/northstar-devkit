@@ -1,15 +1,22 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { AnimatePresence, motion, MotionConfig, type Transition } from "framer-motion";
 import clsx from "clsx";
 import { rpcCall } from "../../lib/ipc";
 import { useSettingsStore } from "../../stores/useSettingsStore";
 import { useSyncAnimationsAttribute } from "../../hooks/useSyncAnimationsAttribute";
 import { TitleBar } from "../../components/TitleBar";
+import { ProjectPicker } from "../../components/ProjectPicker";
 import { GlassPanel } from "../../components/primitives/GlassPanel";
 import { Badge } from "../../components/primitives/Badge";
 import { Button } from "../../components/primitives/Button";
 import { ConfirmDialogHost } from "../../components/ConfirmDialogHost";
+import {
+  PALETTE_TOOL_EVENT,
+  usePaletteStore,
+  type PaletteToolRequest,
+} from "../../components/palette/paletteStore";
 import { ToolRunDialog } from "./ToolRunDialog";
 import type { Catalog, CatalogItem, CatalogModule } from "../../lib/types";
 import "./ControlCenterApp.css";
@@ -90,7 +97,66 @@ export function ControlCenterApp() {
   const [activeGroup, setActiveGroup] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<{ module: CatalogModule; item: CatalogItem } | null>(null);
+  const [missingTool, setMissingTool] = useState<string | null>(null);
   const reducedMotion = usePrefersReducedMotion();
+
+  const openPalette = usePaletteStore((s) => s.openPalette);
+  const toolRequest = usePaletteStore((s) => s.toolRequest);
+  const requestTool = usePaletteStore((s) => s.requestTool);
+  const clearToolRequest = usePaletteStore((s) => s.clearToolRequest);
+
+  /*
+   * A tool picked in the WIDGET's command palette arrives here as a Tauri
+   * event (the widget has no ToolRunDialog of its own), and gets funnelled
+   * into the very same `toolRequest` slot the palette uses when it's
+   * running inside this window - so both paths open the real run dialog
+   * rather than dropping the user in the catalog to find the tool again.
+   * usePaletteStore.requestTool de-dupes on the request id, which is what
+   * makes the palette's deliberate double-emit safe.
+   */
+  useEffect(() => {
+    let unlisten: UnlistenFn | undefined;
+    let cancelled = false;
+    listen<PaletteToolRequest>(PALETTE_TOOL_EVENT, (e) => requestTool(e.payload))
+      .then((fn) => {
+        if (cancelled) fn();
+        else unlisten = fn;
+      })
+      .catch(() => {
+        /* no listener is survivable - the in-window palette path still works */
+      });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [requestTool]);
+
+  // Resolve a pending request against the catalog. Held (not dropped) while
+  // the catalog is still loading, so a request that arrives before the fetch
+  // resolves still opens once it does - and held through a failed load too,
+  // so hitting Retry on the error state opens the tool the user asked for
+  // instead of silently forgetting it.
+  useEffect(() => {
+    if (!toolRequest) return;
+    const modules = catalog?.modules ?? [];
+    if (modules.length === 0) {
+      if (isLoading || isFetching || isError) return; // still arriving, or retryable - keep waiting
+      setMissingTool(toolRequest.label);
+      clearToolRequest();
+      return;
+    }
+    const module = modules.find(
+      (m) => m.folder === toolRequest.folder && m.items.some((i) => i.key === toolRequest.key && i.script === toolRequest.script),
+    );
+    const item = module?.items.find((i) => i.key === toolRequest.key && i.script === toolRequest.script);
+    if (module && item) {
+      setMissingTool(null);
+      setSelected({ module, item });
+    } else {
+      setMissingTool(toolRequest.label);
+    }
+    clearToolRequest();
+  }, [toolRequest, catalog, isLoading, isFetching, isError, clearToolRequest]);
 
   const groups = useMemo(() => {
     const set = new Set<string>();
@@ -128,13 +194,40 @@ export function ControlCenterApp() {
     <MotionConfig reducedMotion={enableAnimations === false ? "always" : "never"}>
       <ConfirmDialogHost>
         <div className="control-center">
-          <TitleBar title="DevKit Control Center" showMaximize>
-            <input
-              className="control-center__search"
-              placeholder="Search tools... (name, description)"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
+          <TitleBar
+            title="DevKit Control Center"
+            showMaximize
+            actions={
+              <button
+                type="button"
+                className="control-center__palette-btn devkit-no-drag"
+                title="Command palette (Ctrl+K)"
+                aria-label="Open command palette"
+                onClick={openPalette}
+              >
+                <kbd>Ctrl</kbd>
+                <kbd>K</kbd>
+              </button>
+            }
+          >
+            {/*
+              The project picker lives in this window's chrome now, not just
+              the widget's. Each Tauri window is its own webview with its own
+              zustand stores, so without a picker here the Control Center's
+              project store stayed empty forever and ToolRunDialog's
+              `requiresProject && !active` check hard-disabled Run on every
+              project-scoped tool in the catalog - while telling the user to
+              go pick a project they had, in fact, already picked.
+            */}
+            <div className="control-center__chrome">
+              <ProjectPicker className="devkit-project-picker--chrome" />
+              <input
+                className="control-center__search"
+                placeholder="Search tools... (name, description)"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
           </TitleBar>
           <div className="control-center__body">
             <nav className="control-center__nav">
@@ -171,6 +264,18 @@ export function ControlCenterApp() {
               ))}
             </nav>
             <main className="control-center__main">
+              {missingTool && (
+                <div className="control-center__notice" role="status">
+                  <span>
+                    <strong>{missingTool}</strong> isn't in the current catalog any more, so its run dialog couldn't be
+                    opened.
+                  </span>
+                  <Button size="sm" variant="ghost" onClick={() => setMissingTool(null)}>
+                    Dismiss
+                  </Button>
+                </div>
+              )}
+
               {isLoading && (
                 <EmptyState
                   icon={<span className="control-center__spinner" aria-hidden="true" />}

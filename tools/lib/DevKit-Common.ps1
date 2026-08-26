@@ -85,6 +85,24 @@ function Get-DevKitSettings {
             terminalTheme      = 'northstar'   # embedded terminal color scheme
             uiSounds           = $true         # click/thud/swoosh feedback
             uiSoundVolume      = 0.5           # 0.0 - 1.0
+            # Flyout trays + global summon (2026 tray revival - the
+            # gitFlyoutWidth/notesFlyoutWidth above are the ORIGINAL WPF
+            # widget's per-flyout widths, kept for continuity; flyoutWidth
+            # is the default for flyouts that don't have their own).
+            flyoutWidth        = 380
+            globalHotkey       = 'CommandOrControl+Alt+D'  # summon/dismiss the widget
+            runHistoryLimit    = 50            # tool runs retained in history
+            # Icon rail (the vertical strip of flyout tabs on the widget's
+            # inner edge). Width is the whole strip; iconSize is the glyph
+            # inside it, kept separate so a wider strip with the same glyph
+            # (more breathing room) is expressible.
+            iconTheme          = 'outline'     # 'outline' | 'solid' | 'duotone'
+            railWidth          = 44            # px, logical
+            railIconSize       = 18            # px, logical
+            # Widget width persisted on close so it reopens exactly as left.
+            # $null = never set; the Rust side then falls back to its
+            # quarter-screen default (see commands.rs).
+            widgetSavedWidth   = $null
         }
     }
 
@@ -139,7 +157,20 @@ function Set-DevKitSettings {
                         foreach ($prop in @($Settings.preferences.PSObject.Properties.Name)) {
                             $onDisk.preferences | Add-Member -MemberType NoteProperty -Name $prop -Value $Settings.preferences.$prop -Force
                         }
-                        $onDisk | Add-Member -MemberType NoteProperty -Name schemaVersion -Value $Settings.schemaVersion -Force
+                        # schemaVersion is deliberately NOT taken from the caller
+                        # unconditionally. A caller sending a partial patch may omit it
+                        # entirely (writing $null would make the next Get-DevKitSettings
+                        # treat the file as unversioned), and an older build must never
+                        # downgrade a file a newer build wrote. Keep the highest version
+                        # either side knows about.
+                        $diskVersion = 0
+                        if ($null -ne $onDisk.schemaVersion) { [void][int]::TryParse([string]$onDisk.schemaVersion, [ref]$diskVersion) }
+                        $callerVersion = 0
+                        if ($null -ne $Settings.schemaVersion) { [void][int]::TryParse([string]$Settings.schemaVersion, [ref]$callerVersion) }
+                        $keepVersion = [Math]::Max($diskVersion, $callerVersion)
+                        if ($keepVersion -gt 0) {
+                            $onDisk | Add-Member -MemberType NoteProperty -Name schemaVersion -Value $keepVersion -Force
+                        }
                         $toSave = $onDisk
                     }
                 }
@@ -188,12 +219,46 @@ function Confirm-DevKitDestructiveAction {
     Write-Host "  This will: $Action" -ForegroundColor Yellow
     foreach ($p in $AffectedPaths) { Write-Host "    - $p" -ForegroundColor Gray }
 
+    # Read-Host THROWS under -NonInteractive ("PowerShell is in NonInteractive
+    # mode"), which is exactly how the GUI launches tool scripts - it spawns
+    # them with -NonInteractive and closes stdin. Without this guard every
+    # destructive tool dies on an unhandled exception right after the user
+    # already confirmed in the app's own caution dialog. Refuse safely instead:
+    # declining is always the correct answer when consent cannot be obtained.
+    if (-not (Test-DevKitCanPrompt)) {
+        Write-Host "  Cannot prompt for confirmation in a non-interactive session - aborting." -ForegroundColor Yellow
+        Write-Host "  Re-run this tool with -Force to proceed without a prompt." -ForegroundColor Gray
+        return $false
+    }
+
     if ($TypedPhrase) {
         $typed = Read-Host "  Type '$TypedPhrase' to confirm"
         return ($typed -ceq $TypedPhrase)
     }
     $answer = Read-Host "  Continue? (y/N)"
     return ($answer -eq 'y')
+}
+
+function Test-DevKitCanPrompt {
+    <#
+    .SYNOPSIS
+        True when this session can actually read a console prompt.
+    .DESCRIPTION
+        PowerShell exposes no direct "am I -NonInteractive" flag, so probe the
+        two conditions that make Read-Host fail: a host whose UI stack is
+        absent (the -NonInteractive case, and runspaces created without a
+        host), and redirected/absent stdin. Any probe failure is treated as
+        "cannot prompt" - the safe direction for a destructive gate.
+    .OUTPUTS
+        [bool]
+    #>
+    try {
+        if ($null -eq $Host -or $null -eq $Host.UI -or $null -eq $Host.UI.RawUI) { return $false }
+        if ([System.Console]::IsInputRedirected) { return $false }
+        return $true
+    } catch {
+        return $false
+    }
 }
 
 # ==================== MODULE MENU DISPATCHER ====================

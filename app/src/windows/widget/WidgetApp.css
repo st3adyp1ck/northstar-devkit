@@ -1,4 +1,18 @@
 .widget-app {
+  /* Icon-rail geometry, derived from the two settings WidgetApp.tsx writes
+     onto this element as --rail-width / --rail-icon.
+
+     Divided by --ui-scale on purpose. This root carries a CSS `zoom` (the
+     uiScale setting), so a rail declared as 44px RENDERS at 44 * uiScale
+     logical px - while Rust, which sizes the window and knows nothing about
+     zoom, is working in unscaled logical px. Dividing first makes the
+     rendered strip land on exactly the logical width the setting names, at
+     every scale. Same idiom guards the flyout pane; see WidgetFlyout.css.
+
+     Published here because the rail, the glyphs inside it and the fallback
+     overlay drawer (components/flyouts) all measure against them. */
+  --flyout-rail-w: calc(var(--rail-width, 44px) / var(--ui-scale, 1));
+  --rail-icon-size: calc(var(--rail-icon, 18px) / var(--ui-scale, 1));
   position: relative;
   display: flex;
   flex-direction: column;
@@ -53,15 +67,25 @@
 }
 
 /* ---------- tray rail ----------
-   The 18-logical-px sliver that stays on screen while the window is slid
-   off its edge (commands::slide_widget's SLIDE_HANDLE_LOGICAL). A living
-   light-strip: accent gradient core, breathing glow, chevron pointing
-   back out. The whole strip is one button. */
+   The sliver that stays on screen while the window is slid off its edge.
+   A living light-strip: accent gradient core, breathing glow, chevron
+   pointing back out. The whole strip is one button.
+
+   Its width has ONE owner: WIDGET_RAIL_LOGICAL in WidgetApp.tsx, published
+   here as --sliver-width and passed to slide_widget as `railWidth`, so the
+   glass drawn and the gap Rust parks the OS window at are the same number.
+   (commands.rs keeps RAIL_FALLBACK_LOGICAL only for a slide that arrives
+   before the frontend has sent one - keep the two equal.)
+
+   Divided by --ui-scale for the same reason --flyout-rail-w is: this root
+   carries the uiScale `zoom`, so a raw 18px strip RENDERS at 18 * uiScale
+   logical px - 17.1 at the shipped 0.95 - while Rust reserves a flat 18,
+   leaving the sliver permanently short of the gap it is meant to fill. */
 .widget-rail {
   position: absolute;
   top: 0;
   bottom: 0;
-  width: 18px;
+  width: calc(var(--sliver-width, 18px) / var(--ui-scale, 1));
   z-index: 30;
   display: flex;
   flex-direction: column;
@@ -133,6 +157,44 @@
   opacity: 0.9;
 }
 
+/* ---------- shell: panel column | tab rail | flyout pane ----------
+   The whole window interior, as one horizontal band. The titlebar lives
+   INSIDE the column, not above this row, so a flyout pane runs the full
+   height of the sidebar - a sheet of glass drawn out of the edge, not a
+   drawer hanging below the chrome. Docked Right flips the order so the rail
+   and its trays always face the screen interior while the sidebar's own edge
+   stays flush against the monitor. Floating renders neither the rail nor a
+   pane, so the column is simply the whole band. */
+.widget-app__shell {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+}
+
+.widget-app--dock-right .widget-app__shell {
+  flex-direction: row-reverse;
+}
+
+/* The panel column. Normally flexes with the window; while a tray is open
+   an inline width pins it, so widening the OS window feeds every new pixel
+   to the flyout instead of reflowing the panels (see useWidgetFlyout). */
+.widget-app__main {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Collapsed, only the 18px grab-rail is on screen - the tab rail belongs to
+   the part of the window that just slid off the edge. */
+.widget-app--collapsed .flyout-rail {
+  opacity: 0;
+  pointer-events: none;
+}
+
 .widget-app__body {
   flex: 1;
   overflow-y: auto;
@@ -141,6 +203,47 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+}
+
+/* ---------- column plinth ----------
+   Docked, four of the nine panels moved into trays, so the column stops well
+   short of the bottom of a full-height sidebar. `margin-top: auto` drops
+   this to the foot of the scroll box whenever there is slack (and collapses
+   to nothing when the column overflows, which is the floating case), so the
+   empty glass above it reads as the instrument's own margin rather than as
+   a panel that failed to load. Nothing lives down here on purpose: filling
+   it with more data would undo the reason those four panels left. */
+.widget-app__plinth {
+  flex: 0 0 auto;
+  margin-top: auto;
+  padding-top: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-2);
+}
+
+/* The horizon the column sits on - the same accent light the panel edges
+   and the tab rail use, run flat and faded out at both ends. */
+.widget-app__horizon {
+  height: 1px;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(
+    to right,
+    transparent,
+    color-mix(in srgb, var(--accent) 55%, transparent),
+    transparent
+  );
+  box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.widget-app__plinth-legend {
+  text-align: center;
+  font-size: var(--text-2xs);
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  opacity: 0.55;
 }
 
 /**

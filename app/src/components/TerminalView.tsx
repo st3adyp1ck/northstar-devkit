@@ -100,9 +100,29 @@ export function TerminalView({ cwd, className }: TerminalViewProps) {
       fitAddon.fit();
     }
 
+    // Coalesce resizes. A ConPTY resize makes the shell repaint the ENTIRE
+    // screen, and resizes arrive in bursts: the flyout tray animates the OS
+    // window's width in ~14 steps, each firing window.resize AND the host's
+    // ResizeObserver. Measured: one flyout open produced 109 full-screen
+    // repaints and pushed Tauri's IPC into its postMessage fallback
+    // ("IPC custom protocol failed" from this function). Two guards:
+    //   - trailing debounce, so a burst costs one resize instead of ~30
+    //   - skip entirely when cols/rows are unchanged, which is the common
+    //     case for a width animation whose steps are under one cell wide
+    let resizeTimer: ReturnType<typeof setTimeout> | null = null;
+    let sentCols = -1;
+    let sentRows = -1;
+
     function pushResize(id: string) {
-      fitAddon.fit();
-      void invoke("terminal_resize", { sessionId: id, cols: term.cols, rows: term.rows }).catch(() => {});
+      if (resizeTimer) clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        resizeTimer = null;
+        fitAddon.fit();
+        if (term.cols === sentCols && term.rows === sentRows) return;
+        sentCols = term.cols;
+        sentRows = term.rows;
+        void invoke("terminal_resize", { sessionId: id, cols: term.cols, rows: term.rows }).catch(() => {});
+      }, 90);
     }
 
     void (async () => {
@@ -152,6 +172,7 @@ export function TerminalView({ cwd, className }: TerminalViewProps) {
 
     return () => {
       disposed = true;
+      if (resizeTimer) clearTimeout(resizeTimer);
       window.removeEventListener("resize", onWindowResize);
       resizeObserver?.disconnect();
       unlisten?.();

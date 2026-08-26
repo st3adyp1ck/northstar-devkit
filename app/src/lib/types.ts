@@ -40,6 +40,19 @@ export interface NodeProcessInfo {
   CpuSeconds: number;
   AgeMinutes: number | null;
   Ports: number[];
+  /** Minutes since this process last burned measurable CPU. Computed by the
+   *  metrics lane across polls (it caches per-pid CPU totals and timestamps),
+   *  so it is null until a process has been observed at least twice. */
+  IdleMinutes: number | null;
+  /** Recent CPU share, derived from the delta between the last two polls. */
+  CpuPercent: number | null;
+  /** True when this looks safe to kill - see StaleReason for why. */
+  IsStale: boolean;
+  /** Human-readable justification, e.g. "idle 47m, no listening port".
+   *  null when the process is NOT stale. */
+  StaleReason: string | null;
+  /** Best-effort command line, so two `node` rows are tellable apart. */
+  CommandLine: string | null;
 }
 
 export interface OtherPortInfo {
@@ -376,6 +389,22 @@ export interface DevKitPreferences {
   terminalTheme: string;
   uiSounds: boolean;
   uiSoundVolume: number;
+  /** Default width for flyout trays without their own (git/notes have theirs above). */
+  flyoutWidth: number;
+  /** Global shortcut that summons/dismisses the widget, in Tauri accelerator syntax. */
+  globalHotkey: string;
+  /** How many tool runs the run-history store retains. */
+  runHistoryLimit: number;
+  /** Glyph style for the flyout rail's icons. */
+  iconTheme: "outline" | "solid" | "duotone";
+  /** Width of the whole icon rail, logical px. */
+  railWidth: number;
+  /** Glyph size inside the rail, logical px - separate from railWidth so a
+   *  roomier strip with the same icon is expressible. */
+  railIconSize: number;
+  /** Widget width persisted on close so it reopens exactly as left.
+   *  null = never set; Rust falls back to its quarter-screen default. */
+  widgetSavedWidth: number | null;
 }
 
 export interface DevKitSettings {

@@ -1,0 +1,8 @@
+/* The SVG stretches to whatever box it's given; height comes from the
+   `height` prop so the viewBox and the CSS box agree and y stays in px. */
+.devkit-sparkline {
+  display: block;
+  width: 100%;
+  /* Round stroke caps at x=0 / x=100 sit a hair outside the viewBox. */
+  overflow: visible;
+}

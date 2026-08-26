@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { recordRenderError } from "../lib/errorCapture";
 import { Button } from "./primitives/Button";
 
 interface ErrorBoundaryProps {
@@ -24,6 +25,11 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
+    // Record BEFORE setState so the entry exists even if the fallback render
+    // itself is what goes wrong. Recording is non-throwing by construction
+    // (see lib/errorCapture.ts), so it cannot interfere with the fallback UI
+    // below - which is unchanged.
+    recordRenderError(error, info.componentStack ?? null);
     this.setState({ error, componentStack: info.componentStack ?? null });
   }
 

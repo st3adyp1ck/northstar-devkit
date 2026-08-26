@@ -41,3 +41,10 @@
   text-transform: uppercase;
   letter-spacing: 0.02em;
 }
+
+/* "These clients answered, but not on the latest poll." A quiet header
+   marker rather than an alarm - the 20s poll self-heals on its own, and
+   the rows below are still true, just not live. */
+.mcp-panel__stale {
+  color: var(--ember-400);
+}

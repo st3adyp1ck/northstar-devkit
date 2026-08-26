@@ -18,7 +18,8 @@
       - ONE dedicated writer runspace owns [Console]::Out. It drains a
         single BlockingCollection[string] ($script:OutQueue) and is the
         only code in the whole process that calls WriteLine/Flush.
-      - FIVE dedicated LANE runspaces (metrics / slow / work / mcp / tool),
+      - SIX dedicated LANE runspaces (metrics / slow / work / errors /
+        mcp / tool),
         each owning a persistent PowerShell runspace with DevKit.Core
         imported once (imports serialized across lanes - see $ImportLock),
         each draining its own BlockingCollection[object] of requests,
@@ -26,8 +27,9 @@
         $script:OutQueue when done. This mirrors (and, for mcp/tool,
         restores) the old WPF widget's MetricsRunspace/McpRunspace/
         WorkRunspace split so no slow caller can stall an unrelated one:
-        metrics ticks, git/github polls, multi-second MCP health checks,
-        and minutes-long tool runs all ride separate lanes.
+        metrics ticks, git/github polls, Event-Log error sweeps,
+        multi-second MCP health checks, and minutes-long tool runs all
+        ride separate lanes.
       - The MAIN thread just reads stdin line-by-line (blocking - that's
         fine, it's the only thing on this thread) and routes each request
         to a lane queue by method prefix (see Get-DevKitRpcLaneForMethod).
@@ -105,6 +107,15 @@ $script:LaneQueues = @{
     metrics = [System.Collections.Concurrent.BlockingCollection[object]]::new()
     slow    = [System.Collections.Concurrent.BlockingCollection[object]]::new()
     work    = [System.Collections.Concurrent.BlockingCollection[object]]::new()
+    # - errors: measured, not theorized. errors.* first shipped on 'slow'
+    #   alongside git/github; with the Error Center open, a live git.overview
+    #   that runs in 183ms standalone took 20,207ms through the RPC - a 110x
+    #   slowdown purely from queueing, and 60s timeouts once the widget's
+    #   git + github pollers stacked behind an errors.system sweep. Each
+    #   method is individually fast (errors.system 209ms, github.prs 623ms);
+    #   it is the SERIALIZATION that kills them. The Error Center polls on
+    #   its own cadence and must never be able to starve the Git panel.
+    errors  = [System.Collections.Concurrent.BlockingCollection[object]]::new()
     # Two lanes the initial port collapsed into the ones above, restored
     # after a wiring audit showed why the old WPF widget kept them apart:
     # - mcp: Get-DevKitMcpWidgetReport shells out to live 'claude mcp list'
@@ -118,6 +129,18 @@ $script:LaneQueues = @{
     mcp     = [System.Collections.Concurrent.BlockingCollection[object]]::new()
     tool    = [System.Collections.Concurrent.BlockingCollection[object]]::new()
 }
+
+# Live handle on every tool run currently in flight, keyed by runId, shared
+# by reference with all six lanes exactly as the queues above are.
+#
+# It exists for one reason: tool.stop cannot be answered on the lane that
+# owns the run. The tool lane spends a whole run blocked draining the child's
+# stdout, so the request that cancels it has to arrive on a DIFFERENT thread
+# - which then has no other way to reach the child's Process object. The
+# writer runspace has $OutQueue, the lanes have $ImportLock, and cancellation
+# has this. See the RUNNING-TOOL REGISTRY section in RpcMethods.ps1 for the
+# entry shape and for why the key is the runId rather than the pid.
+$script:RunRegistry = [System.Collections.Concurrent.ConcurrentDictionary[string, object]]::new()
 
 # ==================== WRITER RUNSPACE ====================
 # The only code in this process allowed to touch [Console]::Out.
@@ -159,6 +182,7 @@ function Start-DevKitRpcLane {
     $rs.SessionStateProxy.SetVariable('ProtocolScriptPath', $script:ProtocolScriptPath)
     $rs.SessionStateProxy.SetVariable('RepoRoot', $script:RepoRoot)
     $rs.SessionStateProxy.SetVariable('ImportLock', $script:ImportLock)
+    $rs.SessionStateProxy.SetVariable('RunRegistry', $script:RunRegistry)
 
     $ps = [powershell]::Create()
     $ps.Runspace = $rs
@@ -268,7 +292,27 @@ function Get-DevKitRpcLaneForMethod {
     param([Parameter(Mandatory)][string]$Method)
     if ($Method -like 'metrics.*') { return 'metrics' }
     if ($Method -like 'mcp.*') { return 'mcp' }
+    # tool.stop is the ONE tool.* method that must not ride the tool lane.
+    # By the time anyone asks to cancel a run, that lane is - by definition -
+    # blocked inside the very run being cancelled, draining its child's
+    # stdout; a stop queued behind it would only be delivered once the thing
+    # it was meant to kill had already finished. It goes to 'work' because
+    # that is where the other interactive process action already lives
+    # (process.kill), and because 'work' has no long-blocking residents: its
+    # slowest members (catalog.get, junk.clear, process.freeMemory) are
+    # user-initiated, rare, and bounded in seconds, so a stop can queue
+    # behind at most one of them rather than behind a dev server that never
+    # exits. Stop-DevKitToolRun is itself bounded (~2s worst case) so it can
+    # never become a blocking resident of the lane it borrows.
+    if ($Method -eq 'tool.stop') { return 'work' }
     if ($Method -like 'tool.*') { return 'tool' }
+    # errors.* joins git/github on 'slow' for the same reason they are there:
+    # a Get-WinEvent sweep of System + Application takes SECONDS on a busy
+    # machine, and errors.app tail-reads several rotated log files. On the
+    # 'work' lane that would sit in front of settings saves, process kills,
+    # and note writes - the interactions a user makes while staring at the
+    # very error list that is blocking them.
+    if ($Method -like 'errors.*') { return 'errors' }
     if ($Method -like 'git.*' -or $Method -like 'github.*') { return 'slow' }
     return 'work'
 }
@@ -284,13 +328,77 @@ $lanes = @{
     work    = Start-DevKitRpcLane -LaneName 'work'
     mcp     = Start-DevKitRpcLane -LaneName 'mcp'
     tool    = Start-DevKitRpcLane -LaneName 'tool'
+    errors  = Start-DevKitRpcLane -LaneName 'errors'
 }
 
 Write-DevKitRpcDiag "lanes started, entering read loop"
 
 # ==================== MAIN READ LOOP ====================
 
-$stdin = [Console]::In
+# Stop child processes from inheriting OUR stdin - the single worst
+# performance bug this sidecar has had.
+#
+# Symptom: any external process a lane spawns (git, gh, docker, npm) took
+# 5-17 SECONDS instead of ~20ms, so git.overview - which runs in ~200ms
+# standalone - took 15-60s through the RPC and routinely hit the 60s
+# timeout, leaving the Git and GitHub panels permanently stuck. Lanes that
+# spawn nothing (work, errors) stayed at single-digit ms throughout, which
+# is what made it look like a lane problem rather than a spawn problem.
+#
+# Cause: this process's stdin is an anonymous PIPE from the Rust host, and
+# the main thread below sits blocked in ReadLine() on it essentially
+# forever. A spawned child INHERITS that same pipe handle as its own stdin.
+# A console-subsystem child attaching to an inherited pipe that another
+# thread is already blocked reading on stalls during startup - it is not
+# waiting on input it will ever get, it is contending for the handle.
+# Bisected empirically: with the main thread reading stdin, spawns blocked
+# for 25s+; with the child given ANY other stdin (redirected .NET Process,
+# `$null |`, or NUL), the same spawns completed in 20-30ms.
+#
+# Fix: capture the real stdin reader FIRST (so this loop keeps the live
+# pipe), then repoint the process-wide STD_INPUT_HANDLE at NUL. Handle
+# inheritance is resolved at CreateProcess time from that slot, so every
+# later child gets NUL while our already-open reader is unaffected.
+#
+# Note this also means a child can never read from the app's stdin - which
+# is correct anyway: tool.run already closes the child's stdin, and
+# Confirm-DevKitDestructiveAction detects the non-interactive session and
+# declines rather than hanging on Read-Host (see tools/lib/DevKit-Common.ps1).
+Add-Type -Namespace DevKitStd -Name Native -MemberDefinition @"
+[DllImport("kernel32.dll", SetLastError=true)]
+public static extern bool SetStdHandle(int nStdHandle, IntPtr hHandle);
+[DllImport("kernel32.dll", SetLastError=true, CharSet=CharSet.Unicode)]
+public static extern IntPtr CreateFileW(string lpFileName, uint dwDesiredAccess, uint dwShareMode,
+    IntPtr lpSecurityAttributes, uint dwCreationDisposition, uint dwFlagsAndAttributes, IntPtr hTemplateFile);
+[DllImport("kernel32.dll", SetLastError=true)]
+public static extern bool SetHandleInformation(IntPtr hObject, uint dwMask, uint dwFlags);
+"@
+
+# Must come BEFORE the SetStdHandle swap: this grabs the real pipe.
+$stdin = [System.IO.StreamReader]::new([Console]::OpenStandardInput(), [System.Text.Encoding]::UTF8)
+
+# GENERIC_READ (0x80000000), FILE_SHARE_READ|WRITE (3), OPEN_EXISTING (3).
+# Best-effort: if NUL can't be opened we simply keep the old (slow but
+# correct) behaviour rather than taking the sidecar down over a perf fix.
+try {
+    $nulHandle = [DevKitStd.Native]::CreateFileW('NUL', [uint32]2147483648, [uint32]3, [IntPtr]::Zero, [uint32]3, [uint32]0, [IntPtr]::Zero)
+    if ($nulHandle -ne [IntPtr]::Zero -and $nulHandle -ne [IntPtr](-1)) {
+        # The handle MUST be inheritable. CreateFileW returns a
+        # non-inheritable handle by default, and a std handle that children
+        # cannot inherit is worse than the problem being fixed: `gh` (a Go
+        # binary) passes its own stdin down to the `git` it shells out to,
+        # and got "fork/exec git.exe: The handle is invalid", which broke the
+        # whole GitHub panel. HANDLE_FLAG_INHERIT = 0x1.
+        $null = [DevKitStd.Native]::SetHandleInformation($nulHandle, [uint32]1, [uint32]1)
+        $null = [DevKitStd.Native]::SetStdHandle(-10, $nulHandle)   # -10 = STD_INPUT_HANDLE
+        Write-DevKitRpcDiag "child stdin detached (STD_INPUT_HANDLE -> inheritable NUL)"
+    } else {
+        Write-DevKitRpcDiag "WARNING: could not open NUL; child spawns may be slow"
+    }
+} catch {
+    Write-DevKitRpcDiag "WARNING: stdin detach failed ($($_.Exception.Message)); child spawns may be slow"
+}
+
 $shuttingDown = $false
 
 while (-not $shuttingDown) {

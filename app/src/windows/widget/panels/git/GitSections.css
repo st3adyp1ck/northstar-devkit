@@ -1,0 +1,172 @@
+/**
+ * Section chrome shared by every part of the Git flyout (repo status, commit
+ * graph, pull requests, issues) plus the GitHub label chip.
+ *
+ * The pane is ONE surface with ruled sections, not four stacked cards: the
+ * separation is a hairline and a small caps title, never another border +
+ * shadow + radius. Four glass cards inside a glass pane is exactly the
+ * "stacked widgets" look this replaced.
+ */
+
+.git-section + .git-section {
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid color-mix(in srgb, var(--accent) 10%, var(--surface-border));
+}
+
+.git-section__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+  min-width: 0;
+}
+
+.git-section__title {
+  margin: 0;
+  font-size: var(--text-2xs);
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.git-section__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-raised);
+  border: 1px solid var(--surface-border);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.git-section__count--live {
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  color: var(--accent-strong);
+}
+
+/* Right-aligned trailing slot: refresh hints, "last known" flags, actions. */
+.git-section__aside {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.git-section__hint {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* "What you're looking at is the last successful poll, not live." */
+.git-section__stale {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--signal-amber);
+  white-space: nowrap;
+}
+
+.git-section__stale::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* ---------- honest states ----------
+   Three visually distinct outcomes, because they mean three different
+   things: still loading / genuinely nothing / the call FAILED. The old
+   panels rendered the third as the second. */
+
+.git-state {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  padding: var(--space-2) 0;
+  line-height: 1.5;
+}
+
+.git-state--error {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--danger-soft);
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
+  color: var(--danger-strong);
+}
+
+.git-state--warn {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent);
+  color: var(--warning);
+}
+
+.git-state__detail {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  word-break: break-word;
+}
+
+.git-state__skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* ---------- GitHub label chip ----------
+   Background is the repo's own label color (data, not a token); the ink is a
+   token, chosen by real contrast math in labelColors.ts. */
+.gh-labels {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.gh-label {
+  display: inline-flex;
+  align-items: center;
+  max-width: 140px;
+  padding: 2px 7px;
+  border-radius: var(--radius-pill);
+  background: var(--label-bg, var(--surface-raised));
+  color: var(--label-fg, var(--text-secondary));
+  border: 1px solid color-mix(in srgb, var(--label-bg, var(--surface-border)) 65%, #000);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gh-label--more {
+  background: var(--surface-raised);
+  color: var(--text-tertiary);
+  border-color: var(--surface-border);
+}

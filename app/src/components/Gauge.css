@@ -19,16 +19,23 @@
   display: block;
 }
 
+/* Positioning context for the readout - sized exactly by the arc svg, so
+   the value stays dead-center on the dial no matter what gets stacked
+   underneath it (label, sub, sparkline). */
+.devkit-gauge__dial {
+  position: relative;
+  display: block;
+  line-height: 0;
+}
+
 .devkit-gauge__center {
   position: absolute;
-  top: var(--space-2);
-  left: 0;
-  right: 0;
+  inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  height: calc(100% - 40px);
   pointer-events: none;
+  line-height: 1;
 }
 
 .devkit-gauge__value {
@@ -50,4 +57,14 @@
   font-size: var(--text-2xs);
   color: var(--text-tertiary);
   font-variant-numeric: tabular-nums;
+}
+
+/* Trend line under the readout. Stretches to the gauge's own width (the
+   column is center-aligned, so it needs to opt out) and reserves a fixed
+   height so the gauge doesn't reflow as the buffer fills. */
+.devkit-gauge__spark {
+  align-self: stretch;
+  display: block;
+  height: 28px;
+  margin-top: 2px;
 }

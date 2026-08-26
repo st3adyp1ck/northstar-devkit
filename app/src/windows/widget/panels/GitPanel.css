@@ -1,20 +1,136 @@
-.git-panel__header {
+/**
+ * The Git flyout's shell: a persistent repository header, a tablist, and
+ * whichever of Graph / Pull requests / Issues is up - with the detail view
+ * docked underneath all of it.
+ *
+ * Only the tab PANEL scrolls. The header does not, because it is the context
+ * for whatever is in the panel: which branch, how far ahead, what is
+ * uncommitted. Scrolling that away to read the graph was the old layout's
+ * worst habit.
+ *
+ * Inside a tray the pane is already a sheet of glass (WidgetFlyout.css), so
+ * this adds no second card there - it just claims the height. Rendered
+ * inline in the floating widget's column, where there is no tray around it,
+ * it wears the same glass the other panels do.
+ */
+
+.git-pane {
+  /* Query container for the tabs and the PR legend, which shed decoration
+     rather than wrap at sidebar widths. */
+  container-type: inline-size;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-  flex-wrap: wrap;
+  flex-direction: column;
+  min-height: 0;
+  gap: var(--space-3);
+  /* Floating widget: this IS the card. */
+  padding: var(--space-4);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--surface-border);
+  background: var(--surface-glass);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  box-shadow: var(--shadow-md), var(--shadow-glass-highlight);
 }
 
-.git-panel__badges {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  flex-wrap: wrap;
-  min-width: 0;
+/* Docked in the tray: the pane itself is the surface, so drop the card and
+   take the whole height instead. */
+.widget-flyout__body > .git-pane {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: none;
 }
 
-.git-panel__branch-wrap {
+.git-pane__header {
+  flex-shrink: 0;
+}
+
+.git-pane__panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  /* Normally a frame, not a scroller - whatever is inside owns its own
+     scrolling, so a tall graph and a long PR list each keep their own
+     position instead of sharing one. `auto` rather than `hidden` is the
+     safety net for a pane too short to satisfy the inner scroller's own
+     min-height (a nearly-collapsed widget): the overflow gets a scrollbar
+     instead of being clipped away unreachably. At any usable height the
+     inner scroller resolves to exactly this box and this never engages. */
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.git-pane__panel:focus-visible {
+  outline: none;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-focus-ring);
+}
+
+/*
+ * Where the height comes from, in the two places this pane lives.
+ *
+ * In a tray the pane has a definite height, so each tab's scroller takes
+ * whatever the header and tablist leave. Rendered inline in the floating
+ * widget's column there IS no definite height - the column sizes to content
+ * - so the scrollers keep the caps the old stacked sections had, or a tab
+ * with 50 issues would grow the widget past the screen.
+ */
+.widget-flyout__body > .git-pane .pr-graph__scroll,
+.widget-flyout__body > .git-pane .gh-list {
+  max-height: none;
+}
+
+/* ---------- no project ---------- */
+
+.git-pane--placeholder {
+  justify-content: center;
+}
+
+.git-pane__placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--space-2);
+  padding: var(--space-6) var(--space-4);
+  color: var(--text-tertiary);
+}
+
+.git-pane__placeholder-icon {
+  color: var(--text-tertiary);
+  opacity: 0.7;
+}
+
+.git-pane__placeholder-title {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.git-pane__placeholder-body {
+  margin: 0;
+  max-width: 34ch;
+  font-size: var(--text-xs);
+  line-height: 1.55;
+}
+
+/* ---------- repository row ---------- */
+
+.git-pane__repo {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.git-pane__branch-wrap {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -22,76 +138,220 @@
   color: var(--text-tertiary);
 }
 
-.git-panel__branch-icon {
+.git-pane__branch-icon {
   flex-shrink: 0;
+  color: var(--accent-strong);
 }
 
-.git-panel__branch {
+.git-pane__branch {
   font-size: var(--text-sm);
   font-weight: 700;
   color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 140px;
+  max-width: 200px;
 }
 
-.git-panel__actions {
+.git-pane__badges {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.git-pane__actions {
   display: flex;
   gap: var(--space-1);
+  margin-left: auto;
   flex-shrink: 0;
 }
 
-.git-panel__status {
+/* ---------- working tree ---------- */
+
+.git-pane__clean {
   margin-top: var(--space-2);
-  padding: var(--space-1) var(--space-2);
-  border-radius: var(--radius-sm);
-  background: var(--surface-raised);
-  color: var(--text-secondary);
   font-size: var(--text-2xs);
+  color: var(--success);
 }
 
-.git-panel__status--error {
-  background: var(--danger-soft);
-  color: var(--ember-400);
+.git-pane__dirty {
+  margin-top: var(--space-2);
 }
 
-.git-panel__commits-toggle {
+.git-pane__dirty-toggle {
   all: unset;
   box-sizing: border-box;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  margin-top: var(--space-3);
-  padding: var(--space-2) 0 0;
+  gap: 6px;
   cursor: pointer;
   font-size: var(--text-2xs);
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
   color: var(--text-secondary);
-  border-top: 1px solid var(--surface-border);
+  padding: 2px 0;
 }
 
-.git-panel__commits-toggle:hover {
+.git-pane__dirty-toggle:hover {
   color: var(--text-primary);
 }
 
-.git-panel__chevron {
+.git-pane__dirty-toggle:focus-visible {
+  outline: none;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-focus-ring);
+}
+
+.git-pane__chevron {
   display: inline-block;
-  font-size: 10px;
+  font-size: 9px;
+  color: var(--text-tertiary);
   transition: transform var(--duration-base) var(--ease-standard);
 }
 
-.git-panel__chevron--open {
+.git-pane__chevron--open {
   transform: rotate(90deg);
 }
 
-.git-panel__graph-hint {
-  margin-top: var(--space-2);
-  padding: var(--space-4) var(--space-2);
-  font-size: var(--text-xs);
+.git-pane__dirty-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: var(--radius-pill);
+  background: var(--danger-soft);
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
+  color: var(--danger-strong);
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.git-pane__dirty-list {
+  list-style: none;
+  margin: var(--space-1) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 170px;
+  overflow-y: auto;
+}
+
+.git-pane__dirty-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 2px var(--space-1);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-2xs);
+  min-width: 0;
+}
+
+.git-pane__dirty-row:hover {
+  background: var(--surface-hover);
+}
+
+/* One glyph, one meaning: added / modified / deleted / renamed / untracked /
+   conflicted each get their own tone rather than all being grey text. */
+.git-pane__dirty-code {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  border: 1px solid transparent;
+}
+
+.git-pane__dirty-code--add {
+  background: color-mix(in srgb, var(--success) 16%, transparent);
+  border-color: color-mix(in srgb, var(--success) 40%, transparent);
+  color: var(--success);
+}
+
+.git-pane__dirty-code--mod {
+  background: color-mix(in srgb, var(--warning) 14%, transparent);
+  border-color: color-mix(in srgb, var(--warning) 38%, transparent);
+  color: var(--warning);
+}
+
+.git-pane__dirty-code--del {
+  background: var(--danger-soft);
+  border-color: color-mix(in srgb, var(--danger) 38%, transparent);
+  color: var(--danger-strong);
+}
+
+.git-pane__dirty-code--move {
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 38%, transparent);
+  color: var(--accent-strong);
+}
+
+.git-pane__dirty-code--new {
+  background: color-mix(in srgb, var(--signal-cyan) 14%, transparent);
+  border-color: color-mix(in srgb, var(--signal-cyan) 38%, transparent);
+  color: var(--signal-cyan);
+}
+
+.git-pane__dirty-code--conflict {
+  background: color-mix(in srgb, var(--signal-red) 20%, transparent);
+  border-color: color-mix(in srgb, var(--signal-red) 50%, transparent);
+  color: var(--signal-red);
+}
+
+.git-pane__dirty-path {
+  min-width: 0;
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-pane__dirty-dir {
   color: var(--text-tertiary);
-  text-align: center;
+  opacity: 0.75;
+}
+
+.git-pane__dirty-name {
+  color: var(--text-primary);
+}
+
+/* ---------- fetch/pull/push result ---------- */
+
+.git-pane__status {
+  margin-top: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  border: 1px solid var(--surface-border);
+  color: var(--text-secondary);
+  font-size: var(--text-2xs);
+  word-break: break-word;
+}
+
+.git-pane__status--error {
+  background: var(--danger-soft);
+  border-color: color-mix(in srgb, var(--danger) 30%, transparent);
+  color: var(--danger-strong);
+}
+
+/* ---------- docked detail ----------
+   Claims at most half the pane, and never grows past it: the detail's own
+   body is what scrolls (see GitDetail.css). */
+.git-pane > .git-detail {
+  flex: 0 1 auto;
+  max-height: 420px;
+}
+
+/* In the tray the pane has a definite height, so the dock can be a share of
+   it rather than a fixed cap. */
+.widget-flyout__body > .git-pane > .git-detail {
+  max-height: 52%;
 }

@@ -291,7 +291,16 @@ while ($true) {
     Write-Host ""
     
     $choice = Read-Host "  Select option"
-    
+    # stdin EOF / non-interactive host: leave cleanly instead of spinning.
+    # Without this the `while ($true)` above becomes an infinite menu loop the
+    # moment there is no console to read - which is exactly how the GUI runs
+    # every tool (tool.run spawns -NonInteractive and closes the child's
+    # stdin). Measured before the guard: ~1,800 output lines/second, forever,
+    # occupying the sidecar's single `tool` lane so no later tool run could
+    # start. Same guard as tools/system/Edit-HostsFile.ps1.
+    if ($null -eq $choice) { Write-Host ""; break }
+    $choice = $choice.Trim()
+
     switch ($choice.ToUpper()) {
         'A' {
             $newPath = Read-Host "  Enter path to add"

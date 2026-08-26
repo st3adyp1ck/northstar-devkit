@@ -302,6 +302,355 @@ function Test-DevKitPortExcluded {
     return $false
 }
 
+# ---------- "last used" / stale detection for node processes ----------
+# Windows exposes no "last used" timestamp for a process, so idleness has to
+# be DERIVED across polls. The metrics lane calls Get-DevKitNodeSnapshot on a
+# ~3s cadence; each call compares a process's CUMULATIVE CPU time against what
+# it was on the previous call. CPU that moved means the process is doing work
+# right now; CPU that has not moved since T means it has burned nothing
+# measurable for (now - T).
+#
+# Two caches at script scope carry that state between calls. Script scope is
+# the right lifetime here for the same reason the sensor caches above use it:
+# each RPC lane is one long-lived runspace that dot-sources this file once, so
+# $script: survives every poll. In any other host (Pester, a one-shot script)
+# they simply start empty and the collectors report $null until they have two
+# samples, which is exactly the honest answer.
+$script:NodeActivity = @{}      # pid -> @{ CpuSeconds; StartTime; ChangedAt; SampledAt }
+$script:NodeCommandLines = @{}  # pid -> @{ StartTime; CommandLine }
+
+function Test-DevKitSameProcessStart {
+    <#
+    .SYNOPSIS
+        True when two process start times identify the SAME process instance.
+        Windows hands a dead process's pid straight back out, so this is the
+        only cheap way to notice that "pid 4056" is now somebody else. Two
+        unreadable start times ($null both sides - a process this session
+        cannot open reports nothing, every poll) count as the same process;
+        one-sided null does not, and forces a conservative reset.
+    #>
+    param($A, $B)
+    if ($null -eq $A -and $null -eq $B) { return $true }
+    if ($null -eq $A -or $null -eq $B) { return $false }
+    try { return ([datetime]$A -eq [datetime]$B) } catch { return $false }
+}
+
+function Format-DevKitNodeCommandLine {
+    <#
+    .SYNOPSIS
+        Normalizes one raw Win32_Process command line for display: whitespace
+        runs (including embedded newlines, which do occur in generated argv)
+        collapse to single spaces, and anything past $MaxLength is cut with an
+        ellipsis. A full node command line routinely runs to several hundred
+        characters of absolute paths - the widget only needs enough to tell
+        two `node` rows apart, and the sidecar should not ship kilobytes of
+        argv on a 3-second poll. Blank/absent input returns $null (the UI
+        renders "command line unavailable" rather than an empty string).
+    #>
+    param(
+        [AllowNull()][AllowEmptyString()][string]$CommandLine,
+        [int]$MaxLength = 300
+    )
+
+    if ([string]::IsNullOrWhiteSpace($CommandLine)) { return $null }
+    if ($MaxLength -lt 8) { $MaxLength = 8 }
+    $collapsed = ($CommandLine -replace '\s+', ' ').Trim()
+    if ($collapsed.Length -le $MaxLength) { return $collapsed }
+    return $collapsed.Substring(0, $MaxLength - 1) + [char]0x2026
+}
+
+function Update-DevKitNodeActivity {
+    <#
+    .SYNOPSIS
+        Folds one poll's worth of node CPU samples into the cross-poll
+        activity tracker and returns the derived per-pid IdleMinutes /
+        CpuPercent.
+    .DESCRIPTION
+        Deliberately free of every OS and clock call: the cache, the samples,
+        "now" and the core count are all arguments, which is what makes the
+        derivation unit-testable. $Cache is mutated in place.
+
+        IdleMinutes is a LOWER BOUND - "this process has burned no measurable
+        CPU for at least N minutes" - because the tracker only knows what it
+        has watched. It is $null until a pid has been sampled twice: a single
+        sample says nothing at all about whether a process is working, and
+        inventing a number there would be the exact class of lie the widget
+        is not allowed to tell. 0 means "no evidence of idleness" (either CPU
+        just moved, or we have been watching for under a minute).
+    .PARAMETER Samples
+        One entry per live node process:
+        @{ Pid [int]; CpuSeconds [double] or $null; StartTime [datetime] or $null }
+    .OUTPUTS
+        Hashtable pid -> @{ IdleMinutes [int] or $null; CpuPercent [double] or $null }
+    #>
+    param(
+        [Parameter(Mandatory = $true)][hashtable]$Cache,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][array]$Samples,
+        [Parameter(Mandatory = $true)][datetime]$Now,
+        [int]$CoreCount = 1
+    )
+
+    if ($CoreCount -lt 1) { $CoreCount = 1 }
+    $result = @{}
+    $live = @{}
+
+    foreach ($sample in $Samples) {
+        $procId = [int]$sample.Pid
+        $live[$procId] = $true
+        $cpu = $sample.CpuSeconds
+        $entry = $Cache[$procId]
+
+        # A pid whose start time no longer matches is a DIFFERENT process, and
+        # the old CPU baseline would read as a huge negative delta.
+        if ($null -ne $entry -and -not (Test-DevKitSameProcessStart -A $entry.StartTime -B $sample.StartTime)) {
+            $entry = $null
+        }
+
+        if ($null -eq $entry) {
+            $Cache[$procId] = @{ CpuSeconds = $cpu; StartTime = $sample.StartTime; ChangedAt = $Now; SampledAt = $Now }
+            $result[$procId] = @{ IdleMinutes = $null; CpuPercent = $null }
+            continue
+        }
+
+        if ($null -eq $cpu -or $null -eq $entry.CpuSeconds) {
+            # CPU time unreadable on one side of the comparison. Keep the
+            # entry (and the ChangedAt we already have, so a process that
+            # becomes readable again resumes its idle clock) but report
+            # nothing for this poll.
+            $entry.CpuSeconds = $cpu
+            $entry.SampledAt = $Now
+            $result[$procId] = @{ IdleMinutes = $null; CpuPercent = $null }
+            continue
+        }
+
+        $elapsed = ($Now - $entry.SampledAt).TotalSeconds
+        $delta = [double]$cpu - [double]$entry.CpuSeconds
+
+        if ($delta -lt 0) {
+            # Cumulative CPU only ever grows, so this is a recycled pid the
+            # start-time check could not catch (unreadable start time). Treat
+            # it as a brand-new process.
+            $entry.CpuSeconds = $cpu
+            $entry.StartTime = $sample.StartTime
+            $entry.ChangedAt = $Now
+            $entry.SampledAt = $Now
+            $result[$procId] = @{ IdleMinutes = $null; CpuPercent = $null }
+            continue
+        }
+
+        if ($elapsed -gt 0) {
+            # An idle node process is never at EXACTLY zero CPU - timers, GC
+            # and libuv wakeups all tick over - so comparing the delta against
+            # 0 would reset the idle clock every single poll and nothing would
+            # ever look idle. "Active" therefore means it burned at least 1%
+            # of ONE core across the window, with an absolute floor so the
+            # short 3s window cannot flip-flop on scheduler noise. The 1-second
+            # CEILING matters just as much: polling stops while the widget is
+            # hidden (see useVisibility), so the window can reopen hours wide,
+            # and a rate-only threshold would then demand minutes of CPU
+            # before it conceded a process was working.
+            $activityFloor = [math]::Min([math]::Max(0.05, $elapsed * 0.01), 1.0)
+            if ($delta -ge $activityFloor) { $entry.ChangedAt = $Now }
+            $percent = [math]::Round(($delta / ($elapsed * $CoreCount)) * 100, 1)
+            if ($percent -lt 0) { $percent = 0 }
+            if ($percent -gt 100) { $percent = 100 }
+            $entry.CpuSeconds = $cpu
+            $entry.SampledAt = $Now
+        } else {
+            # Same instant twice (or a clock step backwards): nothing to
+            # divide by. The idle clock below is still meaningful.
+            $percent = $null
+        }
+
+        $idle = [math]::Floor(($Now - $entry.ChangedAt).TotalMinutes)
+        if ($idle -lt 0) { $idle = 0 }
+        $result[$procId] = @{ IdleMinutes = [int]$idle; CpuPercent = $percent }
+    }
+
+    # Evict dead pids: without this the tracker grows without bound inside the
+    # long-lived metrics runspace, and a recycled pid inherits a stranger's
+    # baseline the moment it reappears.
+    foreach ($key in @($Cache.Keys)) {
+        if (-not $live.ContainsKey($key)) { $Cache.Remove($key) }
+    }
+    return $result
+}
+
+# Command-line fragments that mean "idle is this process's NORMAL state".
+# Matched as lowercase substrings (not regex - these are path-shaped, and a
+# stray '.' or '\' must not become a wildcard). Everything here is a process
+# the user would be furious to lose, so a loose match is the SAFE direction:
+# the only consequence of a false positive is that the widget declines to
+# claim the process is safe to close.
+$script:DevKitNodeNeverStalePatterns = @(
+    # Agent CLIs and MCP servers. These talk stdio, so they hold no listening
+    # port and sit at exactly zero CPU for hours while their client thinks -
+    # the precise shape the heuristic below would otherwise flag - and killing
+    # one kills a live session.
+    'claude', 'kimi', 'codex', 'copilot', 'modelcontextprotocol',
+    'mcp-server', 'mcp_server', 'mcp.js', '-mcp', 'mcp-',
+    # Editor/IDE machinery: language servers and extension hosts are idle by
+    # design between keystrokes.
+    'tsserver', 'language-server', 'languageserver', 'langserver',
+    'lsp-server', '-lsp',
+    'typescript\lib', 'typescript/lib', '.vscode', 'vscode-server',
+    '.cursor', '.windsurf', 'jetbrains',
+    # Watchers and test runners: waiting is what they are FOR.
+    'nodemon', '--watch', 'watchman', 'chokidar', 'jest', 'vitest', 'karma',
+    # A debugger may be attached, or about to be.
+    '--inspect'
+)
+
+function Test-DevKitNodeNeverStale {
+    <#
+    .SYNOPSIS
+        True when a command line names something whose idleness is normal and
+        expected, so it must never be advertised as safe to close. An absent
+        command line also returns true: Win32_Process yields nothing for a
+        process this session cannot open, and "we could not read what this is"
+        is not grounds for telling the user to kill it.
+    #>
+    param([AllowNull()][AllowEmptyString()][string]$CommandLine)
+
+    if ([string]::IsNullOrWhiteSpace($CommandLine)) { return $true }
+    $lower = $CommandLine.ToLowerInvariant()
+    foreach ($needle in $script:DevKitNodeNeverStalePatterns) {
+        if ($lower.Contains($needle)) { return $true }
+    }
+    return $false
+}
+
+function Format-DevKitMinutesSpan {
+    <# Whole-minute duration as "0m" / "47m" / "2h 14m". Negatives clamp to 0m. #>
+    param([int]$Minutes)
+    if ($Minutes -lt 0) { $Minutes = 0 }
+    if ($Minutes -lt 60) { return "${Minutes}m" }
+    $h = [math]::Floor($Minutes / 60)
+    $m = $Minutes % 60
+    if ($m -eq 0) { return "${h}h" }
+    return "${h}h ${m}m"
+}
+
+function Get-DevKitNodeStaleVerdict {
+    <#
+    .SYNOPSIS
+        Decides whether one node process is safe to close, and says why.
+    .DESCRIPTION
+        "Stale" is advice the user will act on with a kill button, so the rule
+        is deliberately conservative: EVERY condition must hold, and anything
+        unknown counts against staleness. A process the user would be annoyed
+        to lose must never be flagged; a stale process the widget stays quiet
+        about costs nothing but a little memory.
+
+          1. Idle for at least $IdleThresholdMinutes, and known to be idle -
+             a $null IdleMinutes (first sample, unreadable CPU) is not
+             evidence of anything.
+          2. No listening port. A port means something can still connect: an
+             idle dev server between requests looks exactly like a dead one,
+             and the user would not thank us for the difference.
+          3. Old enough to have plausibly been abandoned. Redundant with (1)
+             in practice, but it stops an unreadable-age process from riding
+             on a short observation window.
+          4. Its command line is readable and does not name something that is
+             idle BY DESIGN (see Test-DevKitNodeNeverStale).
+
+        Memory is deliberately NOT a condition - a small stale process is
+        still stale - but it goes in the reason, because "holding 412 MB" is
+        what makes the suggestion worth acting on.
+    .OUTPUTS
+        @{ IsStale [bool]; Reason [string] or $null }
+    #>
+    param(
+        $IdleMinutes,
+        [int]$PortCount = 0,
+        $AgeMinutes,
+        [int]$MemoryMB = 0,
+        [AllowNull()][AllowEmptyString()][string]$CommandLine,
+        [int]$IdleThresholdMinutes = 30
+    )
+
+    $notStale = @{ IsStale = $false; Reason = $null }
+    if ($null -eq $IdleMinutes -or [int]$IdleMinutes -lt $IdleThresholdMinutes) { return $notStale }
+    if ($PortCount -gt 0) { return $notStale }
+    if ($null -eq $AgeMinutes -or [int]$AgeMinutes -lt $IdleThresholdMinutes) { return $notStale }
+    if (Test-DevKitNodeNeverStale -CommandLine $CommandLine) { return $notStale }
+
+    $reason = "idle $(Format-DevKitMinutesSpan -Minutes ([int]$IdleMinutes)), no listening port"
+    if ($MemoryMB -ge 50) { $reason += ", holding $MemoryMB MB" }
+    return @{ IsStale = $true; Reason = $reason }
+}
+
+function Get-DevKitNodeCommandLines {
+    <#
+    .SYNOPSIS
+        Command lines for the supplied node pids, memoized for the lifetime of
+        each process.
+    .DESCRIPTION
+        Get-Process cannot supply a command line at all; Win32_Process is the
+        only source that works unelevated, and at ~90ms it is by a wide margin
+        the most expensive thing in a node snapshot. A running process's
+        command line never changes, so ONE query covering every node pid runs
+        only when a pid appears that is not already memoized - steady-state
+        polls (the overwhelming majority on a 3s cadence) cost nothing.
+
+        A pid whose start time no longer matches its cached entry is a
+        recycled pid, and re-queries. A pid missing from a SUCCESSFUL query is
+        genuinely unreadable (access denied, or it exited between the two
+        calls) and caches as $null so it is not re-queried every 3 seconds; a
+        query that throws outright caches nothing and retries next poll.
+    .OUTPUTS
+        Hashtable pid -> command line string (or $null).
+    #>
+    param([Parameter(Mandatory = $true)][AllowEmptyCollection()][array]$Samples)
+
+    $needsQuery = $false
+    foreach ($sample in $Samples) {
+        $entry = $script:NodeCommandLines[[int]$sample.Pid]
+        if ($null -eq $entry -or -not (Test-DevKitSameProcessStart -A $entry.StartTime -B $sample.StartTime)) {
+            $needsQuery = $true
+            break
+        }
+    }
+
+    if ($needsQuery) {
+        $rows = $null
+        try {
+            # Filtered server-side by name and projected to two columns: the
+            # widget only ever shows node, and the full Win32_Process shape is
+            # ~40 properties per row of pure marshalling cost.
+            $rows = @(Get-CimInstance -ClassName Win32_Process -Filter "Name = 'node.exe'" -Property ProcessId, CommandLine -ErrorAction Stop)
+        } catch { }
+        if ($null -ne $rows) {
+            $byPid = @{}
+            foreach ($row in $rows) { $byPid[[int]$row.ProcessId] = $row.CommandLine }
+            foreach ($sample in $Samples) {
+                $procId = [int]$sample.Pid
+                $entry = $script:NodeCommandLines[$procId]
+                if ($null -ne $entry -and (Test-DevKitSameProcessStart -A $entry.StartTime -B $sample.StartTime)) { continue }
+                $raw = $null
+                if ($byPid.ContainsKey($procId)) { $raw = [string]$byPid[$procId] }
+                $script:NodeCommandLines[$procId] = @{
+                    StartTime   = $sample.StartTime
+                    CommandLine = (Format-DevKitNodeCommandLine -CommandLine $raw)
+                }
+            }
+        }
+    }
+
+    $live = @{}
+    $map = @{}
+    foreach ($sample in $Samples) {
+        $procId = [int]$sample.Pid
+        $live[$procId] = $true
+        $entry = $script:NodeCommandLines[$procId]
+        $map[$procId] = if ($null -ne $entry) { $entry.CommandLine } else { $null }
+    }
+    foreach ($key in @($script:NodeCommandLines.Keys)) {
+        if (-not $live.ContainsKey($key)) { $script:NodeCommandLines.Remove($key) }
+    }
+    return $map
+}
+
 function Get-DevKitNodeSnapshot {
     <#
     .SYNOPSIS
@@ -310,24 +659,76 @@ function Get-DevKitNodeSnapshot {
         too instead of silently looking like "nothing running"). Also flags
         common dev ports that sit inside winnat-reserved ranges (unbindable
         even though nothing listens there).
+
+        Each node row also carries the derived "last used" fields the widget
+        needs to tell a working process from an abandoned one: IdleMinutes /
+        CpuPercent from the cross-poll CPU tracker (Update-DevKitNodeActivity),
+        an IsStale/StaleReason verdict (Get-DevKitNodeStaleVerdict), and a
+        truncated CommandLine so two `node` rows are tellable apart.
     #>
     $nodeProcesses = @(Get-Process -Name node -ErrorAction SilentlyContinue)
     $listenRows = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue)
     $portsByPid = Group-DevKitPortsByProcess -ListenRows $listenRows
+    $now = Get-Date
+
+    # One sample row per live node process. Both .CPU and .StartTime throw for
+    # a process this session cannot open (another user's, or elevated), so
+    # each is guarded on its own - an unreadable field means "unknown", never
+    # a dropped row.
+    $samples = @()
+    $sampleByPid = @{}
+    foreach ($proc in $nodeProcesses) {
+        $cpu = $null
+        try {
+            $rawCpu = $proc.CPU
+            if ($null -ne $rawCpu) { $cpu = [double]$rawCpu }
+        } catch { }
+        $startTime = $null
+        try { $startTime = $proc.StartTime } catch { }
+        $sample = @{ Pid = [int]$proc.Id; CpuSeconds = $cpu; StartTime = $startTime }
+        $samples += $sample
+        $sampleByPid[[int]$proc.Id] = $sample
+    }
+
+    $cores = [Environment]::ProcessorCount
+    if ($cores -lt 1) { $cores = 1 }
+    $activity = Update-DevKitNodeActivity -Cache $script:NodeActivity -Samples $samples -Now $now -CoreCount $cores
+    $commandLines = Get-DevKitNodeCommandLines -Samples $samples
 
     $processes = @()
     foreach ($proc in ($nodeProcesses | Sort-Object WorkingSet64 -Descending)) {
+        $procId = [int]$proc.Id
         $ports = @()
-        if ($portsByPid.ContainsKey($proc.Id)) { $ports = $portsByPid[$proc.Id] }
+        if ($portsByPid.ContainsKey($procId)) { $ports = @($portsByPid[$procId]) }
+        $sample = $sampleByPid[$procId]
         $ageMinutes = $null
-        try { $ageMinutes = [math]::Round(((Get-Date) - $proc.StartTime).TotalMinutes, 0) } catch { }
+        if ($null -ne $sample.StartTime) { $ageMinutes = [int][math]::Round(($now - $sample.StartTime).TotalMinutes, 0) }
+        $memoryMB = 0
+        try { $memoryMB = [int][math]::Round($proc.WorkingSet64 / 1MB, 0) } catch { }
+        $commandLine = $commandLines[$procId]
+
+        $idleMinutes = $null
+        $cpuPercent = $null
+        $derived = $activity[$procId]
+        if ($null -ne $derived) {
+            $idleMinutes = $derived.IdleMinutes
+            $cpuPercent = $derived.CpuPercent
+        }
+        $verdict = Get-DevKitNodeStaleVerdict -IdleMinutes $idleMinutes -PortCount $ports.Count `
+            -AgeMinutes $ageMinutes -MemoryMB $memoryMB -CommandLine $commandLine
+
         $processes += [PSCustomObject]@{
-            Pid        = $proc.Id
-            Name       = $proc.ProcessName
-            MemoryMB   = [math]::Round($proc.WorkingSet64 / 1MB, 0)
-            CpuSeconds = if ($proc.CPU) { [math]::Round($proc.CPU, 1) } else { 0 }
-            AgeMinutes = $ageMinutes
-            Ports      = $ports
+            Pid         = $procId
+            Name        = $proc.ProcessName
+            MemoryMB    = $memoryMB
+            CpuSeconds  = if ($null -ne $sample.CpuSeconds) { [math]::Round($sample.CpuSeconds, 1) } else { 0 }
+            AgeMinutes  = $ageMinutes
+            Ports       = $ports
+            IdleMinutes = $idleMinutes
+            CpuPercent  = $cpuPercent
+            IsStale     = [bool]$verdict.IsStale
+            StaleReason = $verdict.Reason
+            CommandLine = $commandLine
         }
     }
 

@@ -3,6 +3,7 @@ import clsx from "clsx";
 import { usePolledRpc } from "../../../hooks/usePolledRpc";
 import { useProjectStore } from "../../../stores/useProjectStore";
 import { rpcCall } from "../../../lib/ipc";
+import { asArray } from "../../../lib/arrays";
 import { GlassPanel } from "../../../components/primitives/GlassPanel";
 import { Badge } from "../../../components/primitives/Badge";
 import { FolderIcon } from "./icons";
@@ -14,7 +15,8 @@ import "./FilesPanel.css";
  * Get-DevKitDirChildren in core/DevKit-WidgetCore.ps1 - deliberately
  * non-recursive). The root level is polled like the other panels; every
  * folder expanded below it is fetched once on first expand and cached in
- * local state so collapsing/re-expanding never re-fetches.
+ * local state so collapsing/re-expanding never re-fetches. A level that
+ * FAILED is not cached that way - see handleToggle.
  *
  * Known gaps left for a later pass: no new-file/new-folder actions, no
  * open-in-editor on double click (both were noted on the old stub but are
@@ -98,12 +100,13 @@ function TreeNode({ node, depth, ctl }: { node: DirChild; depth: number; ctl: Tr
 
 export function FilesPanel() {
   const active = useProjectStore((s) => s.active);
-  const { data: root, isLoading: rootLoading } = usePolledRpc<DirChildrenResult>(
-    "files.children",
-    active ? { path: active.path } : undefined,
-    15000,
-    !!active,
-  );
+  const {
+    data: root,
+    pending: rootPending,
+    failed: rootFailed,
+    stale: rootStale,
+    errorMessage: rootRpcError,
+  } = usePolledRpc<DirChildrenResult>("files.children", active ? { path: active.path } : undefined, 15000, !!active);
 
   const [childrenByPath, setChildrenByPath] = useState<Record<string, DirChild[]>>({});
   const [errorByPath, setErrorByPath] = useState<Record<string, string>>({});
@@ -122,6 +125,16 @@ export function FilesPanel() {
     const path = node.FullName;
     if (expandedPaths[path]) {
       setExpandedPaths((prev) => ({ ...prev, [path]: false }));
+      // Successful reads stay cached, but a failed one is forgotten on
+      // collapse: unlike the polled root, a child level is fetched exactly
+      // once, so a cached error would outlive the sidecar outage that
+      // caused it and this folder would claim to be unreadable forever.
+      setErrorByPath((prev) => {
+        if (!(path in prev)) return prev;
+        const next = { ...prev };
+        delete next[path];
+        return next;
+      });
       return;
     }
     setExpandedPaths((prev) => ({ ...prev, [path]: true }));
@@ -145,9 +158,11 @@ export function FilesPanel() {
   if (!active) return null;
 
   const ctl: TreeController = { childrenByPath, errorByPath, expandedPaths, loadingPaths, onToggle: handleToggle };
-  const rootChildren = root?.Children;
-
-  const stillLoading = rootLoading && !root;
+  // Wire-shape guard: a folder holding exactly one entry can arrive as a
+  // bare object instead of a 1-element list (lib/arrays.ts). `root` itself
+  // stays the "did an answer arrive at all" test, since a normalized [] is
+  // indistinguishable from never having asked.
+  const rootChildren = asArray(root?.Children);
 
   return (
     <GlassPanel>
@@ -156,22 +171,33 @@ export function FilesPanel() {
           <FolderIcon />
         </span>
         <h2 className="panel-header__title">Files</h2>
-        {rootChildren && (
+        {rootStale && <span className="panel-header__hint files-panel__stale">last known — sidecar not answering</span>}
+        {root && !root.Error && (
           <div className="panel-header__actions">
             <Badge tone="neutral">{rootChildren.length}</Badge>
           </div>
         )}
       </div>
-      {stillLoading && (
+      {rootPending && (
         <div className="files-panel__skeleton">
           <div className="panel-skeleton-row" />
           <div className="panel-skeleton-row" />
           <div className="panel-skeleton-row" />
         </div>
       )}
+      {/* Two different failures, deliberately worded apart: `root.Error` is
+          the sidecar telling us it couldn't read the directory (denied,
+          gone), while `rootFailed` is the sidecar not answering at all.
+          Neither may fall through to the blank body this panel used to
+          render, which read as a project with no files in it. */}
+      {rootFailed && (
+        <div className="panel-empty panel-empty--danger" role="alert">
+          Couldn&apos;t read this folder{rootRpcError ? ` - ${rootRpcError}` : "."}
+        </div>
+      )}
       {root?.Error && <div className="panel-empty panel-empty--danger">{root.Error}</div>}
-      {!root?.Error && rootChildren?.length === 0 && <div className="panel-empty">Empty folder.</div>}
-      {!root?.Error && rootChildren && (
+      {root && !root.Error && rootChildren.length === 0 && <div className="panel-empty">Empty folder.</div>}
+      {root && !root.Error && rootChildren.length > 0 && (
         <div className="files-panel__tree">
           {rootChildren.map((child) => (
             <TreeNode key={child.FullName} node={child} depth={0} ctl={ctl} />

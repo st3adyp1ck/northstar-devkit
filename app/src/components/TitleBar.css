@@ -9,10 +9,16 @@
   flex-shrink: 0;
 }
 
+/* Allowed to shrink, and the first thing that does. The widget docks as
+   narrow as 380 logical px (DOCK_MIN_WIDTH_LOGICAL in commands.rs), and a
+   truncated window name is a far better trade there than window controls
+   being pushed off the right edge. */
 .devkit-titlebar__brand {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  min-width: 0;
+  flex: 0 1 auto;
 }
 
 .devkit-titlebar__title {
@@ -21,6 +27,9 @@
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .devkit-titlebar__middle {
@@ -31,10 +40,39 @@
   min-width: 0;
 }
 
-.devkit-titlebar__actions {
+/* ---------- control groups ----------
+   Two deliberate clusters with a hairline between them: everything that
+   acts on the APP (health, per-window actions, errors, settings) on the
+   left of the rule, everything that acts on the WINDOW (minimize, maximize,
+   close) on the right. Never shrinks - see __brand above for who yields. */
+.devkit-titlebar__controls {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.devkit-titlebar__group {
   display: flex;
   align-items: center;
   gap: 2px;
+  min-width: 0;
+}
+
+/* Minimize/maximize/close are the one cluster that may never be squeezed or
+   pushed past the right edge: if the app group ever grows past the window
+   (the sidecar's dead state swaps its dot for a labelled restart button),
+   that group is the one that gives. */
+.devkit-titlebar__group--window {
+  flex-shrink: 0;
+}
+
+.devkit-titlebar__divider {
+  width: 1px;
+  height: 16px;
+  margin: 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--surface-border-strong);
+  flex-shrink: 0;
 }
 
 .devkit-titlebar__btn {
@@ -72,6 +110,197 @@
   transition: transform var(--duration-base) var(--ease-standard);
 }
 
-.devkit-titlebar__btn:hover svg {
+/* ...but only the gear. The Error Center's warning triangle reads as a
+   glyph, not a mechanism - spinning it looks like a glitch. */
+.devkit-titlebar__btn:not(.devkit-titlebar__btn--alert):hover svg {
   transform: rotate(40deg);
+}
+
+/* ---------- Error Center button ----------
+   Silent while there is nothing to report: it inherits the plain button
+   styling above and only takes on the danger tint once unseen entries
+   exist, so a healthy app carries no permanent warning furniture. */
+.devkit-titlebar__btn--alert {
+  position: relative;
+  color: var(--danger);
+}
+
+.devkit-titlebar__btn--alert:hover {
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
+  color: var(--danger);
+}
+
+.devkit-titlebar__badge {
+  position: absolute;
+  top: 1px;
+  right: 0;
+  min-width: 13px;
+  height: 13px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 13px;
+  text-align: center;
+  /* Sits on the window's own background, so a ring keeps it legible
+     against whichever theme is active. */
+  box-shadow: 0 0 0 1.5px var(--surface-app);
+}
+
+/* ---------- sidecar health ----------
+   Three states, three volumes. Checking is a dim grey dot; healthy is a
+   small green dot with a soft glow that breathes; dead is a labelled button
+   that fixes the problem.
+
+   The healthy glow is deliberately a HALO, not a bigger dot - the lit area
+   grows to ~18px while the dot itself stays 6px, so it reads as a positive
+   signal from the corner of your eye without becoming another 30px control
+   competing with the buttons beside it. */
+.devkit-sidecar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  /* The quiet states are a 6px dot sitting between 30px buttons; without
+     this they read as a smudge stuck to the neighbouring icon. The glow
+     itself is box-shadow, so it costs no layout and needs no room here. */
+  padding: 0 var(--space-2);
+}
+
+.devkit-sidecar__dot {
+  width: 5px;
+  height: 5px;
+  border-radius: var(--radius-pill);
+  background: var(--text-tertiary);
+  opacity: 0.5;
+  flex-shrink: 0;
+}
+
+.devkit-sidecar--ok .devkit-sidecar__dot {
+  width: 6px;
+  height: 6px;
+  background: var(--success);
+  opacity: 1;
+  /* Tight ring + near glow + far bloom. All color-mix over --success so the
+     halo stays translucent against whichever theme ground is behind it. */
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--success) 32%, transparent),
+    0 0 5px color-mix(in srgb, var(--success) 50%, transparent),
+    0 0 11px color-mix(in srgb, var(--success) 20%, transparent);
+  animation: devkit-sidecar-breathe 4.2s ease-in-out infinite;
+}
+
+/* Only the halo moves - the dot's own size and position are static, so this
+   never nudges the controls next to it. */
+@keyframes devkit-sidecar-breathe {
+  0%,
+  100% {
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--success) 28%, transparent),
+      0 0 4px color-mix(in srgb, var(--success) 42%, transparent),
+      0 0 9px color-mix(in srgb, var(--success) 16%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--success) 40%, transparent),
+      0 0 8px color-mix(in srgb, var(--success) 72%, transparent),
+      0 0 18px color-mix(in srgb, var(--success) 32%, transparent);
+  }
+}
+
+/* The only state wide enough to be worth compressing - see
+   .devkit-titlebar__group--window. */
+.devkit-sidecar--down {
+  padding: 0 var(--space-1);
+  min-width: 0;
+  flex-shrink: 1;
+}
+
+.devkit-sidecar--down .devkit-sidecar__dot {
+  width: 6px;
+  height: 6px;
+  background: var(--danger);
+  opacity: 1;
+  box-shadow: 0 0 6px var(--danger);
+  animation: devkit-sidecar-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes devkit-sidecar-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+/* Both loops are a fixed literal duration rather than a --duration-* token
+   (a continuous pulse at 0ms is just gone), so neither is covered by
+   tokens.css zeroing those tokens - each has to be switched off by hand in
+   both reduced-motion paths below. The healthy dot keeps its full lit
+   halo when it stops; only the breathing goes. */
+@media (prefers-reduced-motion: reduce) {
+  .devkit-sidecar--down .devkit-sidecar__dot,
+  .devkit-sidecar--ok .devkit-sidecar__dot {
+    animation: none;
+  }
+}
+
+/* App-level twin of the media query above - see tokens.css's data-animations block. */
+:root[data-animations="off"] .devkit-sidecar--down .devkit-sidecar__dot,
+:root[data-animations="off"] .devkit-sidecar--ok .devkit-sidecar__dot {
+  animation: none;
+}
+
+.devkit-sidecar__btn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 22px;
+  min-width: 0;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+  background: var(--danger-soft);
+  color: var(--danger-strong);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-standard);
+}
+
+.devkit-sidecar__btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 28%, transparent);
+}
+
+.devkit-sidecar__btn:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.devkit-sidecar__label {
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Anchored under the button rather than inline: the titlebar is 38px tall
+   and already crowded, and a restart failure is worth real words. */
+.devkit-sidecar__error {
+  position: absolute;
+  top: calc(100% + var(--space-1));
+  right: 0;
+  z-index: 60;
+  max-width: 280px;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+  background: var(--surface-panel-solid);
+  box-shadow: var(--shadow-md);
+  font-size: var(--text-2xs);
+  font-family: var(--font-mono);
+  color: var(--ember-400);
+  word-break: break-word;
+  white-space: normal;
 }

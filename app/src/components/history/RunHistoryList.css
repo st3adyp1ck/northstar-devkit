@@ -1,0 +1,174 @@
+.run-history {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.run-history__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-height: 24px;
+}
+
+.run-history__count {
+  font-size: var(--text-2xs);
+  color: var(--text-tertiary);
+}
+
+.run-history__list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+  overflow: hidden;
+}
+
+.run-history__row + .run-history__row {
+  border-top: 1px solid var(--surface-border);
+}
+
+.run-history__trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-standard);
+}
+
+.run-history__trigger:hover {
+  background: var(--surface-hover);
+}
+
+.run-history__chevron {
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+  transition: transform var(--duration-base) var(--ease-standard), color var(--duration-base) var(--ease-standard);
+}
+
+.run-history__chevron--open {
+  transform: rotate(180deg);
+  color: var(--accent-strong);
+}
+
+.run-history__ident {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.run-history__label {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.run-history__script {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.run-history__meta {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-2xs);
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.run-history__duration {
+  color: var(--text-secondary);
+}
+
+/* Same 0fr -> 1fr disclosure the Expander primitive uses: no JS height
+   measurement, and it snaps instantly when --duration-slow is zeroed by
+   prefers-reduced-motion or the animations-off setting. */
+.run-history__panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--duration-slow) var(--ease-standard);
+}
+
+.run-history__panel--open {
+  grid-template-rows: 1fr;
+}
+
+.run-history__panel-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+
+.run-history__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: 0 var(--space-3) var(--space-3) var(--space-3);
+}
+
+.run-history__args {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--text-secondary);
+  word-break: break-all;
+}
+
+.run-history__notice {
+  font-size: var(--text-2xs);
+  color: var(--signal-amber);
+}
+
+.run-history__empty {
+  font-size: var(--text-2xs);
+  color: var(--text-tertiary);
+}
+
+.run-history__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* ---------- compact: the widget's narrow docked column ---------- */
+
+.run-history--compact .run-history__trigger {
+  padding: 6px var(--space-2);
+  gap: 6px;
+}
+
+.run-history--compact .run-history__label,
+.run-history--compact .run-history__meta {
+  font-size: var(--text-2xs);
+}
+
+.run-history--compact .run-history__meta {
+  gap: 6px;
+}
+
+/* At widget width the script path is the first thing worth losing - the
+   label plus the expanded args line already identify the run. */
+.run-history--compact .run-history__script {
+  display: none;
+}
+
+.run-history--compact .run-history__body {
+  padding: 0 var(--space-2) var(--space-2) var(--space-2);
+}

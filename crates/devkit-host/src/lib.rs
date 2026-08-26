@@ -6,7 +6,52 @@ pub use protocol::{RpcError, RpcEvent, RpcRequest, RpcResponse, SidecarMessage};
 
 #[cfg(test)]
 mod tests {
-    use super::protocol::SidecarMessage;
+    use super::protocol::{RpcRequest, SidecarMessage};
+
+    #[test]
+    fn request_omits_absent_params() {
+        // `ping`/`shutdown` are sent with no params, and the sidecar's main
+        // loop reads `$request.method` off a ConvertFrom-Json object - a
+        // `"params": null` would be harmless there, but the wire format
+        // documents params as optional, so keep it genuinely absent.
+        let line = serde_json::to_string(&RpcRequest::new(9, "ping", None)).unwrap();
+        assert_eq!(line, r#"{"id":9,"method":"ping"}"#);
+    }
+
+    #[test]
+    fn request_carries_params_verbatim() {
+        let req = RpcRequest::new(
+            4,
+            "tool.run",
+            Some(serde_json::json!({ "id": "git-status" })),
+        );
+        let line = serde_json::to_value(&req).unwrap();
+        assert_eq!(line["id"], 4);
+        assert_eq!(line["method"], "tool.run");
+        assert_eq!(line["params"]["id"], "git-status");
+    }
+
+    #[test]
+    fn request_response_round_trip_preserves_id() {
+        // The whole demux depends on this: ids are what pair a reply with
+        // the caller waiting on it.
+        let req = RpcRequest::new(u64::MAX, "metrics.system", None);
+        let raw = format!(r#"{{"id":{},"ok":true,"result":null}}"#, req.id);
+        let msg: SidecarMessage = serde_json::from_str(&raw).unwrap();
+        match msg {
+            SidecarMessage::Response(r) => assert_eq!(r.id, req.id),
+            SidecarMessage::Event(_) => panic!("expected Response variant"),
+        }
+    }
+
+    #[test]
+    fn malformed_line_matches_neither_variant() {
+        // The untagged enum tries Response then Event; a line that is valid
+        // JSON but neither must fail cleanly (the reader logs and skips it)
+        // rather than deserializing into a bogus Event with an empty name.
+        let raw = r#"{"id":1}"#;
+        assert!(serde_json::from_str::<SidecarMessage>(raw).is_err());
+    }
 
     #[test]
     fn decodes_response_message() {

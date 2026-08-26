@@ -14,6 +14,17 @@
  *
  * This file DEFINES palettes, so it is inherently full of literal hexes -
  * the one sanctioned exception to the no-hardcoded-hex house rule.
+ *
+ * CONTRAST FLOOR for --text-tertiary. That token carries timestamps and
+ * origin lines throughout the Error Center and the panels - body text, not
+ * decoration - on both --surface-sunken (--gm-950) and --surface-raised
+ * (--gm-850). Every preset's value below was picked by COMPUTING the WCAG
+ * 2.1 ratio against those two grounds until both cleared 4.5:1, not by eye:
+ * the shipped values were between 2.32:1 and 4.44:1, i.e. anywhere from
+ * "fails large text" to "just misses body text". Each one is annotated with
+ * its before -> after pair as `sunken/raised`. If you re-tune a --gm-950 or
+ * --gm-850 here, re-run those numbers - lightening a ground silently eats
+ * the margin.
  */
 
 export interface ThemePreset {
@@ -67,7 +78,7 @@ export const THEMES: ThemePreset[] = [
       "--ember-400": "#ff7b7b",
       "--text-primary": "#f8f8f2",
       "--text-secondary": "#b8bdd8",
-      "--text-tertiary": "#6272a4",
+      "--text-tertiary": "#8a96bb", // Dracula's comment purple lifted; 3.45/2.86 -> 5.53/4.59
       "--text-on-accent": "#1e1f29",
     },
     preview: { accent: "#bd93f9", danger: "#ff5555", surface: "#1e2029", raised: "#2c2e3a", text: "#f8f8f2" },
@@ -97,7 +108,7 @@ export const THEMES: ThemePreset[] = [
       "--ember-400": "#d08b92",
       "--text-primary": "#eceff4",
       "--text-secondary": "#d8dee9",
-      "--text-tertiary": "#7b88a1",
+      "--text-tertiary": "#9ba4b7", // 3 steps up the Nord polar-night/snow-storm gap; 4.08/3.20 -> 5.82/4.56
       "--text-on-accent": "#20242c",
     },
     preview: { accent: "#88c0d0", danger: "#bf616a", surface: "#242933", raised: "#333a48", text: "#eceff4" },
@@ -127,7 +138,7 @@ export const THEMES: ThemePreset[] = [
       "--ember-400": "#f993a6",
       "--text-primary": "#c0caf5",
       "--text-secondary": "#9aa5ce",
-      "--text-tertiary": "#565f89",
+      "--text-tertiary": "#7e87ae", // Tokyo Night's comment blue lifted; 2.95/2.61 -> 5.19/4.58
       "--text-on-accent": "#15161e",
     },
     preview: { accent: "#7aa2f7", danger: "#f7768e", surface: "#131420", raised: "#1e202e", text: "#c0caf5" },
@@ -157,7 +168,7 @@ export const THEMES: ThemePreset[] = [
       "--ember-400": "#f6a8bd",
       "--text-primary": "#cdd6f4",
       "--text-secondary": "#bac2de",
-      "--text-tertiary": "#7f849c",
+      "--text-tertiary": "#9399b2", // overlay1 -> overlay2, a real Mocha step; 5.07/4.44 -> 6.64/5.81
       "--text-on-accent": "#11111b",
     },
     preview: { accent: "#89b4fa", danger: "#f38ba8", surface: "#11111b", raised: "#1e1e2e", text: "#cdd6f4" },
@@ -189,7 +200,7 @@ export const THEMES: ThemePreset[] = [
       "--ember-400": "#fc6f5d",
       "--text-primary": "#ebdbb2",
       "--text-secondary": "#d5c4a1",
-      "--text-tertiary": "#a89984",
+      "--text-tertiary": "#a89984", // gruvbox's own gray already clears at 5.90/4.72 - left alone
       "--text-on-accent": "#1d2021",
     },
     preview: { accent: "#83a598", danger: "#fb4934", surface: "#1d2021", raised: "#32302f", text: "#ebdbb2" },
@@ -219,7 +230,7 @@ export const THEMES: ThemePreset[] = [
       "--ember-400": "#e88e95",
       "--text-primary": "#dcdfe4",
       "--text-secondary": "#abb2bf",
-      "--text-tertiary": "#5c6370",
+      "--text-tertiary": "#8c94a1", // past One Dark's mono-2 (#828997, still only 3.98 raised); 2.73/2.32 -> 5.40/4.58
       "--text-on-accent": "#171a1f",
     },
     preview: { accent: "#61afef", danger: "#e06c75", surface: "#1b1f27", raised: "#282c34", text: "#dcdfe4" },
@@ -249,7 +260,7 @@ export const THEMES: ThemePreset[] = [
       "--ember-400": "#e0703f",
       "--text-primary": "#eee8d5",
       "--text-secondary": "#93a1a1",
-      "--text-tertiary": "#657b83",
+      "--text-tertiary": "#82979f", // Solarized base00 -> a touch bluer than base0; 3.77/3.12 -> 5.50/4.55
       "--text-on-accent": "#00212a",
     },
     preview: { accent: "#268bd2", danger: "#cb4b16", surface: "#00212a", raised: "#03313d", text: "#eee8d5" },
@@ -279,7 +290,7 @@ export const THEMES: ThemePreset[] = [
       "--ember-400": "#fa5590",
       "--text-primary": "#f8f8f2",
       "--text-secondary": "#c8c8bf",
-      "--text-tertiary": "#75715e",
+      "--text-tertiary": "#999581", // Monokai's olive comment lifted, cast intact; 3.42/2.79 -> 5.57/4.55
       "--text-on-accent": "#14150f",
     },
     preview: { accent: "#66d9ef", danger: "#f92672", surface: "#1d1e19", raised: "#2d2e27", text: "#f8f8f2" },
@@ -311,7 +322,7 @@ export const THEMES: ThemePreset[] = [
       "--ember-400": "#fe6c76",
       "--text-primary": "#f4eee4",
       "--text-secondary": "#b6a9c7",
-      "--text-tertiary": "#8079a7",
+      "--text-tertiary": "#8e88b1", // 3.79 raised was the only miss; 4.39/3.79 -> 5.31/4.59
       "--text-on-accent": "#241b2f",
     },
     preview: { accent: "#ff7edb", danger: "#fe4450", surface: "#1a1626", raised: "#262335", text: "#f4eee4" },

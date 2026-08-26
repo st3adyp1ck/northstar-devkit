@@ -3,7 +3,24 @@
   align-items: center;
   gap: var(--space-2);
   width: 100%;
-  max-width: 260px;
+  max-width: 300px;
+}
+
+/* A narrow docked widget shares its titlebar between the picker and the
+   window controls - tighten the picker's own gaps first so the select keeps
+   as much of the remaining room as possible. */
+@media (max-width: 460px) {
+  .devkit-project-picker {
+    gap: var(--space-1);
+  }
+}
+
+/* Control Center chrome: the picker shares the titlebar's middle slot with
+   the tool search, so it gives up its flex growth and pins to its own width. */
+.devkit-project-picker--chrome {
+  width: auto;
+  flex: 0 1 268px;
+  min-width: 168px;
 }
 
 .devkit-project-picker__select-wrap {
@@ -72,4 +89,43 @@
 
 .devkit-project-picker__browse:active {
   transform: scale(0.92);
+}
+
+.devkit-project-picker__browse svg {
+  display: block;
+}
+
+/* An active project whose folder no longer exists still runs tools against a
+   dead path - flag it right in the picker, not just in the manager list. */
+.devkit-project-picker__select--missing {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--surface-border));
+  color: var(--danger-strong);
+}
+
+/* Three "no project name is showing" states that must not be confused for
+   one another at a glance:
+     --none    a deliberate choice - dashed border, still fully legible
+     --empty   nothing linked yet - flat and muted, nothing to choose from
+     --missing above - the only one that is actually a problem
+   None deliberately borrows no danger/warning color: unscoped is a valid way
+   to run DevKit, not a fault state. */
+.devkit-project-picker__select--none {
+  border-style: dashed;
+  border-color: var(--surface-border-strong);
+  color: var(--text-secondary);
+}
+
+.devkit-project-picker__select--empty {
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
+.devkit-project-picker__error {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: var(--text-2xs);
+  color: var(--danger-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

@@ -28,33 +28,170 @@
   background: color-mix(in srgb, var(--signal-amber) 20%, transparent);
 }
 
+/* env.drift could not be reached at all - stated plainly rather than left to
+   look like a clean bill of health. */
+.quick-actions-panel__drift-unknown {
+  margin-top: var(--space-2);
+  font-size: var(--text-2xs);
+  color: var(--text-tertiary);
+}
+
+.quick-actions-panel__section {
+  margin-top: var(--space-2);
+}
+
+/* Expander's panel-inner carries no padding of its own (same reason
+   .quick-actions-panel__history-body exists). */
+.quick-actions-panel__section-body {
+  padding: 0 var(--space-3) var(--space-3) var(--space-3);
+}
+
+/* Two actions, one per row. The old wrap-a-button-bar layout is gone with
+   the four buttons it existed to pack: these are the day's two deliberate
+   decisions, so they get the width to say what they do. */
 .quick-actions-panel__actions {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 8px;
+  flex-direction: column;
+  gap: var(--space-2);
 }
 
-.quick-actions-panel__action {
+/*
+ * Button is a fixed-height inline-flex row, which is exactly right for a
+ * button bar and exactly wrong for a labelled action. Overriding it here
+ * rather than widening the primitive: two big captioned buttons are this
+ * panel's own idea, and every other surface in the app still wants the
+ * primitive's compact default.
+ *
+ * The spinner Button injects stays a direct flex child, so it lands to the
+ * LEFT of the text block rather than displacing it - which is why the label
+ * and caption are wrapped in __big-text instead of being siblings of it.
+ *
+ * Compounded with .devkit-btn rather than left bare: every property here
+ * fights one the primitive sets at equal specificity, and which of the two
+ * wins would otherwise come down to the order Vite happens to concatenate
+ * two CSS files in.
+ */
+.devkit-btn.quick-actions-panel__big {
+  width: 100%;
+  height: auto;
+  min-height: 48px;
+  justify-content: flex-start;
+  padding: var(--space-2) var(--space-3);
+}
+
+.quick-actions-panel__big-text {
   display: flex;
-  align-items: center;
-  gap: 4px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  min-width: 0;
+  text-align: left;
 }
 
-.quick-actions-panel__port-input {
-  width: 64px;
-  height: 28px;
-  background: var(--surface-raised);
-  border: 1px solid var(--surface-border);
-  border-radius: var(--radius-sm);
-  color: var(--text-primary);
-  padding: 0 var(--space-2);
-  font-size: var(--text-xs);
-  font-variant-numeric: tabular-nums;
+.quick-actions-panel__big-label {
+  font-size: var(--text-sm);
+  font-weight: 700;
+  line-height: 1.3;
 }
 
-.quick-actions-panel__port-input:disabled {
-  opacity: 0.5;
+/* currentColor at reduced opacity rather than a token: this text sits on
+   the primary gradient in one button and the danger gradient in the other,
+   and each variant already picks its own readable foreground. */
+.quick-actions-panel__big-caption {
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  line-height: 1.35;
+  opacity: 0.78;
+  white-space: normal;
+}
+
+.quick-actions-panel__close-out {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+/* Deliberately quiet and tucked under the button it previews - it is the
+   safe way out of a one-click wipe, not a third headline action. */
+.quick-actions-panel__preview {
+  align-self: flex-end;
+}
+
+/* The sidecar has one tool lane, so the other panel's run really does hold
+   these buttons shut. Say which one rather than leaving them silently grey. */
+.quick-actions-panel__blocked {
+  margin-top: var(--space-2);
+  font-size: var(--text-2xs);
+  color: var(--text-tertiary);
+}
+
+/* tool.run was rejected before the sidecar emitted anything, so no process
+   was ever started - a missing script reads as a stated failure here instead
+   of a button that spins forever. */
+.quick-actions-panel__launch-error {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--danger-soft);
+  border: 1px solid color-mix(in srgb, var(--ember-500) 30%, transparent);
+  border-radius: var(--radius-md);
+  font-size: var(--text-2xs);
+  line-height: 1.4;
+  color: var(--ember-400);
+  word-break: break-word;
+}
+
+.quick-actions-panel__launch-hint {
+  color: var(--text-tertiary);
+}
+
+/* Collapsed-state summary: the running tool's name in the section header.
+   Capped so a long label can't shove the Expander title out of a narrow
+   dock - the header's action slot never shrinks. */
+.quick-actions-panel__running {
+  max-width: 128px;
+}
+
+.quick-actions-panel__running-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quick-actions-panel__running-dot {
+  flex-shrink: 0;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: quick-actions-panel-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes quick-actions-panel-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+/* A continuous pulse at 0ms is just an invisible dot, so this loop uses a
+   literal duration and is therefore NOT covered by tokens.css zeroing the
+   --duration-* tokens. Both reduced-motion paths have to switch it off by
+   hand; the dot stays lit, only the breathing stops. */
+@media (prefers-reduced-motion: reduce) {
+  .quick-actions-panel__running-dot {
+    animation: none;
+  }
+}
+
+/* App-level twin of the media query above - see tokens.css's data-animations block. */
+:root[data-animations="off"] .quick-actions-panel__running-dot {
+  animation: none;
 }
 
 .quick-actions-panel__console {
@@ -62,6 +199,34 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
+}
+
+.quick-actions-panel__console-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-height: 0;
+}
+
+.quick-actions-panel__console-footer:empty {
+  display: none;
+}
+
+/* The tool.run RPC errored but the run may still be alive - the panel is
+   still listening for its tool.finished. */
+.quick-actions-panel__degraded {
+  font-size: var(--text-2xs);
+  line-height: 1.4;
+  color: var(--signal-amber);
+}
+
+.quick-actions-panel__history {
+  margin-top: var(--space-2);
+}
+
+.quick-actions-panel__history-body {
+  padding: 0 var(--space-2) var(--space-2) var(--space-2);
 }
 
 .quick-actions-panel__exit-ok,
