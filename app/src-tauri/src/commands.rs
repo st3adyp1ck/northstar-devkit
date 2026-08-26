@@ -119,6 +119,80 @@ pub async fn show_window(app: tauri::AppHandle, label: String) -> Result<(), Str
 /// Rust-side (not the JS window API) so no ACL grants are needed and the
 /// monitor math stays in one place. Physical pixels throughout so DPI
 /// scale factors don't skew anything.
+/// Monotonic generation for widget slide animations: each new slide bumps
+/// it, and any in-flight animation task aborts as soon as it notices it no
+/// longer owns the latest generation - so rapid collapse/expand clicks
+/// never leave two tasks fighting over the window position.
+static SLIDE_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Width (logical px) of the sliver left on-screen when the docked widget
+/// is collapsed - the frontend renders its grab-rail exactly this wide.
+const SLIDE_HANDLE_LOGICAL: f64 = 18.0;
+
+/// Slides the DOCKED widget off its edge like a tray, leaving an
+/// 18-logical-px rail on screen (collapsed=true), or slides it back fully
+/// on screen (collapsed=false). Animates the OS window position itself
+/// (~200ms ease-out at ~60fps) so the whole glass surface physically
+/// glides - the JARVIS-tray behavior - rather than just hiding content.
+/// Only meaningful while docked; the frontend guards that.
+#[tauri::command]
+pub async fn slide_widget(app: tauri::AppHandle, side: String, collapsed: bool) -> Result<(), String> {
+    use std::sync::atomic::Ordering;
+
+    let Some(window) = app.get_webview_window("widget") else {
+        return Err("widget window not found".into());
+    };
+    let monitor = window
+        .current_monitor()
+        .map_err(|e| e.to_string())?
+        .ok_or("no monitor for widget window")?;
+    let scale = monitor.scale_factor();
+    let work = monitor.work_area();
+    let width = window.outer_size().map_err(|e| e.to_string())?.width as i32;
+    let handle = (SLIDE_HANDLE_LOGICAL * scale) as i32;
+
+    let is_left = side.eq_ignore_ascii_case("left");
+    if !is_left && !side.eq_ignore_ascii_case("right") {
+        return Err(format!("unknown dock side '{side}'"));
+    }
+    // Expanded: flush against the edge. Collapsed: slid off-screen with a
+    // `handle`-wide sliver remaining on the INNER edge.
+    let target_x = match (is_left, collapsed) {
+        (true, false) => work.position.x,
+        (true, true) => work.position.x - width + handle,
+        (false, false) => work.position.x + work.size.width as i32 - width,
+        (false, true) => work.position.x + work.size.width as i32 - handle,
+    };
+
+    let start = window.outer_position().map_err(|e| e.to_string())?;
+    let y = start.y;
+    let start_x = start.x;
+    if start_x == target_x {
+        return Ok(());
+    }
+
+    let generation = SLIDE_GEN.fetch_add(1, Ordering::SeqCst) + 1;
+    let win = window.clone();
+    tauri::async_runtime::spawn(async move {
+        const STEPS: u32 = 14;
+        const STEP_MS: u64 = 14;
+        for i in 1..=STEPS {
+            if SLIDE_GEN.load(Ordering::SeqCst) != generation {
+                return; // superseded by a newer slide
+            }
+            let t = i as f64 / STEPS as f64;
+            let eased = 1.0 - (1.0 - t).powi(3); // ease-out cubic
+            let x = start_x + ((target_x - start_x) as f64 * eased).round() as i32;
+            let _ = win.set_position(tauri::PhysicalPosition::new(x, y));
+            tokio::time::sleep(std::time::Duration::from_millis(STEP_MS)).await;
+        }
+        if SLIDE_GEN.load(Ordering::SeqCst) == generation {
+            let _ = win.set_position(tauri::PhysicalPosition::new(target_x, y));
+        }
+    });
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn set_widget_dock(app: tauri::AppHandle, side: String) -> Result<(), String> {
     let Some(window) = app.get_webview_window("widget") else {

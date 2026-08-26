@@ -100,6 +100,7 @@ fn run_app() {
             commands::toggle_window,
             commands::show_window,
             commands::set_widget_dock,
+            commands::slide_widget,
             terminal::terminal_spawn,
             terminal::terminal_write,
             terminal::terminal_resize,

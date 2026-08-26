@@ -49,3 +49,18 @@ export function staggerItemVariants() {
     visible: { opacity: 1, y: 0, transition: { duration, ease: EASE_STANDARD } },
   };
 }
+
+/**
+ * Per-item variants that glide in horizontally from the docked edge - the
+ * "glass slides" reveal used when the widget expands out of its tray rail.
+ * `from` is the edge the widget is docked to, so panels appear to slide
+ * out of it with the window.
+ */
+export function slideItemVariants(from: "left" | "right") {
+  const duration = motionDuration("--duration-slow", 360);
+  const offset = from === "left" ? -28 : 28;
+  return {
+    hidden: { opacity: 0, x: offset },
+    visible: { opacity: 1, x: 0, transition: { duration, ease: EASE_STANDARD } },
+  };
+}

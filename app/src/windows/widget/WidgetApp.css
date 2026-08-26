@@ -1,4 +1,5 @@
 .widget-app {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: calc(100vh / var(--ui-scale, 1)); /* zoom-compensated - see useApplyAppearance */
@@ -6,6 +7,130 @@
   border-radius: var(--radius-lg);
   border: 1px solid var(--surface-border);
   overflow: hidden;
+}
+
+/* Docked = a flush sidebar surface: square the outer corners and carry a
+   holo edge-light on the inner border instead of a uniform hairline. */
+.widget-app--docked {
+  border-radius: 0;
+  border-color: color-mix(in srgb, var(--accent) 22%, var(--surface-border));
+}
+
+/* ---------- JARVIS layer: scanlines + ambient glow ----------
+   Two stacked, pointer-transparent overlays give the whole surface the
+   holographic-projection feel: a faint horizontal scan texture plus a
+   soft accent bloom near the top. Both derive from the theme accent, so
+   every one of the 10 themes projects in its own light. */
+.widget-app::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background: repeating-linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--accent) 4%, transparent) 0px,
+    transparent 1px,
+    transparent 3px
+  );
+  opacity: 0.5;
+}
+
+.widget-app::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(120% 40% at 50% -5%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 70%),
+    radial-gradient(80% 30% at 50% 105%, color-mix(in srgb, var(--accent) 6%, transparent), transparent 70%);
+}
+
+.widget-app > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* ---------- tray rail ----------
+   The 18-logical-px sliver that stays on screen while the window is slid
+   off its edge (commands::slide_widget's SLIDE_HANDLE_LOGICAL). A living
+   light-strip: accent gradient core, breathing glow, chevron pointing
+   back out. The whole strip is one button. */
+.widget-rail {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 18px;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: 0;
+  border: none;
+  background: color-mix(in srgb, var(--surface-app) 88%, var(--accent));
+  color: var(--accent-strong);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--duration-base) var(--ease-standard);
+}
+
+.widget-rail--left {
+  left: 0;
+  border-right: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.widget-rail--right {
+  right: 0;
+  border-left: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.widget-app--collapsed .widget-rail {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.widget-rail__glyph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: widget-rail-breathe 2.4s ease-in-out infinite;
+}
+
+.widget-rail__line {
+  width: 2px;
+  height: 34%;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(to bottom, transparent, var(--accent), transparent);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 60%, transparent);
+  animation: widget-rail-breathe 2.4s ease-in-out infinite;
+}
+
+.widget-rail:hover {
+  background: color-mix(in srgb, var(--surface-app) 74%, var(--accent));
+  color: var(--text-primary);
+}
+
+@keyframes widget-rail-breathe {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .widget-rail__glyph,
+  .widget-rail__line {
+    animation: none;
+    opacity: 0.9;
+  }
+}
+
+:root[data-animations="off"] .widget-rail__glyph,
+:root[data-animations="off"] .widget-rail__line {
+  animation: none;
+  opacity: 0.9;
 }
 
 .widget-app__body {

@@ -17,3 +17,58 @@
 .devkit-glass--padded {
   padding: var(--space-4);
 }
+
+/* ---------- JARVIS holo-slide treatment (docked widget only) ----------
+   Inside the docked tray each panel reads as a physical pane of projected
+   glass rather than a flat card: a lit leading edge on the docked side, a
+   faint diagonal sheen across the surface, and an accent-tinted border
+   that brightens on hover as though the pane catches the light when you
+   reach for it. Scoped under .widget-app--docked so the floating widget
+   and the Control Center keep the calmer original card look. */
+.widget-app--docked .devkit-glass {
+  position: relative;
+  border-color: color-mix(in srgb, var(--accent) 16%, var(--surface-border));
+  overflow: hidden;
+}
+
+/* Diagonal sheen - the "projected pane" highlight. */
+.widget-app--docked .devkit-glass::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    118deg,
+    color-mix(in srgb, var(--accent) 7%, transparent) 0%,
+    transparent 38%,
+    transparent 72%,
+    color-mix(in srgb, var(--accent) 4%, transparent) 100%
+  );
+}
+
+/* Lit leading edge, on the side facing the screen interior. */
+.widget-app--docked .devkit-glass::before {
+  content: "";
+  position: absolute;
+  top: 10%;
+  bottom: 10%;
+  width: 1px;
+  pointer-events: none;
+  background: linear-gradient(to bottom, transparent, color-mix(in srgb, var(--accent) 70%, transparent), transparent);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 45%, transparent);
+  opacity: 0.75;
+  transition: opacity var(--duration-base) var(--ease-standard);
+}
+
+/* Docked Left -> the interior edge is the panel's RIGHT side, and vice versa. */
+.widget-app--docked .devkit-glass::before { right: 0; }
+.widget-app--docked.widget-app--dock-right .devkit-glass::before { right: auto; left: 0; }
+
+.widget-app--docked .devkit-glass:hover {
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--surface-border));
+  box-shadow: var(--shadow-md), var(--shadow-glass-highlight), 0 0 18px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.widget-app--docked .devkit-glass:hover::before {
+  opacity: 1;
+}
