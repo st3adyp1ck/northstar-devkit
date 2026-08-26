@@ -66,7 +66,16 @@ export function useApplyAppearance(): void {
     }
 
     const scale = clampUiScale(prefs.uiScale);
-    if (scale !== 1) desired["zoom"] = String(scale);
+    if (scale !== 1) {
+      desired["zoom"] = String(scale);
+      // CSS `zoom` scales rendered content, but vh units still resolve
+      // against the UNZOOMED viewport - so an element sized 100vh renders
+      // at only 100vh * scale, leaving a transparent gap at the window
+      // bottom when scale < 1 (this window is transparent:true, so the
+      // gap is literally see-through). The window roots size themselves
+      // with calc(100vh / var(--ui-scale, 1)) to compensate.
+      desired["--ui-scale"] = String(scale);
+    }
 
     const style = document.documentElement.style;
     for (const prop of appliedProps.current) {

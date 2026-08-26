@@ -1,7 +1,7 @@
 .widget-app {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: calc(100vh / var(--ui-scale, 1)); /* zoom-compensated - see useApplyAppearance */
   background: var(--surface-app);
   border-radius: var(--radius-lg);
   border: 1px solid var(--surface-border);

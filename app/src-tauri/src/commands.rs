@@ -97,17 +97,24 @@ pub async fn show_window(app: tauri::AppHandle, label: String) -> Result<(), Str
     set_window_visible(&window, true)
 }
 
-/// Docks the widget as a REAL sidebar, or releases it back to a floating
+/// Docks the widget as a real sidebar, or releases it back to a floating
 /// window. Backs the widgetDockMode setting ("Left" | "Right" |
 /// "Floating"):
 ///
-/// - Left/Right: the widget becomes a fixed sidebar - full work-area
-///   height (taskbar-aware via Monitor::work_area), flush against that
-///   edge, and NOT resizable (set_resizable(false) - combined with the
-///   frontend removing the titlebar's drag region while docked, the
-///   window genuinely cannot be moved or shrunk off its edge).
-/// - Floating: resizable again, restored to the default 380x720 logical
-///   size, position left wherever it is.
+/// - Left/Right: full work-area height (taskbar-aware via
+///   Monitor::work_area), flush against that edge, vertically LOCKED but
+///   horizontally resizable: min and max size share the work-area height
+///   (so only the width can change - dragging the inner border widens or
+///   narrows the sidebar while the outer edge stays anchored, which is
+///   just how edge-resizing works), width floored at 380 logical and
+///   capped at half the work area. Combined with the frontend removing
+///   the titlebar's drag region while docked, the window cannot be MOVED
+///   off its edge - only width-adjusted. The current width is kept when
+///   re-docking (window-state restores it across launches, so a user's
+///   chosen sidebar width sticks); a fresh install starts at the 500
+///   default from tauri.conf.json.
+/// - Floating: normal window again - min restored to 480x560 logical, no
+///   max, size restored to the 500x720 default.
 ///
 /// Rust-side (not the JS window API) so no ACL grants are needed and the
 /// monitor math stays in one place. Physical pixels throughout so DPI
@@ -121,6 +128,12 @@ pub async fn set_widget_dock(app: tauri::AppHandle, side: String) -> Result<(), 
     if side.eq_ignore_ascii_case("floating") {
         window.set_resizable(true).map_err(|e| e.to_string())?;
         window
+            .set_max_size(None::<tauri::LogicalSize<f64>>)
+            .map_err(|e| e.to_string())?;
+        window
+            .set_min_size(Some(tauri::LogicalSize::new(480.0, 560.0)))
+            .map_err(|e| e.to_string())?;
+        window
             .set_size(tauri::LogicalSize::new(500.0, 720.0))
             .map_err(|e| e.to_string())?;
         return Ok(());
@@ -133,35 +146,41 @@ pub async fn set_widget_dock(app: tauri::AppHandle, side: String) -> Result<(), 
     let scale = monitor.scale_factor();
     let work = monitor.work_area();
 
-    // Sidebar width: 500 logical regardless of whatever the user had
-    // resized the floating window to - a dock is a fixed-width surface,
-    // and this also self-heals any window-state that was shrunk below the
-    // intended minimum. 500 is the measured width at which the four
-    // System gauges (4 x 108px gauge slots + panel and body padding)
-    // fit on one row without clipping; 380 demonstrably cut off the
-    // fourth gauge.
-    let width = (500.0 * scale) as u32;
+    let min_width = (380.0 * scale) as u32;
+    let max_width = work.size.width / 2;
+    // Keep whatever width the window currently has (a prior resize, or
+    // window-state's restore of one), clamped into the dock's range.
+    let current = window.outer_size().map_err(|e| e.to_string())?;
+    let width = current.width.clamp(min_width, max_width);
     let height = work.size.height;
 
-    let x = if side.eq_ignore_ascii_case("left") {
-        work.position.x
-    } else if side.eq_ignore_ascii_case("right") {
-        work.position.x + work.size.width as i32 - width as i32
-    } else {
+    let is_left = side.eq_ignore_ascii_case("left");
+    if !is_left && !side.eq_ignore_ascii_case("right") {
         return Err(format!(
             "unknown dock side '{side}' (expected Left, Right, or Floating)"
         ));
+    }
+    let x = if is_left {
+        work.position.x
+    } else {
+        work.position.x + work.size.width as i32 - width as i32
     };
 
-    // Order matters: sizing while still resizable, then locking. (A
-    // non-resizable window ignores set_size on some platforms.)
     window.set_resizable(true).map_err(|e| e.to_string())?;
+    // Equal min/max heights lock the vertical axis while the width stays
+    // free between the floor and cap - per-axis resizing without any
+    // per-axis API.
+    window
+        .set_min_size(Some(tauri::PhysicalSize::new(min_width, height)))
+        .map_err(|e| e.to_string())?;
+    window
+        .set_max_size(Some(tauri::PhysicalSize::new(max_width, height)))
+        .map_err(|e| e.to_string())?;
     window
         .set_size(tauri::PhysicalSize::new(width, height))
         .map_err(|e| e.to_string())?;
     window
         .set_position(tauri::PhysicalPosition::new(x, work.position.y))
         .map_err(|e| e.to_string())?;
-    window.set_resizable(false).map_err(|e| e.to_string())?;
     Ok(())
 }

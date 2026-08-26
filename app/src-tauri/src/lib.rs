@@ -177,7 +177,12 @@ fn run_app() {
             if window.label() == "widget" {
                 if let WindowEvent::Resized(size) = event {
                     let scale = window.scale_factor().unwrap_or(1.0);
-                    let min_w = (480.0 * scale) as u32;
+                    // Absolute floor only - per-mode minimums are governed
+                    // by set_min_size in commands::set_widget_dock (docked:
+                    // 380 wide, work-area height; floating: 480x560). This
+                    // backstop must sit at the LOWEST legitimate width or
+                    // it would fight a narrowed docked sidebar forever.
+                    let min_w = (380.0 * scale) as u32;
                     let min_h = (560.0 * scale) as u32;
                     if size.width < min_w || size.height < min_h {
                         let _ = window.set_size(tauri::PhysicalSize::new(
