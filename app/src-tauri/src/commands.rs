@@ -121,7 +121,7 @@ pub async fn set_widget_dock(app: tauri::AppHandle, side: String) -> Result<(), 
     if side.eq_ignore_ascii_case("floating") {
         window.set_resizable(true).map_err(|e| e.to_string())?;
         window
-            .set_size(tauri::LogicalSize::new(380.0, 720.0))
+            .set_size(tauri::LogicalSize::new(500.0, 720.0))
             .map_err(|e| e.to_string())?;
         return Ok(());
     }
@@ -133,11 +133,14 @@ pub async fn set_widget_dock(app: tauri::AppHandle, side: String) -> Result<(), 
     let scale = monitor.scale_factor();
     let work = monitor.work_area();
 
-    // Sidebar width: the configured default (380 logical) regardless of
-    // whatever the user had resized the floating window to - a dock is a
-    // fixed-width surface, and this also self-heals any window-state that
-    // was shrunk below the intended minimum.
-    let width = (380.0 * scale) as u32;
+    // Sidebar width: 500 logical regardless of whatever the user had
+    // resized the floating window to - a dock is a fixed-width surface,
+    // and this also self-heals any window-state that was shrunk below the
+    // intended minimum. 500 is the measured width at which the four
+    // System gauges (4 x 108px gauge slots + panel and body padding)
+    // fit on one row without clipping; 380 demonstrably cut off the
+    // fourth gauge.
+    let width = (500.0 * scale) as u32;
     let height = work.size.height;
 
     let x = if side.eq_ignore_ascii_case("left") {

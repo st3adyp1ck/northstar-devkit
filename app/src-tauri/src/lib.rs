@@ -177,7 +177,7 @@ fn run_app() {
             if window.label() == "widget" {
                 if let WindowEvent::Resized(size) = event {
                     let scale = window.scale_factor().unwrap_or(1.0);
-                    let min_w = (380.0 * scale) as u32;
+                    let min_w = (480.0 * scale) as u32;
                     let min_h = (560.0 * scale) as u32;
                     if size.width < min_w || size.height < min_h {
                         let _ = window.set_size(tauri::PhysicalSize::new(

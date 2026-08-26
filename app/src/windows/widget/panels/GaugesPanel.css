@@ -4,7 +4,13 @@
 
 .gauges-panel__row {
   display: flex;
-  justify-content: space-between;
+  justify-content: space-evenly;
+  /* Wrap instead of clipping: at any width too narrow for four gauge
+     slots on one row (seen live when the 380px dock cut off DISK FREE),
+     the row becomes a clean 2x2 grid rather than losing a gauge off the
+     edge. At the normal 500px width all four stay on one row. */
+  flex-wrap: wrap;
+  row-gap: var(--space-2);
   transition: opacity var(--duration-base) var(--ease-standard);
 }
 
