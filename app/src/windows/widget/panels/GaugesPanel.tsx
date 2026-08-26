@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import clsx from "clsx";
 import { AnimatePresence, motion } from "framer-motion";
 import { usePolledRpc } from "../../../hooks/usePolledRpc";
@@ -8,16 +8,19 @@ import { asArray } from "../../../lib/arrays";
 import { Gauge } from "../../../components/Gauge";
 import { GlassPanel } from "../../../components/primitives/GlassPanel";
 import { Button } from "../../../components/primitives/Button";
+import { Badge } from "../../../components/primitives/Badge";
 import type {
   SystemMetrics,
   TopCpuProcessRow,
   TopMemoryResult,
   GpuProcessUsage,
+  FreeMemoryResult,
+  DriveInfo,
 } from "../../../lib/types";
 import { EASE_STANDARD, motionDuration } from "./motion";
 import "./GaugesPanel.css";
 
-type GaugeKind = "cpu" | "mem" | "gpu" | null;
+type GaugeKind = "cpu" | "mem" | "gpu" | "disk" | null;
 
 /**
  * Reference panel implementation - CPU/Mem/GPU/Disk gauges polled every 2s
@@ -68,6 +71,7 @@ export function GaugesPanel() {
           percent={diskPercent}
           sub={diskFree !== null ? `${(diskFree / 1e9).toFixed(0)} GB free` : undefined}
           tone="ember"
+          onClick={() => setOpenGauge("disk")}
         />
       </div>
       {metrics?.RebootPending && (
@@ -83,7 +87,11 @@ export function GaugesPanel() {
             exit={{ opacity: 0, height: 0 }}
             transition={{ duration: motionDuration("--duration-slow", 360), ease: EASE_STANDARD }}
           >
-            <ProcessFlyout kind={openGauge} onClose={() => setOpenGauge(null)} />
+            {openGauge === "disk" ? (
+              <DriveFlyout drives={asArray(metrics?.Drives)} onClose={() => setOpenGauge(null)} />
+            ) : (
+              <ProcessFlyout kind={openGauge} onClose={() => setOpenGauge(null)} />
+            )}
           </motion.div>
         )}
       </AnimatePresence>
@@ -107,7 +115,18 @@ interface FlyoutRow {
   pctLabel: string;
 }
 
-function ProcessFlyout({ kind, onClose }: { kind: Exclude<GaugeKind, null>; onClose: () => void }) {
+/**
+ * Badge tone/label per Get-DevKitProcessClassification value (verified in
+ * core/DevKit-WidgetCore.ps1: only 'System' | 'Safe' | 'Caution' exist).
+ * Anything unexpected falls back to Caution - "think before killing".
+ */
+const CLASSIFICATION_BADGES: Record<string, { tone: "neutral" | "success" | "warning"; label: string }> = {
+  System: { tone: "neutral", label: "System" },
+  Safe: { tone: "success", label: "Safe" },
+  Caution: { tone: "warning", label: "Caution" },
+};
+
+function ProcessFlyout({ kind, onClose }: { kind: Exclude<GaugeKind, null | "disk">; onClose: () => void }) {
   const method = kind === "mem" ? "process.topMemory" : kind === "gpu" ? "metrics.gpuProcesses" : "process.topCpu";
   const { data, refetch } = usePolledRpc<TopCpuProcessRow[] | TopMemoryResult | GpuProcessUsage>(
     method,
@@ -115,7 +134,17 @@ function ProcessFlyout({ kind, onClose }: { kind: Exclude<GaugeKind, null>; onCl
     3000,
   );
   const [actionError, setActionError] = useState<string | null>(null);
+  const [freeing, setFreeing] = useState(false);
+  const [freeNote, setFreeNote] = useState<string | null>(null);
+  const freeNoteTimer = useRef<number | null>(null);
   const confirmDestructive = useConfirmDestructive();
+
+  // Don't leave the 6s note-dismiss timer firing setState on an unmounted flyout.
+  useEffect(() => {
+    return () => {
+      if (freeNoteTimer.current !== null) window.clearTimeout(freeNoteTimer.current);
+    };
+  }, []);
 
   let rows: FlyoutRow[] = [];
   if (data) {
@@ -170,11 +199,21 @@ function ProcessFlyout({ kind, onClose }: { kind: Exclude<GaugeKind, null>; onCl
 
   async function freeMemory() {
     setActionError(null);
+    setFreeNote(null);
+    if (freeNoteTimer.current !== null) window.clearTimeout(freeNoteTimer.current);
+    setFreeing(true);
     try {
-      await rpcCall("process.freeMemory");
+      const result = await rpcCall<FreeMemoryResult>("process.freeMemory");
+      setFreeNote(`Freed ${Math.round(result.FreedMB)} MB across ${result.TrimmedProcesses} processes`);
+      freeNoteTimer.current = window.setTimeout(() => {
+        setFreeNote(null);
+        freeNoteTimer.current = null;
+      }, 6000);
       refetch();
     } catch (err) {
       setActionError(err instanceof RpcClientError ? err.message : "Could not free memory.");
+    } finally {
+      setFreeing(false);
     }
   }
 
@@ -184,7 +223,7 @@ function ProcessFlyout({ kind, onClose }: { kind: Exclude<GaugeKind, null>; onCl
         <span>{kind === "cpu" ? "Top CPU" : kind === "mem" ? "Top Memory" : "Top GPU"} Processes</span>
         <div className="gauges-panel__flyout-actions">
           {kind === "mem" && (
-            <Button size="sm" variant="ghost" onClick={freeMemory}>
+            <Button size="sm" variant="ghost" loading={freeing} onClick={() => void freeMemory()}>
               Free Memory
             </Button>
           )}
@@ -194,23 +233,90 @@ function ProcessFlyout({ kind, onClose }: { kind: Exclude<GaugeKind, null>; onCl
         </div>
       </div>
       {actionError && <div className="gauges-panel__hint">{actionError}</div>}
+      {freeNote && <div className="gauges-panel__hint gauges-panel__hint--ok">{freeNote}</div>}
       <div className="gauges-panel__flyout-list">
-        {rows.map((row) => (
-          <div key={row.Pid} className="gauges-panel__flyout-row">
-            <span className="gauges-panel__flyout-name">{row.Name}</span>
-            <span className="gauges-panel__flyout-pct">{row.pctLabel}</span>
-            {row.Classification !== "System" && (
-              <button
-                type="button"
-                className="gauges-panel__kill"
-                title={`Kill ${row.Name} (${row.Pid})`}
-                onClick={() => kill(row.Pid, row.Name)}
+        {rows.map((row) => {
+          const badge = CLASSIFICATION_BADGES[row.Classification] ?? CLASSIFICATION_BADGES.Caution;
+          return (
+            <div key={row.Pid} className="gauges-panel__flyout-row">
+              <span className="gauges-panel__flyout-name">{row.Name}</span>
+              <span className="gauges-panel__flyout-pct">{row.pctLabel}</span>
+              <Badge tone={badge.tone} className="gauges-panel__class-badge">
+                {badge.label}
+              </Badge>
+              {row.Classification !== "System" ? (
+                <button
+                  type="button"
+                  className="gauges-panel__kill"
+                  title={`Kill ${row.Name} (${row.Pid})`}
+                  onClick={() => kill(row.Pid, row.Name)}
+                >
+                  &#10005;
+                </button>
+              ) : (
+                <span className="gauges-panel__kill-spacer" aria-hidden="true" />
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Disk drill-down: every drive from metrics.system's Drives array, with a
+ * used-fraction bar. No RPC of its own - the parent already polls
+ * metrics.system every 2s and hands the drives down.
+ */
+function DriveFlyout({ drives, onClose }: { drives: DriveInfo[]; onClose: () => void }) {
+  return (
+    <div className="gauges-panel__flyout">
+      <div className="gauges-panel__flyout-header">
+        <span>Drives</span>
+        <div className="gauges-panel__flyout-actions">
+          <Button size="sm" variant="ghost" onClick={onClose}>
+            Close
+          </Button>
+        </div>
+      </div>
+      {drives.length === 0 && <div className="panel-empty">No drive data.</div>}
+      <div className="gauges-panel__drive-list">
+        {drives.map((drive) => {
+          const usedFrac =
+            drive.TotalBytes > 0 ? Math.min(1, Math.max(0, 1 - drive.FreeBytes / drive.TotalBytes)) : 0;
+          const usedPct = usedFrac * 100;
+          return (
+            <div key={drive.Name} className="gauges-panel__drive">
+              <div className="gauges-panel__drive-top">
+                <span className="gauges-panel__drive-name">{drive.Name}</span>
+                <span className="gauges-panel__drive-free">
+                  {(drive.FreeBytes / 1e9).toFixed(0)} GB free of {(drive.TotalBytes / 1e9).toFixed(0)} GB
+                </span>
+              </div>
+              <div
+                className="gauges-panel__drive-bar"
+                role="progressbar"
+                aria-label={`${drive.Name} used space`}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={Math.round(usedPct)}
               >
-                &#10005;
-              </button>
-            )}
-          </div>
-        ))}
+                <div
+                  className={clsx(
+                    "gauges-panel__drive-fill",
+                    usedPct > 95
+                      ? "gauges-panel__drive-fill--danger"
+                      : usedPct > 85
+                        ? "gauges-panel__drive-fill--warning"
+                        : null,
+                  )}
+                  style={{ width: `${usedPct}%` }}
+                />
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

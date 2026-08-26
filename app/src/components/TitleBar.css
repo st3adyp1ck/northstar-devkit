@@ -65,3 +65,13 @@
   background: var(--danger);
   color: #fff;
 }
+
+/* Settings gear: tiny rotate on hover - a nod that it opens something. */
+.devkit-titlebar__btn svg {
+  display: block;
+  transition: transform var(--duration-base) var(--ease-standard);
+}
+
+.devkit-titlebar__btn:hover svg {
+  transform: rotate(40deg);
+}

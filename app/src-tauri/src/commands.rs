@@ -96,3 +96,39 @@ pub async fn show_window(app: tauri::AppHandle, label: String) -> Result<(), Str
     };
     set_window_visible(&window, true)
 }
+
+/// Docks the widget to the left or right edge of its current monitor's
+/// work area (full work-area height, small margin). Backs the
+/// widgetDockMode setting - the setting persisted before but nothing ever
+/// applied it. Rust-side (not the JS window API) so no ACL grants are
+/// needed and the monitor math stays in one place.
+#[tauri::command]
+pub async fn set_widget_dock(app: tauri::AppHandle, side: String) -> Result<(), String> {
+    let Some(window) = app.get_webview_window("widget") else {
+        return Err("widget window not found".into());
+    };
+    let monitor = window
+        .current_monitor()
+        .map_err(|e| e.to_string())?
+        .ok_or("no monitor for widget window")?;
+
+    // Physical pixels throughout (monitor size/position and set_position's
+    // PhysicalPosition agree), so DPI scale factors don't skew the math.
+    let scale = monitor.scale_factor();
+    let margin = (12.0 * scale) as i32;
+    let mon_pos = monitor.position();
+    let mon_size = monitor.size();
+    let win_size = window.outer_size().map_err(|e| e.to_string())?;
+
+    let x = match side.as_str() {
+        "Left" | "left" => mon_pos.x + margin,
+        "Right" | "right" => mon_pos.x + mon_size.width as i32 - win_size.width as i32 - margin,
+        other => return Err(format!("unknown dock side '{other}' (expected Left or Right)")),
+    };
+    let y = mon_pos.y + margin;
+
+    window
+        .set_position(tauri::PhysicalPosition::new(x, y))
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}

@@ -109,6 +109,14 @@ export interface GpuProcessUsage {
   Processes: GpuProcessRow[];
 }
 
+// ---------- process.freeMemory (verified live against
+// Invoke-DevKitFreeMemory in core/DevKit-WidgetCore.ps1) ----------
+export interface FreeMemoryResult {
+  FreedMB: number;
+  TrimmedProcesses: number;
+  Note: string;
+}
+
 // ---------- catalog.get (verified live) ----------
 export interface ToolPrompt {
   Name: string;
@@ -358,6 +366,16 @@ export interface DevKitPreferences {
   gitFlyoutWidth: number;
   notesFlyoutWidth: number;
   envDriftSilencedProjects: string[];
+  // Appearance/UX (2026 Settings panel) - defaults live in
+  // tools/lib/DevKit-Common.ps1's Get-DevKitSettings; the name-level
+  // backfill there means older settings.json files gain these on load.
+  appTheme: string;
+  accentColor: string | null;
+  fontFamily: string | null;
+  uiScale: number;
+  terminalTheme: string;
+  uiSounds: boolean;
+  uiSoundVolume: number;
 }
 
 export interface DevKitSettings {

@@ -75,6 +75,16 @@ function Get-DevKitSettings {
             gitFlyoutWidth     = 300
             notesFlyoutWidth   = 300
             envDriftSilencedProjects = @()
+            # Tauri app appearance/UX (added with the 2026 Settings panel;
+            # the name-level backfill above makes these safe to add - an
+            # existing settings.json just gains them on next load).
+            appTheme           = 'northstar'   # one of the 10 built-in theme presets
+            accentColor        = $null         # hex override; $null = theme default
+            fontFamily         = $null         # UI font override; $null = theme default
+            uiScale            = 1.0           # 0.8 - 1.4, applied as root zoom
+            terminalTheme      = 'northstar'   # embedded terminal color scheme
+            uiSounds           = $true         # click/thud/swoosh feedback
+            uiSoundVolume      = 0.5           # 0.0 - 1.0
         }
     }
 

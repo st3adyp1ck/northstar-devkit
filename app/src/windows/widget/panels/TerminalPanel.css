@@ -1,9 +1,10 @@
 .terminal-panel {
   display: flex;
   flex-direction: column;
-  /* Placeholder sizing for standalone use - the pass that wires this into
-     WidgetApp.tsx should decide real widget layout sizing. */
-  height: 280px;
+  /* Clip children to the glass radius so the terminal's themed background
+     bleeds cleanly into the panel's rounded bottom corners instead of
+     drawing square edges over them. */
+  overflow: hidden;
 }
 
 .terminal-panel__header {
@@ -13,7 +14,21 @@
 }
 
 .terminal-panel__body {
-  flex: 1;
+  /* Fixed room for the session (task-bar-height header sits above this) -
+     tall enough for a real scrollback view at fontSize 13 / lineHeight
+     1.2 without letting the widget column balloon. */
+  height: 320px;
   min-height: 0;
-  padding: var(--space-2);
+  /* No padding: the terminal surface owns this whole region edge-to-edge;
+     TerminalView carries its own internal padding on the themed
+     background. */
+  padding: 0;
+}
+
+/* Inside the panel the terminal isn't a free-standing rounded card - the
+   GlassPanel's own radius + overflow clipping shape it. Zeroing the
+   inner radius avoids a sliver of glass peeking through between the
+   terminal's smaller radius and the panel's larger one. */
+.terminal-panel__body .terminal-view {
+  border-radius: 0;
 }

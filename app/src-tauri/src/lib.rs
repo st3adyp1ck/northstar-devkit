@@ -99,6 +99,7 @@ fn run_app() {
             commands::sidecar_restart,
             commands::toggle_window,
             commands::show_window,
+            commands::set_widget_dock,
             terminal::terminal_spawn,
             terminal::terminal_write,
             terminal::terminal_resize,

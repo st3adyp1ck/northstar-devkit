@@ -2,7 +2,10 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { initUiSounds } from "./lib/sounds";
 import "./styles/global.css";
+
+initUiSounds();
 
 const queryClient = new QueryClient({
   defaultOptions: {

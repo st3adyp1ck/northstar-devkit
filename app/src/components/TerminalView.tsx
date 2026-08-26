@@ -5,6 +5,8 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
+import { resolveTerminalTheme } from "../lib/terminalThemes";
+import { useSettingsStore } from "../stores/useSettingsStore";
 import "./TerminalView.css";
 
 export interface TerminalViewProps {
@@ -23,37 +25,26 @@ interface TerminalEventPayload {
   data: string;
 }
 
-/**
- * Hardcoded from app/src/styles/tokens.css - xterm.js needs a literal
- * theme object (its canvas/DOM renderers can't resolve CSS custom
- * properties), so these are copied by hand rather than referenced live.
- * Keep in sync if the token values change.
- */
-const XTERM_THEME = {
-  foreground: "#f2f5f9", // --text-primary
-  background: "#0d1219", // --surface-sunken (--gm-950)
-  cursor: "#4fa3ff", // --sapphire-500
-  cursorAccent: "#061019", // --text-on-accent
-  selectionBackground: "rgba(79, 163, 255, 0.25)", // --sapphire-500 @ 25%
-  black: "#131a26", // --gm-900
-  red: "#ef5350", // --signal-red
-  green: "#98c379", // --signal-green
-  yellow: "#ffb020", // --signal-amber
-  blue: "#4fa3ff", // --sapphire-500
-  magenta: "#c678dd", // --signal-violet
-  cyan: "#56b6c2", // --signal-cyan
-  white: "#aab4c4", // --text-secondary
-  brightBlack: "#6b7a90", // --gm-400
-  brightRed: "#ff6b3d", // --ember-500
-  brightGreen: "#98c379", // --signal-green
-  brightYellow: "#e5c07b", // --signal-sand
-  brightBlue: "#79c0ff", // --sapphire-400
-  brightMagenta: "#c678dd", // --signal-violet
-  brightCyan: "#56b6c2", // --signal-cyan
-  brightWhite: "#f2f5f9", // --text-primary
-};
+const XTERM_FONT_FAMILY = '"Cascadia Code", "Cascadia Mono", Consolas, monospace';
 
-const XTERM_FONT_FAMILY = '"Cascadia Code", "Cascadia Mono", ui-monospace, Consolas, monospace';
+/**
+ * One-shot session init, written into the pty right after spawn exactly as
+ * if the user had typed it: defines a compact two-tone prompt (bold cyan
+ * cwd with `~` for home + bright-blue U+276F chevron) using [char]27 ANSI
+ * escapes, then clears the echoed line away with Clear-Host so the session
+ * opens on a clean prompt. Deliberately requires nothing beyond stock
+ * PowerShell: no oh-my-posh, no profile, no Nerd Font (the chevron is
+ * plain unicode Cascadia/Consolas cover), pure-ASCII on the wire (the
+ * glyph is built via [char]0x276F, so shell input encoding never matters),
+ * and verified against both pwsh 7 and Windows PowerShell 5.1 (the two
+ * shells terminal.rs's locate_shell can pick). A parse/runtime failure
+ * here just prints an error and leaves the default prompt - it cannot take
+ * the shell down. Ends with \r (Enter) so it executes immediately.
+ */
+const PROMPT_INIT =
+  "function prompt { $e=[char]27; $p=\"$($executionContext.SessionState.Path.CurrentLocation)\"; " +
+  "if ($HOME -and $p.StartsWith($HOME, [System.StringComparison]::OrdinalIgnoreCase)) { $p = '~' + $p.Substring($HOME.Length) }; " +
+  "\"$e[1;36m$p$e[0m $e[94m$([char]0x276F)$e[0m \" }; Clear-Host\r";
 
 /**
  * Reusable embedded terminal - a real ConPTY `pwsh` session owned by Rust
@@ -65,11 +56,22 @@ const XTERM_FONT_FAMILY = '"Cascadia Code", "Cascadia Mono", ui-monospace, Conso
  * NOT react to `cwd` changing while mounted. Give it a fresh `key` from
  * the parent (e.g. a "Restart" button, or a project switch) to force a
  * clean respawn.
+ *
+ * Colors come from settings.preferences.terminalTheme via
+ * lib/terminalThemes.ts - applied at creation and live-updated through
+ * xterm 5's reactive `terminal.options.theme` setter, so switching themes
+ * in Settings restyles the running session without a respawn.
  */
 export function TerminalView({ cwd, className }: TerminalViewProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const termRef = useRef<Terminal | null>(null);
   const [status, setStatus] = useState<"connecting" | "ready" | "error">("connecting");
   const [error, setError] = useState<string | null>(null);
+
+  const themeId = useSettingsStore((s) => s.settings?.preferences.terminalTheme);
+  // Stable per id (record lookup, not a fresh object), so the effect below
+  // only fires on real theme changes, not every settings re-render.
+  const theme = resolveTerminalTheme(themeId);
 
   useEffect(() => {
     let disposed = false;
@@ -78,13 +80,17 @@ export function TerminalView({ cwd, className }: TerminalViewProps) {
     let sessionId: string | null = null;
 
     const term = new Terminal({
-      theme: XTERM_THEME,
+      // Mount-once effect: read the store imperatively for the initial
+      // theme (settings may even still be loading - falls back to
+      // northstar); the theme effect below handles every later change.
+      theme: resolveTerminalTheme(useSettingsStore.getState().settings?.preferences.terminalTheme),
       fontFamily: XTERM_FONT_FAMILY,
       fontSize: 13,
       lineHeight: 1.2,
       cursorBlink: true,
       scrollback: 5000,
     });
+    termRef.current = term;
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
 
@@ -119,6 +125,10 @@ export function TerminalView({ cwd, className }: TerminalViewProps) {
         });
 
         pushResize(id);
+        // ConPTY queues input written before the shell's first read, so
+        // sending immediately is safe - it executes at the first prompt.
+        // Best-effort: a failed write just means the stock prompt.
+        void invoke("terminal_write", { sessionId: id, data: PROMPT_INIT }).catch(() => {});
         setStatus("ready");
       } catch (err) {
         if (!disposed) {
@@ -148,6 +158,7 @@ export function TerminalView({ cwd, className }: TerminalViewProps) {
       if (sessionId) {
         void invoke("terminal_kill", { sessionId }).catch(() => {});
       }
+      termRef.current = null;
       term.dispose();
     };
     // Mount-once by design (see docstring above) - cwd is only read at
@@ -155,8 +166,20 @@ export function TerminalView({ cwd, className }: TerminalViewProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Live theme switch: xterm 5 options are reactive setters - assigning
+  // repaints the open terminal, no recreate/respawn needed.
+  useEffect(() => {
+    const term = termRef.current;
+    if (term) term.options.theme = theme;
+  }, [theme]);
+
   return (
-    <div className={clsx("terminal-view", className)}>
+    // The wrapper (not the xterm mount node) carries the padding and the
+    // theme background: FitAddon sizes cols/rows from the element xterm is
+    // opened in, so that element must stay padding-free for the math to be
+    // exact, while the wrapper painting the theme's own background makes
+    // the padding read as terminal, not as a gap around it.
+    <div className={clsx("terminal-view", className)} style={{ background: theme.background }}>
       <div ref={hostRef} className="terminal-view__host" />
       {status === "connecting" && <div className="terminal-view__status">Starting terminal…</div>}
       {status === "error" && (

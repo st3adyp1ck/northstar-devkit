@@ -76,6 +76,9 @@ export function WidgetApp() {
               <GaugesPanel />
             </motion.div>
             <motion.div variants={item}>
+              <QuickActionsPanel />
+            </motion.div>
+            <motion.div variants={item}>
               <NodePortsPanel />
             </motion.div>
             <motion.div variants={item}>
@@ -92,9 +95,6 @@ export function WidgetApp() {
             </motion.div>
             <motion.div variants={item}>
               <FilesPanel />
-            </motion.div>
-            <motion.div variants={item}>
-              <QuickActionsPanel />
             </motion.div>
             <motion.div variants={item}>
               <Expander title="Embedded Terminal" lazyMount>

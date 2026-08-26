@@ -4,14 +4,23 @@
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  /* Breathing room around the grid. Lives HERE, not on __host: FitAddon
+     derives cols/rows from the element xterm was opened in, so the mount
+     node must be padding-free - flex layout shrinks it inside this
+     padding instead. The active xterm theme's background is applied
+     inline by TerminalView so the padded area always matches the
+     terminal's own colors; --surface-sunken is only the pre-mount
+     fallback. Slightly tighter on the right so the scrollbar doesn't
+     float in space. */
+  padding: var(--space-2) var(--space-1) var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--surface-sunken);
 }
 
 .terminal-view__host {
   flex: 1;
   min-height: 0;
-  border-radius: var(--radius-md);
-  background: var(--surface-sunken);
-  padding: var(--space-2);
   overflow: hidden;
 }
 

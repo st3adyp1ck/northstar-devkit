@@ -1,9 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import clsx from "clsx";
 import { rpcCall, onToolRun } from "../../../lib/ipc";
 import { useSettingsStore } from "../../../stores/useSettingsStore";
 import { useProjectStore } from "../../../stores/useProjectStore";
-import { useUpdaterStore } from "../../../stores/useUpdaterStore";
 import { usePolledRpc } from "../../../hooks/usePolledRpc";
 import { useConfirmDestructive } from "../../../hooks/useConfirmDestructive";
 import { GlassPanel } from "../../../components/primitives/GlassPanel";
@@ -48,26 +46,21 @@ const QUICK_ACTIONS: QuickAction[] = [
 ];
 
 /**
- * Quick Actions + Settings panel. Each action now streams its output into
- * an inline console (ToolConsole, shared with the Control Center's
- * ToolRunDialog) instead of firing and forgetting, and disables every
- * button while one is running - the sidecar runs one tool.run at a time
- * per runId but there's no reason to let two quick actions race visually.
+ * Quick Actions panel: the quick action buttons (with the Kill Port inline
+ * port input), the streamed inline console, and the env-drift banner. Each
+ * action streams its output into an inline console (ToolConsole, shared
+ * with the Control Center's ToolRunDialog) instead of firing and
+ * forgetting, and disables every button while one is running - the sidecar
+ * runs one tool.run at a time per runId but there's no reason to let two
+ * quick actions race visually. All settings UI (animations, confirm
+ * destructive, update checks, widget dock) lives in the Settings dialog
+ * opened from the title bar - the settings store is only read here for the
+ * env-drift silence list.
  */
 export function QuickActionsPanel() {
-  const { settings, error: settingsError, refresh, update } = useSettingsStore();
+  const { settings, refresh, update } = useSettingsStore();
   const active = useProjectStore((s) => s.active);
   const confirmDestructive = useConfirmDestructive();
-
-  // Reads/drives the SAME store useUpdateCheck() (mounted once in
-  // WidgetApp) writes to - this panel never calls useUpdateCheck itself,
-  // so clicking "Check for Updates" here can't spin up a second
-  // independent 24h-throttled auto-check alongside WidgetApp's. Aliased
-  // away from `update`/`status`, which the settings-store destructure and
-  // local run-state above already use for unrelated things.
-  const updateStatus = useUpdaterStore((s) => s.status);
-  const availableUpdate = useUpdaterStore((s) => s.update);
-  const checkForUpdatesNow = useUpdaterStore((s) => s.checkNow);
 
   const [runningLabel, setRunningLabel] = useState<string | null>(null);
   const [lines, setLines] = useState<ToolConsoleLine[]>([]);
@@ -160,28 +153,6 @@ export function QuickActionsPanel() {
     await update({ envDriftSilencedProjects: [...silenced, active.id] });
   }
 
-  /** Inline status next to the manual "Check for Updates" button - mirrors whatever WidgetApp's dialog is (or isn't) showing. */
-  function updateStatusLabel(): string | null {
-    switch (updateStatus) {
-      case "checking":
-        return "Checking…";
-      case "up-to-date":
-        return "Up to date";
-      case "available":
-        return availableUpdate ? `v${availableUpdate.version} available` : "Update available";
-      case "downloading":
-        return "Downloading…";
-      case "installing":
-        return "Installing…";
-      case "error":
-        return "Check failed";
-      default:
-        return null;
-    }
-  }
-  const updateBusy = updateStatus === "checking" || updateStatus === "downloading" || updateStatus === "installing";
-  const updateLabel = updateStatusLabel();
-
   return (
     <GlassPanel>
       <div className="panel-header">
@@ -236,80 +207,6 @@ export function QuickActionsPanel() {
           {exitCode !== null && (
             <span className={exitCode === 0 ? "quick-actions-panel__exit-ok" : "quick-actions-panel__exit-err"}>exit {exitCode}</span>
           )}
-        </div>
-      )}
-
-      {!settings && !settingsError && (
-        <div className="panel-empty">Loading settings…</div>
-      )}
-
-      {!settings && settingsError && (
-        <div className="panel-empty panel-empty--danger">{settingsError}</div>
-      )}
-
-      {settings && (
-        <div className="quick-actions-panel__settings">
-          {settingsError && <div className="quick-actions-panel__drift">{settingsError}</div>}
-          <label className="quick-actions-panel__toggle">
-            <input
-              type="checkbox"
-              checked={settings.preferences.enableAnimations}
-              onChange={(e) => update({ enableAnimations: e.target.checked })}
-            />
-            Animations
-          </label>
-          <label className="quick-actions-panel__toggle">
-            <input
-              type="checkbox"
-              checked={settings.preferences.confirmDestructive}
-              onChange={(e) => update({ confirmDestructive: e.target.checked })}
-            />
-            Confirm destructive actions
-          </label>
-          <label className="quick-actions-panel__toggle">
-            <input
-              type="checkbox"
-              checked={settings.preferences.updateCheckEnabled}
-              onChange={(e) => update({ updateCheckEnabled: e.target.checked })}
-            />
-            Check for updates
-          </label>
-
-          <div className="quick-actions-panel__update-check">
-            <Button size="sm" variant="subtle" disabled={updateBusy} loading={updateStatus === "checking"} onClick={() => void checkForUpdatesNow()}>
-              Check for Updates
-            </Button>
-            {updateLabel && (
-              <span
-                className={clsx(
-                  "quick-actions-panel__update-status",
-                  updateStatus === "error" && "quick-actions-panel__update-status--error",
-                  updateStatus === "available" && "quick-actions-panel__update-status--available",
-                )}
-              >
-                {updateLabel}
-              </span>
-            )}
-          </div>
-
-          <div className="quick-actions-panel__dock">
-            <span>Widget dock</span>
-            <div className="quick-actions-panel__segmented">
-              {(["Left", "Right"] as const).map((mode) => (
-                <button
-                  key={mode}
-                  type="button"
-                  className={clsx(
-                    "quick-actions-panel__segment",
-                    settings.preferences.widgetDockMode === mode && "quick-actions-panel__segment--active",
-                  )}
-                  onClick={() => update({ widgetDockMode: mode })}
-                >
-                  {mode}
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
       )}
 

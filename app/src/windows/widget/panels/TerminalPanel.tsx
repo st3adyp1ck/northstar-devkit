@@ -14,6 +14,13 @@ import "./TerminalPanel.css";
  * flyout. Wired into WidgetApp.tsx inside a collapsed-by-default Expander
  * (a full ConPTY session in an always-on widget shouldn't claim vertical
  * space until asked for).
+ *
+ * Presentation notes: the panel clips to the glass radius (overflow
+ * hidden in TerminalPanel.css) and the body has zero padding, so the
+ * terminal's themed background runs edge-to-edge into the rounded
+ * corners; TerminalView itself supplies the internal padding on that
+ * background. Colors follow settings.preferences.terminalTheme
+ * (lib/terminalThemes.ts) live - no respawn needed on theme change.
  */
 export function TerminalPanel() {
   const active = useProjectStore((s) => s.active);
