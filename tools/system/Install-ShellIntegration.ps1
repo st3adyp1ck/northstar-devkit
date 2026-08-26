@@ -32,13 +32,15 @@ if (Test-Path $CommonModule) { . $CommonModule }
 
 Write-DevKitHeader "Install Shell Integration"
 
-# Two levels up: this script lives at tools\system\, the repo root is above tools\.
+# Two levels up: this script lives at tools\system\, the repo/install root is above tools\.
 $devKitRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+# A shipped CLI would land at the install root; the target\ paths exist only in a dev checkout.
+$rootExe = Join-Path $devKitRoot "devkit.exe"
 $releaseExe = Join-Path $devKitRoot "target\release\devkit.exe"
 $debugExe = Join-Path $devKitRoot "target\debug\devkit.exe"
-$devKitExe = if (Test-Path $releaseExe) { $releaseExe } elseif (Test-Path $debugExe) { $debugExe } else { $null }
+$devKitExe = if (Test-Path $rootExe) { $rootExe } elseif (Test-Path $releaseExe) { $releaseExe } elseif (Test-Path $debugExe) { $debugExe } else { $null }
 if (-not $devKitExe) {
-    Write-DevKitError "devkit.exe not found - build the CLI first: cargo build --release -p devkit-cli"
+    Write-DevKitError "devkit.exe not found. The DevKit CLI is not bundled with the installed app yet. In a dev checkout, build it first: cargo build --release -p devkit-cli"
     exit 1
 }
 

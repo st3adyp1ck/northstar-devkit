@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { rpcCall } from "../lib/ipc";
+import { asArray } from "../lib/arrays";
 import type { LinkedProject } from "../lib/types";
 
 interface ProjectState {
@@ -23,7 +24,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         rpcCall<LinkedProject | null>("projects.getActive"),
         rpcCall<LinkedProject[]>("projects.list"),
       ]);
-      set({ active, linked: linked ?? [], loading: false });
+      set({ active, linked: asArray(linked), loading: false });
     } catch {
       set({ loading: false });
     }

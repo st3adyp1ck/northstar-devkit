@@ -45,6 +45,15 @@ cd app
 pnpm tauri build
 ```
 
+### Warning: test installers silently overwrite the real install
+
+Tauri's NSIS installer remembers the previous install directory per-user
+(in HKCU), so running a locally built test setup exe on a machine with a
+production DevKit install will silently install OVER the real install's
+location. This actually hijacked a production install during testing on
+2026-08-25 - don't relearn it. Never run a test-built setup exe on a
+machine with a production install, or uninstall the production copy first.
+
 ## 4. Commit and push
 
 ```powershell

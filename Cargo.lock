@@ -991,6 +991,7 @@ dependencies = [
  "clap",
  "crossterm",
  "devkit-host",
+ "dunce",
  "ratatui",
  "serde",
  "serde_json",
@@ -1006,6 +1007,7 @@ name = "devkit-host"
 version = "4.0.0"
 dependencies = [
  "anyhow",
+ "dunce",
  "serde",
  "serde_json",
  "thiserror 2.0.20",

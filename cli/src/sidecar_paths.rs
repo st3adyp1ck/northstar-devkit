@@ -32,6 +32,7 @@ fn which_pwsh() -> anyhow::Result<PathBuf> {
         return Ok(path);
     }
     if let Ok(path) = which::which("powershell") {
+        tracing::warn!("pwsh 7 not found; falling back to Windows PowerShell 5.1");
         return Ok(path);
     }
     anyhow::bail!("neither pwsh.exe (PowerShell 7+) nor powershell.exe was found on PATH")
@@ -47,7 +48,12 @@ fn find_repo_root() -> anyhow::Result<PathBuf> {
         }
     }
 
+    // Resolve symlinks before walking up: a devkit.exe reached via a
+    // symlink would otherwise walk the symlink's tree, not the install's.
+    // dunce (not fs::canonicalize) so we don't trade that bug for a `\\?\`
+    // verbatim-path one; fall back to the raw path if canonicalize errors.
     let exe = std::env::current_exe()?;
+    let exe = dunce::canonicalize(&exe).unwrap_or(exe);
     let mut dir = exe.parent().map(|p| p.to_path_buf());
     while let Some(candidate) = dir {
         if candidate.join("core").is_dir() && candidate.join("tools").is_dir() {

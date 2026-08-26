@@ -18,24 +18,25 @@
       - ONE dedicated writer runspace owns [Console]::Out. It drains a
         single BlockingCollection[string] ($script:OutQueue) and is the
         only code in the whole process that calls WriteLine/Flush.
-      - Three dedicated LANE runspaces (metrics / slow / work) each own a
-        persistent PowerShell runspace with DevKit.Core imported once, and
-        each drains its own BlockingCollection[object] of requests,
+      - FIVE dedicated LANE runspaces (metrics / slow / work / mcp / tool),
+        each owning a persistent PowerShell runspace with DevKit.Core
+        imported once (imports serialized across lanes - see $ImportLock),
+        each draining its own BlockingCollection[object] of requests,
         processing one at a time, pushing its JSON response line onto
-        $script:OutQueue when done. This mirrors the old WPF widget's
-        MetricsRunspace/McpRunspace/WorkRunspace split (gui/DevKit-Widget.ps1)
-        so a slow `gh pr list` can never stall a metrics tick.
+        $script:OutQueue when done. This mirrors (and, for mcp/tool,
+        restores) the old WPF widget's MetricsRunspace/McpRunspace/
+        WorkRunspace split so no slow caller can stall an unrelated one:
+        metrics ticks, git/github polls, multi-second MCP health checks,
+        and minutes-long tool runs all ride separate lanes.
       - The MAIN thread just reads stdin line-by-line (blocking - that's
         fine, it's the only thing on this thread) and routes each request
-        to a lane queue by method prefix ("metrics.*" -> metrics lane,
-        "git.*"/"github.*"/"tool.*"/"maintenance.*" -> slow lane, everything
-        else -> work lane). `ping`/`shutdown` are handled inline with no
-        lane hop.
+        to a lane queue by method prefix (see Get-DevKitRpcLaneForMethod).
+        `ping`/`shutdown` are handled inline with no lane hop.
 
     If this proves fragile in practice, the documented fallback is to split
-    the three lanes into three separate pwsh processes instead of three
-    runspaces in one - simpler, more RAM, but no shared-process invariants
-    to get right. Keep that in mind if this file gets hard to reason about.
+    the lanes into separate pwsh processes instead of runspaces in one -
+    simpler, more RAM, but no shared-process invariants to get right. Keep
+    that in mind if this file gets hard to reason about.
 #>
 
 param(
@@ -104,6 +105,18 @@ $script:LaneQueues = @{
     metrics = [System.Collections.Concurrent.BlockingCollection[object]]::new()
     slow    = [System.Collections.Concurrent.BlockingCollection[object]]::new()
     work    = [System.Collections.Concurrent.BlockingCollection[object]]::new()
+    # Two lanes the initial port collapsed into the ones above, restored
+    # after a wiring audit showed why the old WPF widget kept them apart:
+    # - mcp: Get-DevKitMcpWidgetReport shells out to live 'claude mcp list'
+    #   health checks that take SECONDS and repolls every 20s - on the
+    #   shared work lane it stalled process kills, settings toggles, and
+    #   note saves behind it (the old app had a dedicated McpRunspace for
+    #   exactly this reason).
+    # - tool: tool.run drains a child process synchronously for the tool's
+    #   whole runtime (minutes for e.g. Docker tools) - on the shared slow
+    #   lane it starved every git.overview/github.* poll into timeouts.
+    mcp     = [System.Collections.Concurrent.BlockingCollection[object]]::new()
+    tool    = [System.Collections.Concurrent.BlockingCollection[object]]::new()
 }
 
 # ==================== WRITER RUNSPACE ====================
@@ -189,7 +202,8 @@ function Start-DevKitRpcLane {
             [Console]::Error.WriteLine($importError.ScriptStackTrace)
             foreach ($request in $InQueue.GetConsumingEnumerable()) {
                 $line = ConvertTo-DevKitRpcLine (New-DevKitRpcFailure -Id $request.id -Kind 'LaneInitFailed' -Message "The '$LaneName' lane failed to initialize: $($importError.Exception.Message)")
-                $OutQueue.Add($line)
+                # Same shutdown-race guard as the healthy path's Add.
+                try { $OutQueue.Add($line) } catch { }
             }
             return
         }
@@ -203,20 +217,45 @@ function Start-DevKitRpcLane {
             $evt = [ordered]@{ event = $EventName }
             if ($RunId) { $evt.runId = $RunId }
             foreach ($key in $Extra.Keys) { $evt[$key] = $Extra[$key] }
-            $OutQueue.Add((ConvertTo-DevKitRpcLine $evt))
+            # Guarded for the same shutdown race as the response Add below:
+            # a tool.run still streaming output past the drain deadline
+            # must not kill the lane by Add-ing to a closed queue.
+            try { $OutQueue.Add((ConvertTo-DevKitRpcLine $evt)) } catch { }
         }.GetNewClosure()
 
         foreach ($request in $InQueue.GetConsumingEnumerable()) {
             $reqSw = [System.Diagnostics.Stopwatch]::StartNew()
             try {
                 $result = Invoke-DevKitRpcMethod -Method $request.method -Params $request.params -EmitEvent $emitEvent
+                # PowerShell unrolls arrays at the function boundary above:
+                # a 1-element array arrives here as the bare element, an
+                # empty one as $null - which would serialize as {...}/null
+                # instead of [...] and crash every typed consumer on the
+                # fresh-install/first-item states. Re-wrap for the methods
+                # whose contract is "always an array" (the registry lives
+                # in RpcMethods.ps1 next to the methods themselves).
+                # DIRECT assignments only: `$result = if (...) { @() }`
+                # would collect the if-block's OUTPUT stream, which unrolls
+                # the array all over again (verified: it turned @() back
+                # into $null and @($one) back into the bare element,
+                # silently defeating this exact fix).
+                if (Test-DevKitRpcArrayMethod -Method $request.method) {
+                    if ($null -eq $result) { $result = @() } else { $result = @($result) }
+                }
                 $reqSw.Stop()
                 $line = ConvertTo-DevKitRpcLine (New-DevKitRpcSuccess -Id $request.id -Result $result -Ms $reqSw.Elapsed.TotalMilliseconds)
             } catch {
                 $reqSw.Stop()
                 $line = ConvertTo-DevKitRpcLine (New-DevKitRpcFailure -Id $request.id -Message $_.Exception.Message -Detail $_.ScriptStackTrace)
             }
-            $OutQueue.Add($line)
+            # Guarded: during shutdown the main thread closes $OutQueue after
+            # a drain deadline; a method still in flight past that deadline
+            # (observed: a multi-second mcp.report racing an immediate
+            # shutdown) would otherwise throw on the completed collection
+            # and kill this lane thread silently mid-drain.
+            try { $OutQueue.Add($line) } catch {
+                [Console]::Error.WriteLine("[devkit-rpc][$LaneName] response for request $($request.id) dropped - output queue already closed (shutdown race)")
+            }
         }
     })
     $handle = $ps.BeginInvoke()
@@ -228,7 +267,9 @@ function Start-DevKitRpcLane {
 function Get-DevKitRpcLaneForMethod {
     param([Parameter(Mandatory)][string]$Method)
     if ($Method -like 'metrics.*') { return 'metrics' }
-    if ($Method -like 'git.*' -or $Method -like 'github.*' -or $Method -like 'tool.*' -or $Method -like 'maintenance.*') { return 'slow' }
+    if ($Method -like 'mcp.*') { return 'mcp' }
+    if ($Method -like 'tool.*') { return 'tool' }
+    if ($Method -like 'git.*' -or $Method -like 'github.*') { return 'slow' }
     return 'work'
 }
 
@@ -241,6 +282,8 @@ $lanes = @{
     metrics = Start-DevKitRpcLane -LaneName 'metrics'
     slow    = Start-DevKitRpcLane -LaneName 'slow'
     work    = Start-DevKitRpcLane -LaneName 'work'
+    mcp     = Start-DevKitRpcLane -LaneName 'mcp'
+    tool    = Start-DevKitRpcLane -LaneName 'tool'
 }
 
 Write-DevKitRpcDiag "lanes started, entering read loop"

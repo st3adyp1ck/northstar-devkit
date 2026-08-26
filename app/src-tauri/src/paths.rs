@@ -62,6 +62,7 @@ fn which_pwsh() -> anyhow::Result<PathBuf> {
         return Ok(path);
     }
     if let Ok(path) = which::which("powershell") {
+        tracing::warn!("pwsh 7 not found; falling back to Windows PowerShell 5.1");
         return Ok(path);
     }
     anyhow::bail!("neither pwsh.exe (PowerShell 7+) nor powershell.exe was found on PATH")

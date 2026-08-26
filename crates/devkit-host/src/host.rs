@@ -4,11 +4,11 @@
 //!
 //! Isolation model mirrors the old WPF widget's `MetricsRunspace` /
 //! `McpRunspace` / `WorkRunspace` split (see `gui/DevKit-Widget.ps1`): the
-//! sidecar itself fans work out across a PowerShell `RunspacePool` on lanes
-//! named in each request's `method` prefix (`metrics.*`, `slow.*`,
-//! `work.*`), so a slow `gh pr list` call can never stall a metrics poll.
-//! From the Rust side that's opaque - this client just sees one stdout
-//! stream and demuxes by request id.
+//! sidecar itself fans work out across a PowerShell `RunspacePool` on
+//! lanes, routed by method-name prefix in the sidecar's
+//! `Get-DevKitRpcLaneForMethod`, so a slow `gh pr list` call can never
+//! stall a metrics poll. From the Rust side that's opaque - this client
+//! just sees one stdout stream and demuxes by request id.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -219,6 +219,12 @@ impl PsHost {
         }
 
         let spec = &self.inner.spec;
+        // Last line of defense against `\\?\`-prefixed verbatim paths, which
+        // PowerShell's own providers reject (see app/src-tauri/src/paths.rs).
+        // The app side already simplifies, but the CLI path does not - so
+        // simplify here regardless of which host built the spec.
+        let script = dunce::simplified(&spec.script);
+        let cwd = dunce::simplified(&spec.cwd);
         let mut cmd = Command::new(&spec.program);
         cmd.arg("-NoLogo")
             .arg("-NoProfile")
@@ -226,20 +232,22 @@ impl PsHost {
             .arg("-ExecutionPolicy")
             .arg("Bypass")
             .arg("-File")
-            .arg(&spec.script)
-            .current_dir(&spec.cwd)
+            .arg(script)
+            .current_dir(cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
 
         // Piped stdio redirects the STREAMS but does not, on its own, stop
-        // Windows from allocating a visible console for a console-subsystem
+        // Windows from showing a console window for a console-subsystem
         // child like pwsh.exe - without this flag a real (non-dev-loopback)
         // launch shows an empty console window sitting behind the app,
         // since all of pwsh's actual output goes through the pipes instead
-        // of that console. CREATE_NO_WINDOW (0x08000000) suppresses the
-        // allocation entirely. See std::os::windows::process::CommandExt.
+        // of that console. CREATE_NO_WINDOW (0x08000000) only prevents the
+        // window from being SHOWN - the child still gets a console object
+        // (which is why e.g. [Console]::InputEncoding works inside the
+        // sidecar). See std::os::windows::process::CommandExt.
         #[cfg(windows)]
         {
             // tokio::process::Command exposes creation_flags() natively on

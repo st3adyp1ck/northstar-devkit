@@ -60,7 +60,8 @@
     ],
     "resources": {
       "../../core": "core",
-      "../../tools": "tools"
+      "../../tools": "tools",
+      "../../VERSION": "VERSION"
     },
     "windows": {
       "nsis": {

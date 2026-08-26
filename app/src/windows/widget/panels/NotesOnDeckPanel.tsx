@@ -3,6 +3,7 @@ import clsx from "clsx";
 import { usePolledRpc } from "../../../hooks/usePolledRpc";
 import { useProjectStore } from "../../../stores/useProjectStore";
 import { rpcCall, RpcClientError } from "../../../lib/ipc";
+import { asArray } from "../../../lib/arrays";
 import { GlassPanel } from "../../../components/primitives/GlassPanel";
 import { Badge } from "../../../components/primitives/Badge";
 import { Button } from "../../../components/primitives/Button";
@@ -65,13 +66,20 @@ export function NotesOnDeckPanel() {
   const [itemDraft, setItemDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
 
+  // Wire-shape guard: a 1-element PS list can arrive as a bare object (see
+  // lib/arrays.ts). Normalize once and use these everywhere - especially in
+  // the read-modify-write notes.save payloads, where spreading a bare
+  // object would corrupt the saved list.
+  const noteList = asArray(notes);
+  const itemList = asArray(items);
+
   function describeError(err: unknown, fallback: string): string {
     return err instanceof RpcClientError ? err.message : fallback;
   }
 
   async function addNote() {
     if (!active || !noteDraft.trim()) return;
-    const current = notes ?? [];
+    const current = noteList;
     const text = noteDraft.trim();
     const newNote: ProjectNote = {
       Id: crypto.randomUUID(),
@@ -94,7 +102,7 @@ export function NotesOnDeckPanel() {
     if (!active) return;
     setError(null);
     try {
-      await rpcCall("notes.save", { projectPath: active.path, notes: (notes ?? []).filter((n) => n.Id !== id) });
+      await rpcCall("notes.save", { projectPath: active.path, notes: noteList.filter((n) => n.Id !== id) });
       refetchNotes();
     } catch (err) {
       setError(describeError(err, "Could not delete note."));
@@ -151,7 +159,7 @@ export function NotesOnDeckPanel() {
   if (!active) return null;
 
   const grouped: Record<OnDeckStatus, OnDeckItem[]> = { notStarted: [], inProgress: [], done: [] };
-  for (const item of items ?? []) {
+  for (const item of itemList) {
     (grouped[item.Status] ?? grouped.notStarted).push(item);
   }
 
@@ -159,10 +167,10 @@ export function NotesOnDeckPanel() {
     <GlassPanel>
       <div className="panel-tabs">
         <button type="button" className={clsx("panel-tab", tab === "notes" && "panel-tab--active")} onClick={() => setTab("notes")}>
-          Notes <Badge tone={tab === "notes" ? "accent" : "neutral"}>{notes?.length ?? 0}</Badge>
+          Notes <Badge tone={tab === "notes" ? "accent" : "neutral"}>{noteList.length}</Badge>
         </button>
         <button type="button" className={clsx("panel-tab", tab === "ondeck" && "panel-tab--active")} onClick={() => setTab("ondeck")}>
-          On Deck <Badge tone={tab === "ondeck" ? "accent" : "neutral"}>{items?.length ?? 0}</Badge>
+          On Deck <Badge tone={tab === "ondeck" ? "accent" : "neutral"}>{itemList.length}</Badge>
         </button>
       </div>
 
@@ -184,11 +192,11 @@ export function NotesOnDeckPanel() {
           </div>
           {notesLoading && !notes ? (
             <div className="panel-empty">Loading notes...</div>
-          ) : (notes ?? []).length === 0 ? (
+          ) : noteList.length === 0 ? (
             <div className="panel-empty">No notes yet.</div>
           ) : (
             <div className="notes-panel__list">
-              {(notes ?? []).map((n) => (
+              {noteList.map((n) => (
                 <div key={n.Id} className="notes-panel__note" style={{ "--note-color": n.Color } as CSSProperties}>
                   <span className="notes-panel__note-text">{n.Text}</span>
                   <button
@@ -222,7 +230,7 @@ export function NotesOnDeckPanel() {
           </div>
           {itemsLoading && !items ? (
             <div className="panel-empty">Loading on-deck items...</div>
-          ) : (items ?? []).length === 0 ? (
+          ) : itemList.length === 0 ? (
             <div className="panel-empty">Nothing on deck.</div>
           ) : (
             <div className="notes-panel__sections">

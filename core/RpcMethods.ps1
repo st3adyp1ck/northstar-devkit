@@ -16,6 +16,37 @@
 if ($global:DevKitRpcMethodsLoaded) { return }
 $global:DevKitRpcMethodsLoaded = $true
 
+# Methods whose TOP-LEVEL result is an array. PowerShell unrolls arrays at
+# every function boundary, so `return @(...)` from Invoke-DevKitRpcMethod
+# hands the lane worker a bare object for one element and $null for zero -
+# and the JSON envelope then carries {"result":{...}} or null instead of
+# [...], crashing typed consumers (the CLI's Vec<LinkedProject> parse, the
+# widget's .map calls) precisely on the fresh-install / first-project /
+# first-note states no dev machine ever exhibits. The lane worker consults
+# this set after every call and re-wraps (see Invoke-DevKitRpc.ps1) - keep
+# it in sync when adding a method that returns a bare array.
+$script:DevKitRpcArrayMethods = @{
+    'projects.list'      = $true
+    'projects.remove'    = $true
+    'projects.rename'    = $true
+    'projects.setPinned' = $true
+    'projects.repair'    = $true
+    'notes.get'          = $true
+    'notes.save'         = $true
+    'ondeck.get'         = $true
+    'ondeck.add'         = $true
+    'ondeck.remove'      = $true
+    'ondeck.setStatus'   = $true
+    'ondeck.clearDone'   = $true
+    'process.topCpu'     = $true
+    'metrics.excludedPorts' = $true
+}
+
+function Test-DevKitRpcArrayMethod {
+    param([Parameter(Mandatory)][string]$Method)
+    return $script:DevKitRpcArrayMethods.ContainsKey($Method)
+}
+
 function Get-DevKitRpcParam {
     <# Safe property read off a params PSCustomObject (JSON-parsed) - never throws on a missing property. #>
     param($Params, [Parameter(Mandatory)][string]$Name, $Default = $null)
@@ -23,6 +54,40 @@ function Get-DevKitRpcParam {
     $prop = $Params.PSObject.Properties[$Name]
     if ($null -eq $prop -or $null -eq $prop.Value) { return $Default }
     return $prop.Value
+}
+
+function ConvertTo-DevKitQuotedArgument {
+    <#
+    .SYNOPSIS
+        Quotes ONE argument for a raw Win32 command line, per the C
+        runtime's parsing rules (the same rules ArgumentList implements):
+        backslashes are literal except when they precede a double quote,
+        where N backslashes + quote must become 2N+1 backslashes + quote;
+        a trailing run of N backslashes inside quotes must double to 2N.
+        Needed only on Windows PowerShell 5.1, where
+        ProcessStartInfo.ArgumentList (a .NET Core 2.1+ API) does not
+        exist and arguments must go through the single .Arguments string.
+    #>
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Value)
+    if ($Value.Length -gt 0 -and $Value -notmatch '[\s"]') { return $Value }
+    $sb = [System.Text.StringBuilder]::new()
+    [void]$sb.Append('"')
+    $backslashes = 0
+    foreach ($ch in $Value.ToCharArray()) {
+        if ($ch -eq '\') {
+            $backslashes++
+        } elseif ($ch -eq '"') {
+            [void]$sb.Append('\' * ($backslashes * 2 + 1))
+            [void]$sb.Append('"')
+            $backslashes = 0
+        } else {
+            if ($backslashes -gt 0) { [void]$sb.Append('\' * $backslashes); $backslashes = 0 }
+            [void]$sb.Append($ch)
+        }
+    }
+    if ($backslashes -gt 0) { [void]$sb.Append('\' * ($backslashes * 2)) }
+    [void]$sb.Append('"')
+    return $sb.ToString()
 }
 
 function Get-DevKitCatalogPayload {
@@ -281,10 +346,20 @@ function Invoke-DevKitRpcMethod {
             $pwshExe = (Get-Process -Id $PID).Path
             $psi = [System.Diagnostics.ProcessStartInfo]::new()
             $psi.FileName = $pwshExe
-            foreach ($a in @('-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $scriptPath)) {
-                [void]$psi.ArgumentList.Add($a)
+            $allArgs = @('-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $scriptPath) + @($toolArgs | ForEach-Object { [string]$_ })
+            # ProcessStartInfo.ArgumentList is .NET Core 2.1+ only - on a
+            # machine with no pwsh 7 the sidecar runs under Windows
+            # PowerShell 5.1 (.NET Framework), where the property doesn't
+            # exist and .Add() dies with a null-method error, silently
+            # breaking every tool run. Branch: use ArgumentList when
+            # available (it quotes correctly for us), else build the single
+            # .Arguments string with the same C-runtime quoting rules via
+            # ConvertTo-DevKitQuotedArgument.
+            if ($null -ne $psi.PSObject.Properties['ArgumentList'] -and $null -ne $psi.ArgumentList) {
+                foreach ($a in $allArgs) { [void]$psi.ArgumentList.Add($a) }
+            } else {
+                $psi.Arguments = ($allArgs | ForEach-Object { ConvertTo-DevKitQuotedArgument -Value $_ }) -join ' '
             }
-            foreach ($a in $toolArgs) { [void]$psi.ArgumentList.Add([string]$a) }
             $psi.RedirectStandardOutput = $true
             $psi.RedirectStandardError = $true
             $psi.RedirectStandardInput = $true

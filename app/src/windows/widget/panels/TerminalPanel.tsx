@@ -40,7 +40,8 @@ export function TerminalPanel() {
         </div>
       </div>
       <div className="terminal-panel__body">
-        <TerminalView key={sessionKey} cwd={active?.path} />
+        {/* A Missing project's folder no longer exists - spawning ConPTY there fails, so fall back to the default dir. */}
+        <TerminalView key={sessionKey} cwd={active?.Missing ? undefined : active?.path} />
       </div>
     </GlassPanel>
   );

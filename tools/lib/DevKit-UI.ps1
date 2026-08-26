@@ -211,9 +211,10 @@ function Show-DevKitStartupBanner {
         Prints a short gradient "Northstar DevKit vX.Y.Z" banner, intended
         to be called exactly once per session by a separate caller.
     .DESCRIPTION
-        Reads the version dynamically from the repo-root VERSION file,
-        resolved relative to this file's own location via $PSScriptRoot
-        (lib/ -> repo root). Falls back to plain Write-Host output - no
+        Reads the version dynamically from the repo/install-root VERSION
+        file, resolved relative to this file's own location via
+        $PSScriptRoot (tools\lib\ -> two levels up to the root). Falls
+        back to plain Write-Host output - no
         escape codes, no crash - reasonably close to today's banner style,
         whenever animation isn't supported or the VERSION file can't be
         read.
@@ -222,7 +223,7 @@ function Show-DevKitStartupBanner {
     #>
     $version = '3.8.0'
     try {
-        $versionFile = Join-Path (Split-Path -Parent $PSScriptRoot) "VERSION"
+        $versionFile = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) "VERSION"
         if (Test-Path $versionFile) {
             $raw = (Get-Content -Path $versionFile -Raw -ErrorAction Stop).Trim()
             if (-not [string]::IsNullOrWhiteSpace($raw)) { $version = $raw }

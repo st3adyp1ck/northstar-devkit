@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import "./styles/global.css";
 
 const queryClient = new QueryClient({
@@ -22,7 +23,9 @@ async function mount() {
     root.render(
       <StrictMode>
         <QueryClientProvider client={queryClient}>
-          <ControlCenterApp />
+          <ErrorBoundary>
+            <ControlCenterApp />
+          </ErrorBoundary>
         </QueryClientProvider>
       </StrictMode>,
     );
@@ -33,7 +36,9 @@ async function mount() {
   root.render(
     <StrictMode>
       <QueryClientProvider client={queryClient}>
-        <WidgetApp />
+        <ErrorBoundary>
+          <WidgetApp />
+        </ErrorBoundary>
       </QueryClientProvider>
     </StrictMode>,
   );

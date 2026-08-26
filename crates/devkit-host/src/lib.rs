@@ -38,6 +38,28 @@ mod tests {
     }
 
     #[test]
+    fn event_extra_fields_round_trip() {
+        // tool.finished carries exitCode, which is not a declared RpcEvent
+        // field - it must survive deserialize -> re-serialize via the
+        // #[serde(flatten)] catch-all, or the frontend renders every
+        // successful run as "exit -1".
+        let raw = r#"{"event":"tool.finished","runId":"a1","exitCode":0}"#;
+        let msg: SidecarMessage = serde_json::from_str(raw).unwrap();
+        let evt = match msg {
+            SidecarMessage::Event(e) => e,
+            SidecarMessage::Response(_) => panic!("expected Event variant"),
+        };
+        assert_eq!(evt.extra.get("exitCode"), Some(&serde_json::json!(0)));
+
+        let reserialized = serde_json::to_value(&evt).unwrap();
+        assert_eq!(reserialized["event"], "tool.finished");
+        assert_eq!(reserialized["runId"], "a1");
+        // exitCode must be back at the TOP level, not nested under "extra".
+        assert_eq!(reserialized["exitCode"], 0);
+        assert!(reserialized.get("extra").is_none());
+    }
+
+    #[test]
     fn decodes_event_message() {
         let raw = r#"{"event":"tool.output","runId":"a1","stream":"stdout","line":"Killed PID 4821"}"#;
         let msg: SidecarMessage = serde_json::from_str(raw).unwrap();

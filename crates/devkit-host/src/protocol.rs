@@ -57,6 +57,14 @@ pub struct RpcEvent {
     pub line: Option<String>,
     #[serde(default)]
     pub data: Option<Value>,
+    /// Catch-all for event fields not declared above (`exitCode` on
+    /// `tool.finished`, `pid` on `tool.started`, ...). Without this, serde
+    /// silently drops unknown fields on deserialize, and since the app
+    /// re-serializes this typed struct to the frontend, those fields would
+    /// never reach it. `#[serde(flatten)]` both captures them on
+    /// deserialize and re-emits them flat (top-level) on serialize.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 impl RpcRequest {

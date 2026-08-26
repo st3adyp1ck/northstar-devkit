@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { usePolledRpc } from "../../../hooks/usePolledRpc";
 import { useConfirmDestructive } from "../../../hooks/useConfirmDestructive";
 import { rpcCall, RpcClientError } from "../../../lib/ipc";
+import { asArray } from "../../../lib/arrays";
 import { Gauge } from "../../../components/Gauge";
 import { GlassPanel } from "../../../components/primitives/GlassPanel";
 import { Button } from "../../../components/primitives/Button";
@@ -133,7 +134,8 @@ function ProcessFlyout({ kind, onClose }: { kind: Exclude<GaugeKind, null>; onCl
         pctLabel: `${p.GpuPercent}%`,
       }));
     } else {
-      rows = (data as TopCpuProcessRow[]).map((p) => ({
+      // process.topCpu is a top-level array - normalize the PS single-element-unroll shape (see lib/arrays.ts).
+      rows = asArray(data as TopCpuProcessRow[] | TopCpuProcessRow).map((p) => ({
         Pid: p.Pid,
         Name: p.Name,
         Classification: p.Classification,

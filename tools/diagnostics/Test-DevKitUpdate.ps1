@@ -50,7 +50,8 @@ if (-not $Force -and $settings.preferences.lastUpdateCheckUtc) {
     }
 }
 
-$versionFile = Join-Path (Split-Path -Parent $PSScriptRoot) "VERSION"
+# Two levels up: this script lives at tools\diagnostics\, the repo/install root is above tools\.
+$versionFile = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) "VERSION"
 if (-not (Test-Path $versionFile)) {
     Write-DevKitError "VERSION file not found - cannot determine the installed version."
     exit 1

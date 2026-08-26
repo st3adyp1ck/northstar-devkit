@@ -39,7 +39,12 @@ async fn main() -> anyhow::Result<()> {
         .with_writer(std::io::stderr)
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
+                // Quiet the forwarded sidecar stderr (WARN) by default: it
+                // would print into the ratatui alternate screen and corrupt
+                // the menu. RUST_LOG still overrides for debugging.
+                .unwrap_or_else(|_| {
+                    tracing_subscriber::EnvFilter::new("warn,devkit_sidecar_stderr=error")
+                }),
         )
         .init();
 
