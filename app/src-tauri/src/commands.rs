@@ -97,38 +97,68 @@ pub async fn show_window(app: tauri::AppHandle, label: String) -> Result<(), Str
     set_window_visible(&window, true)
 }
 
-/// Docks the widget to the left or right edge of its current monitor's
-/// work area (full work-area height, small margin). Backs the
-/// widgetDockMode setting - the setting persisted before but nothing ever
-/// applied it. Rust-side (not the JS window API) so no ACL grants are
-/// needed and the monitor math stays in one place.
+/// Docks the widget as a REAL sidebar, or releases it back to a floating
+/// window. Backs the widgetDockMode setting ("Left" | "Right" |
+/// "Floating"):
+///
+/// - Left/Right: the widget becomes a fixed sidebar - full work-area
+///   height (taskbar-aware via Monitor::work_area), flush against that
+///   edge, and NOT resizable (set_resizable(false) - combined with the
+///   frontend removing the titlebar's drag region while docked, the
+///   window genuinely cannot be moved or shrunk off its edge).
+/// - Floating: resizable again, restored to the default 380x720 logical
+///   size, position left wherever it is.
+///
+/// Rust-side (not the JS window API) so no ACL grants are needed and the
+/// monitor math stays in one place. Physical pixels throughout so DPI
+/// scale factors don't skew anything.
 #[tauri::command]
 pub async fn set_widget_dock(app: tauri::AppHandle, side: String) -> Result<(), String> {
     let Some(window) = app.get_webview_window("widget") else {
         return Err("widget window not found".into());
     };
+
+    if side.eq_ignore_ascii_case("floating") {
+        window.set_resizable(true).map_err(|e| e.to_string())?;
+        window
+            .set_size(tauri::LogicalSize::new(380.0, 720.0))
+            .map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+
     let monitor = window
         .current_monitor()
         .map_err(|e| e.to_string())?
         .ok_or("no monitor for widget window")?;
-
-    // Physical pixels throughout (monitor size/position and set_position's
-    // PhysicalPosition agree), so DPI scale factors don't skew the math.
     let scale = monitor.scale_factor();
-    let margin = (12.0 * scale) as i32;
-    let mon_pos = monitor.position();
-    let mon_size = monitor.size();
-    let win_size = window.outer_size().map_err(|e| e.to_string())?;
+    let work = monitor.work_area();
 
-    let x = match side.as_str() {
-        "Left" | "left" => mon_pos.x + margin,
-        "Right" | "right" => mon_pos.x + mon_size.width as i32 - win_size.width as i32 - margin,
-        other => return Err(format!("unknown dock side '{other}' (expected Left or Right)")),
+    // Sidebar width: the configured default (380 logical) regardless of
+    // whatever the user had resized the floating window to - a dock is a
+    // fixed-width surface, and this also self-heals any window-state that
+    // was shrunk below the intended minimum.
+    let width = (380.0 * scale) as u32;
+    let height = work.size.height;
+
+    let x = if side.eq_ignore_ascii_case("left") {
+        work.position.x
+    } else if side.eq_ignore_ascii_case("right") {
+        work.position.x + work.size.width as i32 - width as i32
+    } else {
+        return Err(format!(
+            "unknown dock side '{side}' (expected Left, Right, or Floating)"
+        ));
     };
-    let y = mon_pos.y + margin;
 
+    // Order matters: sizing while still resizable, then locking. (A
+    // non-resizable window ignores set_size on some platforms.)
+    window.set_resizable(true).map_err(|e| e.to_string())?;
     window
-        .set_position(tauri::PhysicalPosition::new(x, y))
+        .set_size(tauri::PhysicalSize::new(width, height))
         .map_err(|e| e.to_string())?;
+    window
+        .set_position(tauri::PhysicalPosition::new(x, work.position.y))
+        .map_err(|e| e.to_string())?;
+    window.set_resizable(false).map_err(|e| e.to_string())?;
     Ok(())
 }

@@ -1,7 +1,9 @@
 import { useState, type PropsWithChildren, type ReactNode } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { AnimatePresence } from "framer-motion";
+import clsx from "clsx";
 import { useApplyAppearance } from "../hooks/useApplyAppearance";
+import { useSettingsStore } from "../stores/useSettingsStore";
 import { SettingsDialog } from "./settings/SettingsDialog";
 import "./TitleBar.css";
 
@@ -48,9 +50,17 @@ export function TitleBar({ title, icon, onHide, showMaximize, actions, children 
   const [settingsOpen, setSettingsOpen] = useState(false);
   useApplyAppearance();
 
+  // While the widget is DOCKED (Left/Right), it must be genuinely
+  // immovable: the Rust side already made it non-resizable and pinned it,
+  // but an undecorated window is dragged via -webkit-app-region: drag on
+  // this titlebar - so drop the drag region entirely in docked mode. The
+  // Control Center (and a Floating widget) stay draggable as normal.
+  const dockMode = useSettingsStore((s) => s.settings?.preferences.widgetDockMode);
+  const isDockedWidget = win.label === "widget" && (dockMode === "Left" || dockMode === "Right");
+
   return (
     <>
-      <div className="devkit-titlebar devkit-drag-region">
+      <div className={clsx("devkit-titlebar", !isDockedWidget && "devkit-drag-region")}>
         <div className="devkit-titlebar__brand">
           {icon}
           <span className="devkit-titlebar__title">{title}</span>

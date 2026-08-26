@@ -449,7 +449,7 @@ function BehaviorSection({ prefs, update }: SectionProps) {
   const availableUpdate = useUpdaterStore((s) => s.update);
   const checkNow = useUpdaterStore((s) => s.checkNow);
 
-  async function setDock(mode: "Left" | "Right") {
+  async function setDock(mode: "Left" | "Right" | "Floating") {
     setDockError(null);
     // Persist regardless of whether the immediate move works - the setting
     // also applies at next startup via useApplyAppearance.
@@ -507,7 +507,7 @@ function BehaviorSection({ prefs, update }: SectionProps) {
       <h3 className="settings-section__title">Widget dock</h3>
       <div className="settings-field">
         <div className="settings-segmented" role="group" aria-label="Widget dock side">
-          {(["Left", "Right"] as const).map((mode) => (
+          {(["Left", "Right", "Floating"] as const).map((mode) => (
             <button
               key={mode}
               type="button"
@@ -518,7 +518,10 @@ function BehaviorSection({ prefs, update }: SectionProps) {
             </button>
           ))}
         </div>
-        <span className="settings-row__hint">Which screen edge the widget snaps to.</span>
+        <span className="settings-row__hint">
+          Left/Right pin the widget as a fixed full-height sidebar (immovable, fixed width). Floating is a normal
+          draggable, resizable window.
+        </span>
       </div>
       {dockError && <div className="settings-inline-error">{dockError}</div>}
 

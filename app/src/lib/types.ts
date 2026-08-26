@@ -361,7 +361,7 @@ export interface DevKitPreferences {
   updateCheckEnabled: boolean;
   lastUpdateCheckUtc: string | null;
   enableAnimations: boolean;
-  widgetDockMode: "Left" | "Right";
+  widgetDockMode: "Left" | "Right" | "Floating";
   widgetWidth: number;
   gitFlyoutWidth: number;
   notesFlyoutWidth: number;

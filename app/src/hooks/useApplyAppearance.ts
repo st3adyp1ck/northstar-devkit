@@ -94,6 +94,12 @@ export function useApplyAppearance(): void {
     // actually docks, but marking the others done skips re-checking.
     dockApplied.current = true;
     if (getCurrentWindow().label !== "widget") return;
+    // Floating mode at startup: do nothing - the window-state plugin has
+    // already restored the user's floating size/position, and calling the
+    // dock command would clobber that with the default size. Docked modes
+    // always re-pin (the whole point: the sidebar reasserts itself every
+    // launch regardless of what state was saved).
+    if (settings.preferences.widgetDockMode === "Floating") return;
     invoke("set_widget_dock", { side: settings.preferences.widgetDockMode }).catch((err) => {
       // Startup positioning is best-effort - a missing monitor mid-resume
       // shouldn't break anything else, so log rather than surface.

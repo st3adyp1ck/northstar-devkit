@@ -168,6 +168,25 @@ fn run_app() {
                 let _ = window.hide();
                 emit_visibility(window, window.label(), false);
             }
+            // Hard floor on the widget's size, enforced at the event level:
+            // the config's minWidth/minHeight SHOULD cover this, but a
+            // user-reported real-machine case still shrank the undecorated
+            // window below them (tao's custom resize borders + restored
+            // window-state interact unreliably here), which breaks the UI
+            // layout. Re-clamp after any resize that lands under the floor.
+            if window.label() == "widget" {
+                if let WindowEvent::Resized(size) = event {
+                    let scale = window.scale_factor().unwrap_or(1.0);
+                    let min_w = (380.0 * scale) as u32;
+                    let min_h = (560.0 * scale) as u32;
+                    if size.width < min_w || size.height < min_h {
+                        let _ = window.set_size(tauri::PhysicalSize::new(
+                            size.width.max(min_w),
+                            size.height.max(min_h),
+                        ));
+                    }
+                }
+            }
         })
         .build(tauri::generate_context!())
         .expect("error while building devkit application")
