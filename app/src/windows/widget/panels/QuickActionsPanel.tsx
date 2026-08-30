@@ -53,6 +53,20 @@ const CLOSE_OUT = {
   previewArgs: ["-DryRun"],
 };
 
+/**
+ * Deep Close-Out is the SAME script, not a second tool: the two everyday
+ * opt-ins (-IncludeRecycleBin, -IncludePackageCache) ride along as plain
+ * args, and the active project (when one is linked) is appended at click
+ * time as -ProjectPath so its regenerable framework caches go too. The
+ * manifest's own Deep entry (tools/workflow/_module.psd1, item 8) passes
+ * the same two switches but deliberately leaves the project out - a
+ * catalog item cannot know which project is active; this panel can.
+ */
+const CLOSE_OUT_DEEP = {
+  label: "Close-Out (deep)",
+  args: ["-IncludeRecycleBin", "-IncludePackageCache"] as string[],
+};
+
 /* ------------------------------------------------------------------ */
 /* collapsed/expanded preference                                       */
 /* ------------------------------------------------------------------ */
@@ -220,6 +234,47 @@ export function QuickActionsPanel() {
     );
   }
 
+  /**
+   * Same gate as runCloseOut - the extras (a PERMANENT Recycle Bin empty, a
+   * slower next install while the package cache refills, the active
+   * project's framework caches) are exactly the kind of thing a one-click
+   * button must say out loud before it does them.
+   */
+  function runDeepCloseOut() {
+    if (runId) return;
+    // Resolved BEFORE the dialog opens so the copy and the run agree on
+    // whether a project is going along.
+    const args = active ? [...CLOSE_OUT_DEEP.args, "-ProjectPath", active.path] : CLOSE_OUT_DEEP.args;
+    confirmDestructive(
+      {
+        title: "Deep close out the day's session?",
+        description: (
+          <>
+            Runs <code>{`${CLOSE_OUT.folder}/${CLOSE_OUT.script}`}</code> like the button above, plus: empties the{" "}
+            <strong>Recycle Bin (permanent)</strong> and cleans the package manager&apos;s global cache (the next
+            install in any project will be slower)
+            {active
+              ? ", and clears the active project's framework caches (.next, .turbo, node_modules/.cache, node_modules/.vite - never node_modules itself, never dist)"
+              : ""}
+            . Anything unsaved in the stopped processes is lost, and none of it can be undone.
+          </>
+        ),
+        confirmLabel: "Deep close out",
+        danger: true,
+      },
+      () =>
+        startWidgetToolRun({
+          surface: "quick-actions",
+          folder: CLOSE_OUT.folder,
+          script: CLOSE_OUT.script,
+          label: CLOSE_OUT_DEEP.label,
+          args,
+          caution: true,
+          confirmed: true,
+        }),
+    );
+  }
+
   /** Replays a recorded run. RunHistoryList has already applied the caution gate. */
   function runFromHistory(entry: RunHistoryEntry) {
     void startWidgetToolRun({
@@ -315,17 +370,28 @@ export function QuickActionsPanel() {
                     <span className="quick-actions-panel__big-caption">{CLOSE_OUT.caption}</span>
                   </span>
                 </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="quick-actions-panel__preview"
-                  disabled={!!runId}
-                  loading={mine && runningLabel === `${CLOSE_OUT.label} (preview)`}
-                  onClick={previewCloseOut}
-                  title="Dry run - lists what Close-Out would do without doing any of it"
-                >
-                  Preview first
-                </Button>
+                <div className="quick-actions-panel__close-out-options">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={!!runId}
+                    loading={mine && runningLabel === CLOSE_OUT_DEEP.label}
+                    onClick={runDeepCloseOut}
+                    title="Same clean, plus the Recycle Bin, the package manager cache, and the active project's framework caches"
+                  >
+                    Deep
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={!!runId}
+                    loading={mine && runningLabel === `${CLOSE_OUT.label} (preview)`}
+                    onClick={previewCloseOut}
+                    title="Dry run - lists what Close-Out would do without doing any of it"
+                  >
+                    Preview first
+                  </Button>
+                </div>
               </div>
             </div>
 

@@ -209,4 +209,20 @@ Describe "Get-DevKitGuiCatalog (against the real manifests)" {
         $none = @(Search-DevKitGuiTools -Catalog $script:catalog -Keyword 'zzz-no-such-tool-zzz')
         $none.Count | Should -Be 0
     }
+
+    It "workflow manifest's Deep Close-Out entry carries its two opt-in switches" {
+        $workflow = @($script:catalog | ForEach-Object { $_.Modules } | Where-Object { $_.Folder -eq 'workflow' })[0]
+        $deep = @($workflow.Items | Where-Object { $_.Script -eq 'Close-OutSession.ps1' -and $_.StaticArgs -and $_.StaticArgs['IncludeRecycleBin'] })
+        $deep.Count | Should -Be 1
+        $deep[0].StaticArgs['IncludePackageCache'] | Should -BeTrue
+        # And the static args survive argument resolution as the switches the
+        # script itself declares (StaticArgs merge last and win).
+        $rendered = ConvertTo-DevKitToolArguments -Item $deep[0] -Values @{}
+        $rendered['IncludeRecycleBin'] | Should -BeTrue
+        $rendered['IncludePackageCache'] | Should -BeTrue
+        # The dry-run preview entry must NOT have grown the deep switches.
+        $preview = @($workflow.Items | Where-Object { $_.Script -eq 'Close-OutSession.ps1' -and $_.StaticArgs -and $_.StaticArgs['DryRun'] })
+        $preview.Count | Should -Be 1
+        $preview[0].StaticArgs.Contains('IncludeRecycleBin') | Should -BeFalse
+    }
 }

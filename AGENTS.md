@@ -348,12 +348,34 @@ try {
 - Supports both User and Machine environment scopes
 - Interactive PATH editor with duplicate detection
 - JSON backup/restore for environment variables
+- **Admin Mode** (`Set-DevKitAdminMode.ps1`/`.bat`, manifest items 6-7):
+  opt-in, one-time setup that registers a `NorthstarDevKit-Admin` scheduled
+  task (RunLevel Highest) so the app launches elevated with no per-launch
+  UAC prompt - started through a tiny hidden wscript launcher and
+  'DevKit (Admin)' Desktop/Start-Menu shortcuts. If Start-with-Windows is
+  on it is MOVED from the HKCU Run key onto the task as a logon trigger
+  (Windows will not auto-start elevated apps from the Run key), and every
+  change is recorded in `%LOCALAPPDATA%\NorthstarDevKit\admin-mode.json` so
+  `-Off` reverses it exactly. When not elevated the script re-launches
+  itself once via `Start-Process -Verb RunAs -Wait` and reads the child's
+  JSON result file (ShellExecute streams nothing back), so it also works
+  from the Control Center's headless Run dialog; `-DryRun` prints the plan.
+  The app surfaces the result through the `system.isElevated` RPC as an
+  amber ADMIN badge in the shared TitleBar (`ElevationIndicator` in
+  `app/src/components/TitleBar.tsx`).
 
 ### Workflow Tools (`tools/workflow/`)
 - Detects VS Code and Cursor installations
 - Opens repositories in browser (GitHub, GitLab, Bitbucket, Azure DevOps)
 - Parses `.env.example` templates for variable extraction
 - Converts SSH URLs to HTTPS for browser opening
+- Close Out Session (`Close-OutSession.ps1`): the one-action end-of-day
+  cleanup (stops node.exe, frees dev ports held by recognized dev runtimes,
+  clears temp/junk, trims every accessible working set). The manifest
+  registers it three ways - default (item 6), dry-run preview (item 7,
+  `StaticArgs DryRun`), and Deep (item 8, `StaticArgs IncludeRecycleBin` +
+  `IncludePackageCache`) - and the widget's Quick Actions panel mirrors all
+  three, adding `-ProjectPath <active project>` to its own Deep run.
 
 ### Diagnostics (`tools/diagnostics/`)
 - Checks tool installations and versions
@@ -527,7 +549,11 @@ reliably drive `document.visibilityState`, which the frontend's
   toggle (`tauri-plugin-autostart`), and Exit. Closing the window via its
   titlebar hides it to the tray rather than quitting (`lib.rs`'s
   `CloseRequested` handler) - only the tray's Exit item, or
-  `tauri-plugin-process`, actually ends the process.
+  `tauri-plugin-process`, actually ends the process. When Admin Mode is
+  enabled, the Run-key Start-with-Windows entry is superseded by the
+  elevation task's logon trigger - `Set-DevKitAdminMode.ps1` moves it there
+  on enable and restores it on `-Off`, so the two never fight over the same
+  mechanism (see System Tools above).
 - **`control-center`** (`app/src/windows/control-center/ControlCenterApp.tsx`)
   - the full catalog-driven tool browser. Renders the `catalog.get`
   payload as a searchable, grouped card grid; clicking a card opens
@@ -711,6 +737,17 @@ cargo build --release -p devkit-cli
   `preferences.confirmDestructive` (default `true`) gates both of the
   helpers above globally; it does not gate any script's own bespoke
   confirmation logic that predates `Confirm-DevKitDestructiveAction`.
+- **Admin Mode** (`tools/system/Set-DevKitAdminMode.ps1`) is a deliberate,
+  opt-in weakening of the least-privilege default: the scheduled task it
+  registers elevates whatever its registered exe path points at with NO
+  prompt, and the per-user install folder is writable by anything running
+  as the user, so replacing `DevKit.exe` afterwards is a silent elevation
+  path. While elevated, every DevKit surface (all tools, the embedded
+  terminal) runs as Administrator. It requires one interactive UAC consent
+  to enable, is gated by `Confirm-DevKitDestructiveAction`, announces the
+  trade-off in its own help text and output, supports a read-only
+  `-DryRun`, and `-Off` removes every trace (task, launcher, shortcuts,
+  restored Run key, state marker).
 - **Never execute a destructive/mutating script's real path to "test" it
   - only its documented read-only/`-DryRun`/`-WhatIf` invocation.** Every
   script under `tools/maintenance/` and `tools/agents/` that mutates the
@@ -735,7 +772,9 @@ scan parser, the GUI/widget cores (`core/DevKit-GuiCore.ps1` /
 `core/DevKit-WidgetCore.ps1` - argument rendering, MCP/Kimi parsers,
 nvidia-smi parser, git log parser + graph lane layout, .env key diff, the
 file-name -> icon-key/color mapping), the winnat excluded-port-ranges
-parser, the .env key extractor, and the Convert-DevText converters. Run
+parser, the .env key extractor, the Convert-DevText converters, and the
+Admin Mode pure helpers (exe-candidate resolution, launcher/shortcut/
+child-argument rendering, the Run-key autostart matcher). Run
 locally with:
 
 ```powershell

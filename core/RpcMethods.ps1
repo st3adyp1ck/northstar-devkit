@@ -784,6 +784,14 @@ function Invoke-DevKitRpcMethod {
         'junk.clear' {
             return Clear-DevKitSystemJunk
         }
+        'system.isElevated' {
+            # True when the sidecar (and therefore the app and every tool it
+            # spawns) is running elevated - i.e. it was launched via Admin
+            # Mode's scheduled task (tools/system/Set-DevKitAdminMode.ps1).
+            # Fixed for the process's lifetime; drives the title bar's ADMIN
+            # badge.
+            return @{ elevated = [bool](Test-DevKitAdmin) }
+        }
 
         # ---------- git ----------
         'git.overview' {

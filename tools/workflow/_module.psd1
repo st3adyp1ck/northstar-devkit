@@ -1,6 +1,6 @@
 @{
     Name        = "Workflow Tools"
-    Description = "Everyday shortcuts, most of them scoped to a linked project: open it in VS Code or Cursor, open its Git remote (GitHub, GitLab, Bitbucket, Azure DevOps) in a browser, copy a detected .env template into it, or diff .env against that template. Two items need no project at all: the offline dev-text converter, and Close Out Session - the one-action end-of-day cleanup that stops dev processes, frees dev ports, clears temp/junk, and hands memory back to the OS. Project-scoped tools prompt you to pick a project first and run with their default (non-interactive, non-dry-run) flags from this menu; less common options - recent-projects picker, Cursor preference, a specific remote/branch/PR/issues/actions page, interactive value prompts, dry run, and every Close Out Session opt-in switch - are only available via direct command-line invocation."
+    Description = "Everyday shortcuts, most of them scoped to a linked project: open it in VS Code or Cursor, open its Git remote (GitHub, GitLab, Bitbucket, Azure DevOps) in a browser, copy a detected .env template into it, or diff .env against that template. Two items need no project at all: the offline dev-text converter, and Close Out Session - the one-action end-of-day cleanup that stops dev processes, frees dev ports, clears temp/junk, and hands memory back to the OS, offered here in three strengths (item 6 default, item 7 dry-run preview, item 8 Deep with the Recycle Bin and package-cache opt-ins already on). Project-scoped tools prompt you to pick a project first and run with their default (non-interactive, non-dry-run) flags from this menu; less common options - recent-projects picker, Cursor preference, a specific remote/branch/PR/issues/actions page, interactive value prompts, and the less-everyday Close Out Session opt-in switches (Docker, database ports, -KillAnyPortOwner, a specific -ProjectPath) - are only available via direct command-line invocation."
     Items       = @(
         @{
             Key             = '1'
@@ -48,6 +48,13 @@
             Script     = 'Close-OutSession.ps1'
             Help       = "The same end-of-day cleanup as item 6, in preview: it reports exactly which node processes it would stop, which dev ports it would free (and who is holding the ones it would leave alone), and how much temp/junk it would delete, then stops without stopping, deleting, or changing anything at all. Fully read-only - it only ever measures and lists, the dry-run flag overrides every other switch including -Force, and it never prompts. Use this first to decide whether to run the real thing."
             StaticArgs = @{ DryRun = $true }
+        }
+        @{
+            Key        = '8'
+            Label      = 'Close Out Session - Deep (Recycle Bin + Package Cache)'
+            Script     = 'Close-OutSession.ps1'
+            Help       = "The same one-action end-of-day cleanup as item 6 with the two everyday opt-ins already on: stops every running node.exe, frees the common dev ports held by recognized dev runtimes, deletes the CONTENTS of your user TEMP folder (plus Windows\Temp and the Windows Update cache when elevated), trims every accessible process's working set - and additionally EMPTIES THE RECYCLE BIN (permanent - a file you deleted but might still want back is gone for good) and cleans the detected package manager's global cache (npm cache clean --force / pnpm store prune / yarn cache clean --all / bun pm cache rm - safe, but the next install in any project is slower while the cache refills). It still will NOT clear a project's framework caches (that needs -ProjectPath from the command line; the widget's Deep button adds the active project itself), prune Docker, free the database ports 3306/5432/6379/27017, or stop a port owner that is not a recognized dev runtime. Safety note: this really does stop processes, permanently empties the Recycle Bin, and deletes files, so it is gated by the shared Confirm-DevKitDestructiveAction prompt - the Control Center's caution dialog passes -Force for you once you confirm, and a non-interactive run without -Force declines and changes nothing."
+            StaticArgs = @{ IncludeRecycleBin = $true; IncludePackageCache = $true }
         }
     )
 }

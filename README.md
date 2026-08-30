@@ -181,10 +181,13 @@ The widget is DevKit's main face — it opens from the Start Menu/Desktop icon s
 - **MCP**: expandable **Claude Code** / **Kimi Code** boxes listing that project's MCP servers alongside your user-scope ones, with Connected / Disconnected / Requires Auth badges.
 - **Notes/On-Deck**: quick per-project sticky notes, plus an on-deck list whose items advance Not Started → In Progress → Done with a click.
 - **Files**: a lightweight file explorer scoped to the active project.
-- **Quick Actions**: Clear NPM Cache, Kill All Node, Kill Port (with an inline port field), and Doctor — each streams live into the same inline console — plus the widget's own **Settings** (confirm-before-destructive, animations, update checks) and an `.env` drift warning when the active project is missing template keys.
+- **Quick Actions**: **Doctor** (full environment check, reads only) and **Close-Out** (the one-click end-of-day cleanup — stops dev processes, frees their ports, clears temp/junk, trims memory back to the OS) with **Preview first** (dry run) and **Deep** (adds the Recycle Bin, the package-manager cache, and the active project's framework caches) beside it — each streams live into the same inline console — plus the widget's own **Settings** (confirm-before-destructive, animations, update checks) and an `.env` drift warning when the active project is missing template keys. An amber **ADMIN** badge in the title bar shows whenever the app is running elevated (see Admin Mode below).
 - **Terminal**: collapsed by default; expand it for a real embedded terminal (ConPTY-hosted `pwsh`/`powershell`), already in your project folder — interactive CLIs just work because it genuinely is a terminal.
 - **Project selector**: the same Active Project shared with the Control Center and the `devkit` CLI.
 - **Tray**: closing the widget just hides it to the tray — right-click the icon for **Show/Hide Widget**, **Open DevKit Control Center**, **Start with Windows**, and **Exit**.
+
+### Admin Mode (optional, always-elevated launching)
+Some cleanup simply reaches further with Administrator rights — Close-Out's `Windows\Temp` and Windows Update cache, and working-set trims of elevated processes. If you want DevKit elevated by default, run `tools\system\Set-DevKitAdminMode.ps1` once (or **System Tools → Enable DevKit Admin Mode** in the app): after a single UAC consent it registers a scheduled task that launches the app with highest privileges, and puts a **DevKit (Admin)** shortcut on your Desktop and Start Menu — no UAC prompt ever again. Exit the tray app first, then relaunch via that shortcut; the title bar shows an amber **ADMIN** badge when it's really elevated, and Start-with-Windows moves from the registry Run key onto the task (Windows can't auto-start elevated apps from the Run key). `Set-DevKitAdminMode.ps1 -Off` removes every trace. The trade-off, stated plainly: while elevated, every tool and the embedded terminal run as Administrator.
 
 ### `devkit` CLI
 There's no installer for the CLI yet — build it from source:
@@ -282,6 +285,9 @@ These are the same 65 scripts the widget, the Control Center, and the `devkit` C
 .\tools\system\Env-Restore.ps1 -BackupFile "backup.json"
 .\tools\system\Shell-Reload.ps1
 .\tools\system\Edit-HostsFile.ps1 -Show            # view hosts entries; interactive add/remove/toggle
+.\tools\system\Set-DevKitAdminMode.ps1 -DryRun     # preview Admin Mode (always-elevated launching)
+.\tools\system\Set-DevKitAdminMode.ps1             # enable: one UAC consent, then no per-launch prompt
+.\tools\system\Set-DevKitAdminMode.ps1 -Off        # disable, removing every trace
 ```
 
 ### Workflow Tools
@@ -291,6 +297,9 @@ These are the same 65 scripts the widget, the Control Center, and the `devkit` C
 .\tools\workflow\Copy-EnvTemplate.ps1 -Path "C:\my-project" -Interactive
 .\tools\workflow\Compare-EnvFiles.ps1 -Path "C:\my-project"      # .env vs template drift (keys only)
 .\tools\workflow\Convert-DevText.ps1                             # Base64/URL/timestamps/GUID/SHA-256/JWT
+.\tools\workflow\Close-OutSession.ps1 -DryRun                    # preview the end-of-day cleanup
+.\tools\workflow\Close-OutSession.ps1                            # stop dev processes, free ports, clear junk, trim memory
+.\tools\workflow\Close-OutSession.ps1 -IncludeRecycleBin -IncludePackageCache -ProjectPath "C:\my-project"  # deep
 ```
 
 ### Diagnostics

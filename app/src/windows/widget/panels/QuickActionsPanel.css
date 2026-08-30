@@ -111,10 +111,13 @@
   gap: var(--space-1);
 }
 
-/* Deliberately quiet and tucked under the button it previews - it is the
-   safe way out of a one-click wipe, not a third headline action. */
-.quick-actions-panel__preview {
-  align-self: flex-end;
+/* Deliberately quiet and tucked under the button they belong to - Preview
+   is the safe way out of a one-click wipe and Deep is the same wipe with
+   its everyday opt-ins on, so neither is a third headline action. */
+.quick-actions-panel__close-out-options {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-1);
 }
 
 /* The sidecar has one tool lane, so the other panel's run really does hold

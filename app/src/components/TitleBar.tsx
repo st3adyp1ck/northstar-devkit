@@ -5,7 +5,7 @@ import clsx from "clsx";
 import { useApplyAppearance } from "../hooks/useApplyAppearance";
 import { useVisibility } from "../hooks/useVisibility";
 import { useSettingsStore } from "../stores/useSettingsStore";
-import { sidecarRestart, sidecarStatus } from "../lib/ipc";
+import { sidecarRestart, sidecarStatus, isElevated } from "../lib/ipc";
 import { playSound } from "../lib/sounds";
 import { SettingsDialog } from "./settings/SettingsDialog";
 import { ErrorCenterHost, openErrorCenter, useUnseenErrorCount } from "./errors";
@@ -168,6 +168,61 @@ function SidecarHealthIndicator() {
   );
 }
 
+/** Slow poll: elevation is fixed at process start, so this only exists to land the first answer. */
+const ELEVATION_POLL_MS = 60_000;
+
+/**
+ * Small ADMIN badge shown only while the app runs elevated - i.e. it was
+ * launched through Admin Mode's scheduled task (tools/system/
+ * Set-DevKitAdminMode.ps1). Renders NOTHING otherwise: non-elevated is the
+ * normal state and gets no furniture, the same restraint the sidecar dot
+ * uses. Amber rather than red on purpose - Admin Mode is a deliberate
+ * choice with a real blast radius, so the badge reads "be aware", not
+ * "something is wrong". Mounted here (every window renders a TitleBar) so
+ * both surfaces carry it for free.
+ */
+function ElevationIndicator() {
+  const visible = useVisibility();
+  const [elevated, setElevated] = useState(false);
+  const mounted = useRef(true);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  const check = useCallback(async () => {
+    try {
+      const value = await isElevated();
+      if (mounted.current) setElevated(value);
+    } catch {
+      // A failed check means "don't know" - and showing nothing is the
+      // honest rendering of that, so there is no error state here.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!visible) return;
+    void check();
+    const timer = window.setInterval(() => void check(), ELEVATION_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [visible, check]);
+
+  if (!elevated) return null;
+  return (
+    <span
+      className="devkit-elevated"
+      role="img"
+      aria-label="Running as administrator"
+      title="DevKit is running with administrator privileges (Admin Mode). Every tool and the embedded terminal run elevated."
+    >
+      ADMIN
+    </span>
+  );
+}
+
 /**
  * Custom chrome for undecorated windows - a drag region plus minimal window
  * controls, matching decorations:false in tauri.conf.json.
@@ -222,6 +277,7 @@ export function TitleBar({ title, icon, onHide, showMaximize, actions, children 
         <div className="devkit-titlebar__controls devkit-no-drag">
           <div className="devkit-titlebar__group">
             <SidecarHealthIndicator />
+            <ElevationIndicator />
             {actions}
             <ErrorCenterButton />
             <button

@@ -34,6 +34,16 @@ export async function sidecarStatus(): Promise<boolean> {
   return invoke<boolean>("sidecar_status");
 }
 
+/**
+ * True when the whole app (and therefore the sidecar and every tool it
+ * runs) is elevated - i.e. launched through Admin Mode's scheduled task
+ * (tools/system/Set-DevKitAdminMode.ps1). Fixed for the process's lifetime.
+ */
+export async function isElevated(): Promise<boolean> {
+  const result = await rpcCall<{ elevated: boolean }>("system.isElevated");
+  return !!result?.elevated;
+}
+
 export async function sidecarRestart(): Promise<void> {
   return invoke<void>("sidecar_restart");
 }

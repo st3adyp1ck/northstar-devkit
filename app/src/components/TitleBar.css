@@ -158,6 +158,25 @@
    grows to ~18px while the dot itself stays 6px, so it reads as a positive
    signal from the corner of your eye without becoming another 30px control
    competing with the buttons beside it. */
+
+/* The ADMIN badge renders ONLY while the app runs elevated - non-elevated
+   is the normal state and gets no furniture (same rule as the sidecar
+   dot). Amber, not red: Admin Mode is a deliberate choice with a real
+   blast radius, so it reads "be aware", not "something is wrong". */
+.devkit-elevated {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: var(--radius-pill);
+  border: 1px solid color-mix(in srgb, var(--signal-amber) 45%, transparent);
+  color: var(--signal-amber);
+  font-size: var(--text-2xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
 .devkit-sidecar {
   position: relative;
   display: flex;

@@ -29,12 +29,12 @@
           "requiresFile": null,
           "prompts": [
             {
-              "Max": 65535,
-              "InvalidMessage": "Invalid port number.",
-              "Name": "Port",
+              "Type": "Int",
               "Min": 1,
+              "Name": "Port",
+              "InvalidMessage": "Invalid port number.",
               "Prompt": "Enter port number",
-              "Type": "Int"
+              "Max": 65535
             }
           ],
           "staticArgs": {
@@ -52,12 +52,12 @@
           "requiresFile": null,
           "prompts": [
             {
-              "Max": 2147483647,
-              "InvalidMessage": "Invalid PID.",
-              "Name": "ProcessId",
+              "Type": "Int",
               "Min": 1,
+              "Name": "ProcessId",
+              "InvalidMessage": "Invalid PID.",
               "Prompt": "Enter PID to kill",
-              "Type": "Int"
+              "Max": 2147483647
             }
           ],
           "staticArgs": null
@@ -85,12 +85,12 @@
           "requiresFile": null,
           "prompts": [
             {
-              "Max": 65535,
-              "InvalidMessage": "Invalid port number.",
-              "Name": "Port",
+              "Type": "Int",
               "Min": 1,
+              "Name": "Port",
+              "InvalidMessage": "Invalid port number.",
               "Prompt": "Enter port number",
-              "Type": "Int"
+              "Max": 65535
             }
           ],
           "staticArgs": {
@@ -108,12 +108,12 @@
           "requiresFile": null,
           "prompts": [
             {
-              "Max": 65535,
-              "InvalidMessage": "Invalid port number.",
-              "Name": "Port",
+              "Type": "Int",
               "Min": 1,
+              "Name": "Port",
+              "InvalidMessage": "Invalid port number.",
               "Prompt": "Enter port number",
-              "Type": "Int"
+              "Max": 65535
             }
           ],
           "staticArgs": null
@@ -141,10 +141,10 @@
           "requiresFile": null,
           "prompts": [
             {
-              "Optional": true,
-              "Prompt": "Enter URL to test (blank = scan listening dev ports)",
               "Type": "String",
-              "Name": "Url"
+              "Optional": true,
+              "Name": "Url",
+              "Prompt": "Enter URL to test (blank = scan listening dev ports)"
             }
           ],
           "staticArgs": null
@@ -284,18 +284,18 @@
           "requiresFile": null,
           "prompts": [
             {
-              "Optional": true,
-              "Prompt": "Clear Turbopack cache too?",
               "Type": "YesNo",
-              "Name": "Turbo"
+              "Optional": true,
+              "Name": "Turbo",
+              "Prompt": "Clear Turbopack cache too?"
             },
             {
-              "Max": 65535,
-              "Name": "Port",
+              "Type": "Int",
               "Min": 1,
+              "Name": "Port",
               "Prompt": "Port (press Enter for default)",
               "Optional": true,
-              "Type": "Int"
+              "Max": 65535
             }
           ],
           "staticArgs": null
@@ -387,13 +387,13 @@
           "requiresFile": null,
           "prompts": [
             {
-              "Max": 720,
-              "InvalidMessage": "Invalid hours.",
-              "Name": "Hours",
+              "Type": "Int",
               "Min": 1,
+              "Name": "Hours",
+              "InvalidMessage": "Invalid hours.",
               "Prompt": "How many hours back? (blank = 24)",
               "Optional": true,
-              "Type": "Int"
+              "Max": 720
             }
           ],
           "staticArgs": null
@@ -448,7 +448,7 @@
       "group": "System & Workflow",
       "folder": "system",
       "name": "System Tools",
-      "description": "Edit the PATH environment variable, back up and restore User/Machine environment variables to/from a JSON file, and reload the current shell's environment without restarting the terminal. Most operations here read or write real environment state directly via [Environment]::GetEnvironmentVariable/SetEnvironmentVariable.",
+      "description": "Edit the PATH environment variable, back up and restore User/Machine environment variables to/from a JSON file, reload the current shell's environment without restarting the terminal, edit the hosts file, and turn DevKit's own Admin Mode (always-elevated launching via a scheduled task, no per-launch UAC) on and off. Most operations here read or write real environment state directly via [Environment]::GetEnvironmentVariable/SetEnvironmentVariable.",
       "items": [
         {
           "key": "1",
@@ -483,10 +483,10 @@
           "requiresProject": false,
           "projectArgName": null,
           "requiresFile": {
-            "Filter": "DevKit backups (*.json)|*.json|All files (*.*)|*.*",
+            "ParamName": "BackupFile",
             "Description": "Select an environment backup to restore",
             "TypePrompt": "Enter backup file path to restore",
-            "ParamName": "BackupFile"
+            "Filter": "DevKit backups (*.json)|*.json|All files (*.*)|*.*"
           },
           "prompts": null,
           "staticArgs": null
@@ -516,6 +516,32 @@
           "staticArgs": {
             "Show": true
           }
+        },
+        {
+          "key": "6",
+          "label": "Enable DevKit Admin Mode",
+          "script": "Set-DevKitAdminMode.ps1",
+          "help": "Makes DevKit launchable with full Administrator rights and NO per-launch UAC prompt, using a scheduled task that runs the app 'with highest privileges' - the same mechanism tools like MSI Afterburner use. One UAC consent when you run this is the only prompt the setup ever needs (Windows allows no way around that one, by design); when not already elevated, the script re-launches itself elevated once and waits for it to finish. It registers the 'NorthstarDevKit-Admin' task, writes a tiny hidden launcher, puts a 'DevKit (Admin)' shortcut on your Desktop and in Start Menu > Programs, and - if Start-with-Windows is on - moves it from the registry Run key onto the task as a logon trigger (Windows refuses to auto-start elevated apps from the Run key). Afterwards: exit DevKit from the tray, then relaunch via 'DevKit (Admin)' - the widget title bar shows an ADMIN badge when the app really is elevated, and admin-gated work (Close Out's Windows\\Temp + Windows Update cache, working-set trims of elevated processes) then runs with full rights. Everything is recorded in a state marker so item 7 reverses it exactly. Safety note: registers a persistent prompt-free elevation path for the app exe, and while elevated ALL DevKit surfaces run as Administrator (every tool and the embedded terminal) - gated by the shared Confirm-DevKitDestructiveAction prompt; the Control Center's caution dialog passes -Force for you once you confirm. Pass -DryRun from the command line to preview the plan without changing anything.",
+          "caution": true,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        },
+        {
+          "key": "7",
+          "label": "Disable DevKit Admin Mode",
+          "script": "Set-DevKitAdminMode.ps1",
+          "help": "Undoes item 6 completely: removes the 'NorthstarDevKit-Admin' scheduled task, deletes the hidden launcher and both 'DevKit (Admin)' shortcuts, restores Start-with-Windows to the registry Run key if Admin Mode had moved it (read back exactly from the state marker enable wrote), and deletes that marker. Uses the same one-time self-elevation flow when not already running as Administrator, and reports 'nothing to do' when Admin Mode is not enabled. Safety note: mutates real system state (scheduled task, shortcuts, registry Run key) - gated by the shared Confirm-DevKitDestructiveAction prompt; re-enabling with item 6 restores the feature.",
+          "caution": true,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": {
+            "Off": true
+          }
         }
       ]
     },
@@ -523,7 +549,7 @@
       "group": "System & Workflow",
       "folder": "workflow",
       "name": "Workflow Tools",
-      "description": "Everyday shortcuts scoped to a linked project: open it in VS Code or Cursor, open its Git remote (GitHub, GitLab, Bitbucket, Azure DevOps) in a browser, or copy a detected .env template into it. Each tool prompts you to pick a project first and runs with its default (non-interactive, non-dry-run) flags from this menu; less common options - recent-projects picker, Cursor preference, a specific remote/branch/PR/issues/actions page, interactive value prompts, dry run - are only available via direct command-line invocation.",
+      "description": "Everyday shortcuts, most of them scoped to a linked project: open it in VS Code or Cursor, open its Git remote (GitHub, GitLab, Bitbucket, Azure DevOps) in a browser, copy a detected .env template into it, or diff .env against that template. Two items need no project at all: the offline dev-text converter, and Close Out Session - the one-action end-of-day cleanup that stops dev processes, frees dev ports, clears temp/junk, and hands memory back to the OS, offered here in three strengths (item 6 default, item 7 dry-run preview, item 8 Deep with the Recycle Bin and package-cache opt-ins already on). Project-scoped tools prompt you to pick a project first and run with their default (non-interactive, non-dry-run) flags from this menu; less common options - recent-projects picker, Cursor preference, a specific remote/branch/PR/issues/actions page, interactive value prompts, and the less-everyday Close Out Session opt-in switches (Docker, database ports, -KillAnyPortOwner, a specific -ProjectPath) - are only available via direct command-line invocation.",
       "items": [
         {
           "key": "1",
@@ -584,6 +610,47 @@
           "requiresFile": null,
           "prompts": null,
           "staticArgs": null
+        },
+        {
+          "key": "6",
+          "label": "Close Out Session (End-of-Day Cleanup)",
+          "script": "Close-OutSession.ps1",
+          "help": "Ends a work session in one action, with no project selected and none needed. A default run stops every running node.exe, frees the common dev ports (1337, 3000-3003, 4200, 5000, 5173/5174, 5500, 8000, 8080/8081, 9000) but only when a recognized dev runtime (node, bun, deno, python, dotnet, java, php, ruby, go, ...) is holding them, deletes the CONTENTS of your user TEMP folder, and trims every accessible process's working set back to the OS via psapi's EmptyWorkingSet - a trim, not a kill, so nothing loses state. It streams a per-step trail and ends with a SUMMARY of what was stopped, what was freed, how much disk and memory came back, and anything skipped and why. Idempotent: run it twice and the second run reports 'nothing to do' for nearly every step. Safety note: this really does stop processes and delete files, so it is gated by the shared Confirm-DevKitDestructiveAction prompt - the Control Center's caution dialog passes -Force for you once you confirm, and a non-interactive run without -Force declines and changes nothing. What it will NOT do: touch source files, git working trees, uncommitted changes, .env files, node_modules, or build output; empty the Recycle Bin (opt in with -IncludeRecycleBin); prune anything in Docker (-IncludeDocker, and even then only stopped containers, dangling images, and build cache - never volumes, never tagged images); clean the package manager cache (-IncludePackageCache); free the database ports 3306/5432/6379/27017 (-IncludeDatabasePorts); stop a port owner that is not a recognized dev runtime (-KillAnyPortOwner); clear a project's framework caches (-ProjectPath, which clears only .next, node_modules\\.cache, node_modules\\.vite and .turbo - never node_modules itself, never dist); or stop DevKit's own process tree, ever. Windows\\Temp and the Windows Update download cache are only cleared in an elevated session and are skipped with a notice otherwise. Run item 7 (the dry-run preview) first if you want to see exactly what a real run would touch.",
+          "caution": true,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": null
+        },
+        {
+          "key": "7",
+          "label": "Close Out Session - Dry Run Preview",
+          "script": "Close-OutSession.ps1",
+          "help": "The same end-of-day cleanup as item 6, in preview: it reports exactly which node processes it would stop, which dev ports it would free (and who is holding the ones it would leave alone), and how much temp/junk it would delete, then stops without stopping, deleting, or changing anything at all. Fully read-only - it only ever measures and lists, the dry-run flag overrides every other switch including -Force, and it never prompts. Use this first to decide whether to run the real thing.",
+          "caution": false,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": {
+            "DryRun": true
+          }
+        },
+        {
+          "key": "8",
+          "label": "Close Out Session - Deep (Recycle Bin + Package Cache)",
+          "script": "Close-OutSession.ps1",
+          "help": "The same one-action end-of-day cleanup as item 6 with the two everyday opt-ins already on: stops every running node.exe, frees the common dev ports held by recognized dev runtimes, deletes the CONTENTS of your user TEMP folder (plus Windows\\Temp and the Windows Update cache when elevated), trims every accessible process's working set - and additionally EMPTIES THE RECYCLE BIN (permanent - a file you deleted but might still want back is gone for good) and cleans the detected package manager's global cache (npm cache clean --force / pnpm store prune / yarn cache clean --all / bun pm cache rm - safe, but the next install in any project is slower while the cache refills). It still will NOT clear a project's framework caches (that needs -ProjectPath from the command line; the widget's Deep button adds the active project itself), prune Docker, free the database ports 3306/5432/6379/27017, or stop a port owner that is not a recognized dev runtime. Safety note: this really does stop processes, permanently empties the Recycle Bin, and deletes files, so it is gated by the shared Confirm-DevKitDestructiveAction prompt - the Control Center's caution dialog passes -Force for you once you confirm, and a non-interactive run without -Force declines and changes nothing.",
+          "caution": true,
+          "requiresProject": false,
+          "projectArgName": null,
+          "requiresFile": null,
+          "prompts": null,
+          "staticArgs": {
+            "IncludeRecycleBin": true,
+            "IncludePackageCache": true
+          }
         }
       ]
     },

@@ -493,8 +493,8 @@ Describe "workflow/_module.psd1 registration" {
         @($script:ParseErrors).Count | Should -Be 0
     }
 
-    It "registers the tool twice: the real run and the dry-run preview" {
-        $script:CloseOutItems.Count | Should -Be 2
+    It "registers the tool three times: the real run, the dry-run preview, and the deep variant" {
+        $script:CloseOutItems.Count | Should -Be 3
     }
 
     It "gives every item a unique key within the module" {
@@ -518,6 +518,17 @@ Describe "workflow/_module.psd1 registration" {
         $preview | Should -Not -BeNullOrEmpty
         $preview.StaticArgs.DryRun | Should -Be $true
         $preview.Help | Should -Not -Match 'Safety note:'
+    }
+
+    It "flags the deep variant as caution and turns on exactly its two opt-in switches" {
+        $deep = @($script:CloseOutItems | Where-Object { $_.StaticArgs -and $_.StaticArgs.ContainsKey('IncludeRecycleBin') })
+        $deep.Count | Should -Be 1
+        $deep[0].Help | Should -Match 'Safety note:'
+        $deep[0].StaticArgs.IncludeRecycleBin | Should -Be $true
+        $deep[0].StaticArgs.IncludePackageCache | Should -Be $true
+        # The deep variant must not sneak in the dry-run switch - it is a
+        # real run with extra scope, not a second preview.
+        $deep[0].StaticArgs.ContainsKey('DryRun') | Should -Be $false
     }
 
     It "declares -Force, which is what lets the Control Center's confirm dialog run it" {
