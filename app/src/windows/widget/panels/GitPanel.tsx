@@ -100,9 +100,17 @@ export function GitPanel() {
   const [statusIsError, setStatusIsError] = useState(false);
   const [showDirty, setShowDirty] = useState(false);
 
+  // The overview poll wants the open-PR head SHAs (the backend grows its
+  // log window until every one fits - see -ExtraTips in
+  // Get-DevKitRepoOverview), but those come from the gh poll declared
+  // BELOW, whose own enabled flag depends on this poll's data - the two
+  // cannot simply swap places. The ref hands each render the PREVIOUS
+  // render's tips: at worst one render of lag, and the queryFn closure
+  // always sees the latest params on the next 6s tick regardless.
+  const prTipsRef = useRef<string[]>([]);
   const overview = usePolledRpc<GitOverview>(
     "git.overview",
-    path ? { path, includeGraph: true } : undefined,
+    path ? { path, includeGraph: true, extraTips: prTipsRef.current } : undefined,
     OVERVIEW_POLL_MS,
     !!path && onScreen,
   );
@@ -121,6 +129,11 @@ export function GitPanel() {
   const lists = useGitHubLists(path, onScreen && !notRepoReason);
   const { prs, issues, prRows, issueRows } = lists;
 
+  // Feeds NEXT render's git.overview params - see prTipsRef above. Guarded
+  // so the write only happens when the tip set actually changed.
+  const prTips = prRows.map((pr) => pr.headRefOid).filter((oid): oid is string => typeof oid === "string" && oid.length > 0);
+  if (prTipsRef.current.join() !== prTips.join()) prTipsRef.current = prTips;
+
   // Lane hues rotate off the LIVE accent so they stay distinguishable in all
   // ten themes; read from settings rather than the DOM - see prLaneColors.ts.
   const appTheme = useSettingsStore((s) => s.settings?.preferences.appTheme);
@@ -130,10 +143,10 @@ export function GitPanel() {
   const prLanes = useMemo(() => buildPrLanes(graph, prRows, accentHex), [graph, prRows, accentHex]);
   /**
    * A PR carries its lane color into the PR list only if the Graph tab has
-   * SOMETHING of it - a ribbon along its commits, an arc into its base, or
-   * at least a legend chip standing for one. A PR with neither end in the
-   * log gets no color, and its row shows an empty channel instead: the list
-   * must not imply a lane the graph cannot show.
+   * SOMETHING of it - a pill on its head row, a ribbon along its commits, or
+   * at least a base lane it would land on. A PR with neither end in the log
+   * gets no color, and its row shows an empty channel instead: the list must
+   * not imply a lane the graph cannot show.
    */
   const drawnLaneColors = useMemo(
     () =>

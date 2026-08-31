@@ -75,6 +75,8 @@ export function TerminalView({ cwd, className }: TerminalViewProps) {
 
   useEffect(() => {
     let disposed = false;
+    /** True once xterm is open and the session exists (or failed trying). */
+    let started = false;
     let unlisten: UnlistenFn | null = null;
     let resizeObserver: ResizeObserver | null = null;
     let sessionId: string | null = null;
@@ -95,9 +97,20 @@ export function TerminalView({ cwd, className }: TerminalViewProps) {
     term.loadAddon(fitAddon);
 
     const host = hostRef.current;
-    if (host) {
-      term.open(host);
-      fitAddon.fit();
+
+    // fit() is only ever called through here. Both guards are load-bearing:
+    // a zero-size host computes 0 cols, and on a terminal whose renderer has
+    // not initialized yet (exactly the hidden-mount case below) fit() throws
+    // xterm's "Cannot read properties of undefined (reading 'dimensions')" -
+    // the TypeError this component used to log on every tray open.
+    function safeFit(): boolean {
+      if (disposed || !host || host.clientWidth === 0 || host.clientHeight === 0) return false;
+      try {
+        fitAddon.fit();
+        return true;
+      } catch {
+        return false;
+      }
     }
 
     // Coalesce resizes. A ConPTY resize makes the shell repaint the ENTIRE
@@ -117,7 +130,7 @@ export function TerminalView({ cwd, className }: TerminalViewProps) {
       if (resizeTimer) clearTimeout(resizeTimer);
       resizeTimer = setTimeout(() => {
         resizeTimer = null;
-        fitAddon.fit();
+        if (!safeFit()) return;
         if (term.cols === sentCols && term.rows === sentRows) return;
         sentCols = term.cols;
         sentRows = term.rows;
@@ -125,8 +138,23 @@ export function TerminalView({ cwd, className }: TerminalViewProps) {
       }, 90);
     }
 
-    void (async () => {
+    /**
+     * Opens xterm and spawns the session - ONCE, and only once the host has
+     * real dimensions. The flyout tray keeps panes mounted while hidden
+     * (see FlyoutPaneStack), so this component mounts against a 0x0 host;
+     * opening and spawning then is what produced a blank terminal with a
+     * dead cursor that only a manual kill+restart (a remount while VISIBLE)
+     * ever recovered from. Starting late costs nothing: there is no session
+     * output to miss before the session exists.
+     */
+    async function start() {
+      if (started || disposed || !host) return;
+      if (host.clientWidth === 0 || host.clientHeight === 0) return;
+      started = true;
       try {
+        term.open(host);
+        safeFit();
+
         const id = await invoke<string>("terminal_spawn", { cwd: cwd ?? null });
         if (disposed) {
           // Unmounted while the spawn was in flight - clean up the
@@ -156,12 +184,18 @@ export function TerminalView({ cwd, className }: TerminalViewProps) {
           setStatus("error");
         }
       }
-    })();
+    }
 
     if (host) {
       resizeObserver = new ResizeObserver(() => {
-        if (sessionId) pushResize(sessionId);
-        else fitAddon.fit();
+        if (!started) {
+          // The hidden-tray case: the first non-zero tick starts the session.
+          void start();
+        } else if (sessionId) {
+          pushResize(sessionId);
+        } else {
+          safeFit();
+        }
       });
       resizeObserver.observe(host);
     }
@@ -169,6 +203,9 @@ export function TerminalView({ cwd, className }: TerminalViewProps) {
       if (sessionId) pushResize(sessionId);
     };
     window.addEventListener("resize", onWindowResize);
+
+    // The common case (already laid out and visible at mount) starts now.
+    void start();
 
     return () => {
       disposed = true;

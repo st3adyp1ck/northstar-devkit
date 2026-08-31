@@ -32,6 +32,7 @@ import { NotesOnDeckPanel } from "./panels/NotesOnDeckPanel";
 import { FilesPanel } from "./panels/FilesPanel";
 import { QuickActionsPanel } from "./panels/QuickActionsPanel";
 import { TerminalPanel } from "./panels/TerminalPanel";
+import { ControlCenterApp } from "../control-center/ControlCenterApp";
 import { staggerContainerVariants, staggerItemVariants, slideItemVariants } from "./panels/motion";
 import "./WidgetApp.css";
 
@@ -72,6 +73,20 @@ const TRAYS: ReadonlyArray<{
 function clampFlyoutWidth(value: number | undefined, fallback: number): number {
   const width = typeof value === "number" && Number.isFinite(value) ? value : fallback;
   return Math.round(Math.min(PANE_MAX_WIDTH, Math.max(PANE_MIN_WIDTH, width)));
+}
+
+/**
+ * "The rest of the remaining screen" for the Control Center tray: the
+ * monitor's available width minus the sidebar's own base width (Rust reports
+ * that in logical px via devkit://widget-geometry, and screen.availWidth
+ * speaks the same space). 520 is the don't-know-yet fallback - the geometry
+ * pull lands a beat after mount. Rust's derive_rect clips the request to the
+ * work area either way, so this can never overshoot.
+ */
+function remainingScreenWidth(sidebarBaseWidth: number | null): number {
+  const available = typeof window !== "undefined" ? (window.screen?.availWidth ?? 0) : 0;
+  if (available <= 0 || sidebarBaseWidth === null || sidebarBaseWidth <= 0) return 520;
+  return Math.max(PANE_MIN_WIDTH, Math.round(available - sidebarBaseWidth));
 }
 
 /** Rail geometry from settings, kept inside what the strip can actually draw. */
@@ -138,6 +153,7 @@ export function WidgetApp() {
   const gitFlyoutWidth = useSettingsStore((s) => s.settings?.preferences.gitFlyoutWidth);
   const notesFlyoutWidth = useSettingsStore((s) => s.settings?.preferences.notesFlyoutWidth);
   const defaultFlyoutWidth = useSettingsStore((s) => s.settings?.preferences.flyoutWidth);
+  const ccFlyoutWidth = useSettingsStore((s) => s.settings?.preferences.controlCenterFlyoutWidth);
   const iconThemePref = useSettingsStore((s) => s.settings?.preferences.iconTheme);
   const railWidthPref = useSettingsStore((s) => s.settings?.preferences.railWidth);
   const railIconSizePref = useSettingsStore((s) => s.settings?.preferences.railIconSize);
@@ -167,16 +183,27 @@ export function WidgetApp() {
     (id: string) => {
       if (id === "git") return clampFlyoutWidth(gitFlyoutWidth, 300);
       if (id === "notes") return clampFlyoutWidth(notesFlyoutWidth, 300);
+      if (id === "control-center") {
+        // Fill the rest of the screen by default (a null pref); a resize
+        // drag persists a real number and that choice sticks. NOT
+        // clampFlyoutWidth: this tray's drag ceiling is the screen itself
+        // (see FlyoutPaneStack's resizeBounds), so a fill-width drag would
+        // outlive the 900px panel cap only to be snapped back here.
+        if (typeof ccFlyoutWidth === "number" && ccFlyoutWidth > 0) {
+          return Math.max(PANE_MIN_WIDTH, Math.round(ccFlyoutWidth));
+        }
+        return remainingScreenWidth(sidebarBaseWidthRef.current);
+      }
       return clampFlyoutWidth(defaultFlyoutWidth, 380);
     },
-    [gitFlyoutWidth, notesFlyoutWidth, defaultFlyoutWidth],
+    [gitFlyoutWidth, notesFlyoutWidth, ccFlyoutWidth, defaultFlyoutWidth],
   );
 
   const flyout = useWidgetFlyout({ side, widthFor, mainRef });
 
   const flyoutPanes = useMemo<FlyoutPaneDef[]>(
-    () =>
-      TRAYS.map((tray) => ({
+    () => [
+      ...TRAYS.map((tray) => ({
         id: tray.id,
         label: tray.label,
         // The pane header is chrome, not rail furniture: it follows the icon
@@ -186,6 +213,17 @@ export function WidgetApp() {
         content: tray.content,
         fill: tray.fill,
       })),
+      // The Control Center is a tray too - the rail's DEVKIT brand plate is
+      // its tab, which is why it is NOT in flyoutTabs. Embedded mode, filling
+      // the pane's height like the terminal does.
+      {
+        id: "control-center",
+        label: "Control Center",
+        icon: <RailIcon name="devkit" theme={iconTheme} size={15} />,
+        content: <ControlCenterApp embedded />,
+        fill: true,
+      },
+    ],
     [iconTheme],
   );
   const flyoutTabs = useMemo<FlyoutTabDef[]>(
@@ -193,10 +231,21 @@ export function WidgetApp() {
     [],
   );
 
+  // The floating titlebar DEVKIT button's way in (there is no rail to hold a
+  // tray when the widget isn't docked). Docked, the brand plate calls
+  // toggleControlCenterTray instead - see the rail wiring below.
   const openControlCenter = useCallback(() => {
     playSound("click");
     void showWindow("control-center");
   }, []);
+
+  // Docked, the brand plate is the Control Center TRAY's tab: it slides out
+  // in the same window like every other tray, instead of opening the
+  // standalone window.
+  const toggleControlCenterTray = useCallback(() => {
+    playSound("click");
+    flyout.toggle("control-center");
+  }, [flyout]);
 
   // ---------- persistence ----------
   // Both of these are patch-only writes (see useSettingsStore.update): only
@@ -225,7 +274,9 @@ export function WidgetApp() {
           ? { gitFlyoutWidth: width }
           : openTrayId === "notes"
             ? { notesFlyoutWidth: width }
-            : { flyoutWidth: width };
+            : openTrayId === "control-center"
+              ? { controlCenterFlyoutWidth: width }
+              : { flyoutWidth: width };
       if (paneWidthTimer.current) clearTimeout(paneWidthTimer.current);
       paneWidthTimer.current = setTimeout(() => {
         paneWidthTimer.current = null;
@@ -239,6 +290,8 @@ export function WidgetApp() {
   // a settings write per frame.
   const savedWidthRef = useRef<number | null>(null);
   if (typeof widgetSavedWidth === "number") savedWidthRef.current = widgetSavedWidth;
+  /** The sidebar's own logical width, tray excluded - what "fill the REST of the screen" is measured against. */
+  const sidebarBaseWidthRef = useRef<number | null>(null);
 
   // ---------- the geometry round trip ----------
   //
@@ -285,6 +338,9 @@ export function WidgetApp() {
       const min = typeof geom.minWidth === "number" ? geom.minWidth : 1;
       const max = typeof geom.maxWidth === "number" ? geom.maxWidth : Number.MAX_SAFE_INTEGER;
       if (width < min || width > max) return;
+      // Also the exact figure "fill the REST of the screen" is measured
+      // against in widthFor for the Control Center tray.
+      sidebarBaseWidthRef.current = width;
       if (width === savedWidthRef.current) return;
       savedWidthRef.current = width;
       // Patch-only write (see useSettingsStore.update): nothing else in
@@ -505,7 +561,13 @@ export function WidgetApp() {
                   <QuickActionsPanel />
                 </motion.div>
                 <motion.div variants={item}>
-                  <NodePortsPanel />
+                  {/* Collapsed by default, like the terminal: lazyMount means
+                      the panel (and its process/port polls) costs nothing
+                      until first opened, then stays mounted so an in-flight
+                      tool run can never be torn down by toggling it shut. */}
+                  <Expander title="Node & Ports" lazyMount>
+                    <NodePortsPanel />
+                  </Expander>
                 </motion.div>
                 {/* Docked, these four live in trays instead (below). */}
                 {!docked && (
@@ -563,8 +625,9 @@ export function WidgetApp() {
                   side={side}
                   iconTheme={iconTheme}
                   onSelect={flyout.toggle}
-                  onBrand={openControlCenter}
-                  brandTitle="Open the DevKit Control Center"
+                  onBrand={toggleControlCenterTray}
+                  brandActive={flyout.activeId === "control-center"}
+                  brandTitle="Open the Control Center tray"
                 />
                 <FlyoutPaneStack
                   panes={flyoutPanes}

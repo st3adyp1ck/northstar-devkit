@@ -325,6 +325,52 @@ Describe "ConvertTo-DevKitGitGraphLayout" {
     }
 }
 
+Describe "Test-DevKitGitAutoFetchDue" {
+
+    BeforeAll {
+        $script:now = [DateTime]::new(2026, 8, 30, 12, 0, 0, [DateTimeKind]::Utc)
+    }
+
+    It "is due when the repo was never fetched" {
+        Test-DevKitGitAutoFetchDue -LastAttemptUtc $null -NowUtc $script:now | Should -BeTrue
+    }
+
+    It "is due once the interval has elapsed" {
+        $last = $script:now.AddSeconds(-61)
+        Test-DevKitGitAutoFetchDue -LastAttemptUtc $last -NowUtc $script:now -MinIntervalSeconds 60 | Should -BeTrue
+    }
+
+    It "is not due inside the interval" {
+        $last = $script:now.AddSeconds(-30)
+        Test-DevKitGitAutoFetchDue -LastAttemptUtc $last -NowUtc $script:now -MinIntervalSeconds 60 | Should -BeFalse
+    }
+
+    It "is due when the stamp is in the future (clock skew must not starve fetches)" {
+        $last = $script:now.AddMinutes(5)
+        Test-DevKitGitAutoFetchDue -LastAttemptUtc $last -NowUtc $script:now -MinIntervalSeconds 60 | Should -BeTrue
+    }
+}
+
+Describe "Test-DevKitGitSha" {
+
+    It "accepts a full 40-hex id, either case" {
+        Test-DevKitGitSha -Value ('a' * 40) | Should -BeTrue
+        Test-DevKitGitSha -Value ('A1b2' * 10) | Should -BeTrue
+    }
+
+    It "rejects short ids, non-hex, and empty values" {
+        Test-DevKitGitSha -Value 'a54151d' | Should -BeFalse
+        Test-DevKitGitSha -Value ('g' * 40) | Should -BeFalse
+        Test-DevKitGitSha -Value '' | Should -BeFalse
+        Test-DevKitGitSha -Value $null | Should -BeFalse
+    }
+
+    It "rejects anything with extra characters around a valid id" {
+        Test-DevKitGitSha -Value ("x" + ('a' * 40)) | Should -BeFalse
+        Test-DevKitGitSha -Value (('a' * 40) + ' ') | Should -BeFalse
+    }
+}
+
 
 Describe "ConvertFrom-DevKitGitShow" {
 

@@ -350,6 +350,7 @@ export function QuickActionsPanel() {
                 disabled={!!runId}
                 loading={mine && runningLabel === DOCTOR.label}
                 onClick={runDoctor}
+                title="Runs DevKit-Doctor.ps1 - checks every tool, runtime, and config it can see. Reads only, changes nothing."
               >
                 <span className="quick-actions-panel__big-text">
                   <span className="quick-actions-panel__big-label">{DOCTOR.label}</span>
@@ -364,6 +365,7 @@ export function QuickActionsPanel() {
                   disabled={!!runId}
                   loading={mine && runningLabel === CLOSE_OUT.label}
                   onClick={runCloseOut}
+                  title="Runs Close-OutSession.ps1 - stops dev processes, frees their ports, clears temp/junk, and trims memory. Always asks for confirmation first."
                 >
                   <span className="quick-actions-panel__big-text">
                     <span className="quick-actions-panel__big-label">{CLOSE_OUT.label}</span>

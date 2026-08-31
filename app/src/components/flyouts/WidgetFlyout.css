@@ -195,6 +195,24 @@
   box-shadow: var(--shadow-inset);
 }
 
+/* The plate is the Control Center tray's tab, so it lights like one while
+   its tray is open: the hover's accent wash, held, with the seam lit steady
+   and the legend picked out in accent. */
+.flyout-rail__brand--active {
+  color: var(--accent-strong);
+  background:
+    linear-gradient(to top, color-mix(in srgb, var(--accent) 32%, transparent), transparent 72%),
+    color-mix(in srgb, var(--surface-raised) 70%, var(--accent));
+}
+
+.flyout-rail__brand--active .flyout-rail__brand-seam {
+  opacity: 1;
+}
+
+.flyout-rail__brand--active .flyout-rail__brand-label {
+  color: var(--accent-strong);
+}
+
 /* The lit edge the plate is seated on. */
 .flyout-rail__brand-seam {
   position: absolute;

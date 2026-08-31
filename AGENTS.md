@@ -540,7 +540,19 @@ reliably drive `document.visibilityState`, which the frontend's
 
 - **`widget`** (`app/src/windows/widget/WidgetApp.tsx`) - the always-on
   companion, DevKit's main face. Panels top to bottom: Gauges
-  (CPU/Mem/GPU/Disk), Node/Ports, Git (a gradient-lane commit graph),
+  (CPU/Mem/GPU/Disk), Node/Ports (collapsed by default, like the
+  embedded terminal - `lazyMount`, so its polls cost nothing until first
+  opened), Git (a gradient-lane commit graph with
+  open-PR pills on the head commits they point at and ribbons tracing each
+  PR's commits on hover - PR identity lives IN the chart, never in a
+  separate legend/band above it; matching is hash-exact via gh's
+  `headRefOid` with a branch-name fallback, see `git/prLanes.ts`; and the
+  overview auto-fetches origin - throttled to one prompt-free attempt per
+  minute per repo, `Invoke-DevKitGitAutoFetch` - so bot-pushed branches
+  like dependabot's reach the log without a manual Fetch, and the log
+  window grows from 40 up to 400 commits until every open-PR head fits
+  (`-ExtraTips` from the gh poll), so a busy trunk can't push PRs out of
+  the chart),
   GitHub (PRs/Issues), MCP status, Notes/On-Deck, Files, Quick Actions,
   and a collapsed-by-default embedded terminal (see below). Single-
   instance via `tauri-plugin-single-instance` (a second launch surfaces
@@ -561,7 +573,20 @@ reliably drive `document.visibilityState`, which the frontend's
   `prompts`/`requiresProject`/`staticArgs` (mirroring
   `Read-DevKitTypedValue`'s validation contract exactly - see its own
   code comments) and runs the tool via the headless `tool.run` path,
-  streaming its output live.
+  streaming its output live. The SAME component also mounts inside the
+  docked widget as a slide-out flyout tray via
+  `<ControlCenterApp embedded />` (`WidgetApp.tsx`'s `flyoutPanes`): the
+  rail's DEVKIT brand plate is its tab, embedded mode drops the TitleBar
+  (a pane has no window chrome), the ProjectPicker (the widget's own
+  picker shares the store), and the `PALETTE_TOOL_EVENT` listener (the
+  standalone window stays the command palette's tool-run target - two
+  mounted instances consuming one event would open the same dialog
+  twice). On open the tray fills the REST of the screen (the sidebar's
+  base width off `screen.availWidth`; Rust's `derive_rect` clips the
+  request to the work area, so it can never overshoot), and its drag
+  ceiling is the screen itself rather than the 900px panel cap. A
+  resize drag persists `controlCenterFlyoutWidth` (null = fill,
+  beside `gitFlyoutWidth`/`notesFlyoutWidth`/`flyoutWidth`).
 
 Both windows go through the **single generic `rpc_call` Tauri command**
 (`commands.rs`) for everything sidecar-related - `host.call(&method,

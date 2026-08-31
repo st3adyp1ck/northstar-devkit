@@ -251,6 +251,7 @@ export function NodePortsPanel() {
             disabled={!!runId || (nodeCountIsLive && processes.length === 0)}
             loading={mine && runningLabel === KILL_ALL_NODE.label}
             onClick={killAllNode}
+            title="Ends EVERY running node.exe at once, with no per-process safety read - the X on a row is the careful version of this."
           >
             Kill all node{nodeCountIsLive && processes.length > 0 ? ` (${processes.length})` : ""}
           </Button>
@@ -288,6 +289,7 @@ export function NodePortsPanel() {
             className="node-ports-panel__action-btn"
             disabled={!!runId || !portValid}
             loading={mine && runningLabel === KILL_PORT.label}
+            title="Ends whatever process is currently listening on the port in the field, after re-checking who owns it."
           >
             Kill port
           </Button>

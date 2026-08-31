@@ -112,10 +112,17 @@ export function FlyoutPaneStack({
     if (host && stack && shell && typeof window !== "undefined") {
       const chrome = Math.max(0, shell.getBoundingClientRect().width - stack.getBoundingClientRect().width);
       const available = window.screen?.availWidth ?? 0;
-      if (available > 0) max = Math.min(max, Math.round(available - chrome));
+      if (available > 0) {
+        const screenBound = Math.round(available - chrome);
+        // The Control Center tray opens at fill-the-remaining-screen width,
+        // which is legitimately PAST the 900px panel cap on big monitors.
+        // Its drag ceiling is the screen itself, or the first drag touch
+        // would snap it straight back down to the cap.
+        max = activeId === "control-center" ? screenBound : Math.min(max, screenBound);
+      }
     }
     return { min: PANE_MIN_WIDTH, max: Math.max(PANE_MIN_WIDTH, max) };
-  }, []);
+  }, [activeId]);
 
   const flushDraft = useCallback(
     (commit: boolean) => {

@@ -140,9 +140,16 @@ export function Gauge({
         </span>
       </span>
       <div className="devkit-gauge__label">{label}</div>
-      {sub && <div className="devkit-gauge__sub">{sub}</div>}
-      {history && (
-        <span className="devkit-gauge__spark">
+      {/* The sub and spark slots are ALWAYS rendered, with or without
+          content: a line that only exists when it has something to say
+          moves everything below it every time a reading appears, wraps, or
+          disappears - which is exactly the up-and-down bounce this fixes.
+          Fixed slots keep all four gauges pixel-identical in height, so the
+          sparklines share one baseline and Disk (no history) still ends on
+          the same bottom edge. */}
+      <div className="devkit-gauge__sub">{sub ?? ""}</div>
+      <span className="devkit-gauge__spark">
+        {history && (
           <Sparkline
             values={history}
             capacity={historyCapacity}
@@ -150,8 +157,8 @@ export function Gauge({
             height={28}
             ariaLabel={`${label} recent history`}
           />
-        </span>
-      )}
+        )}
+      </span>
     </button>
   );
 }

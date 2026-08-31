@@ -367,3 +367,45 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+
+/* ---------- embedded (flyout tray) mode ----------
+   The same app mounted inside the docked widget's flyout pane via
+   <ControlCenterApp embedded /> (WidgetApp.tsx's flyoutPanes). The pane
+   supplies the frame, so the window-level radius/border/vh-height go away;
+   the nav column becomes a horizontal chip strip; the grid's own auto-fill
+   takes the cards to one column at tray width with no extra rules. */
+.control-center--embedded {
+  height: 100%;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+
+.control-center--embedded .control-center__chrome {
+  max-width: none;
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--surface-border);
+}
+
+.control-center--embedded .control-center__search {
+  max-width: none;
+}
+
+.control-center--embedded .control-center__body {
+  flex-direction: column;
+}
+
+.control-center--embedded .control-center__nav {
+  width: auto;
+  flex-direction: row;
+  overflow-x: auto;
+  border-right: none;
+  border-bottom: 1px solid var(--surface-border);
+  padding: var(--space-2);
+  gap: var(--space-1);
+  flex-shrink: 0;
+}
+
+.control-center--embedded .control-center__nav-label {
+  white-space: nowrap;
+}

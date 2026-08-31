@@ -78,7 +78,7 @@ function EmptyState({ icon, title, description, action, tone = "default" }: Empt
   );
 }
 
-export function ControlCenterApp() {
+export function ControlCenterApp({ embedded = false }: { embedded?: boolean }) {
   useSyncAnimationsAttribute();
   const enableAnimations = useSettingsStore((s) => s.settings?.preferences.enableAnimations);
   const {
@@ -115,6 +115,10 @@ export function ControlCenterApp() {
    * makes the palette's deliberate double-emit safe.
    */
   useEffect(() => {
+    // The standalone window stays the command palette's tool-run target.
+    // With BOTH instances listening (the tray pane plus the hidden - not
+    // destroyed - window), one event would open the same dialog twice.
+    if (embedded) return;
     let unlisten: UnlistenFn | undefined;
     let cancelled = false;
     listen<PaletteToolRequest>(PALETTE_TOOL_EVENT, (e) => requestTool(e.payload))
@@ -193,34 +197,50 @@ export function ControlCenterApp() {
     // doesn't already branch on reducedMotion itself.
     <MotionConfig reducedMotion={enableAnimations === false ? "always" : "never"}>
       <ConfirmDialogHost>
-        <div className="control-center">
-          <TitleBar
-            title="DevKit Control Center"
-            showMaximize
-            actions={
-              <button
-                type="button"
-                className="control-center__palette-btn devkit-no-drag"
-                title="Command palette (Ctrl+K)"
-                aria-label="Open command palette"
-                onClick={openPalette}
-              >
-                <kbd>Ctrl</kbd>
-                <kbd>K</kbd>
-              </button>
-            }
-          >
-            {/*
-              The project picker lives in this window's chrome now, not just
-              the widget's. Each Tauri window is its own webview with its own
-              zustand stores, so without a picker here the Control Center's
-              project store stayed empty forever and ToolRunDialog's
-              `requiresProject && !active` check hard-disabled Run on every
-              project-scoped tool in the catalog - while telling the user to
-              go pick a project they had, in fact, already picked.
-            */}
-            <div className="control-center__chrome">
-              <ProjectPicker className="devkit-project-picker--chrome" />
+        <div className={clsx("control-center", embedded && "control-center--embedded")}>
+          {!embedded && (
+            <TitleBar
+              title="DevKit Control Center"
+              showMaximize
+              actions={
+                <button
+                  type="button"
+                  className="control-center__palette-btn devkit-no-drag"
+                  title="Command palette (Ctrl+K)"
+                  aria-label="Open command palette"
+                  onClick={openPalette}
+                >
+                  <kbd>Ctrl</kbd>
+                  <kbd>K</kbd>
+                </button>
+              }
+            >
+              {/*
+                The project picker lives in this window's chrome now, not just
+                the widget's. Each Tauri window is its own webview with its own
+                zustand stores, so without a picker here the Control Center's
+                project store stayed empty forever and ToolRunDialog's
+                `requiresProject && !active` check hard-disabled Run on every
+                project-scoped tool in the catalog - while telling the user to
+                go pick a project they had, in fact, already picked.
+              */}
+              <div className="control-center__chrome">
+                <ProjectPicker className="devkit-project-picker--chrome" />
+                <input
+                  className="control-center__search"
+                  placeholder="Search tools... (name, description)"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                />
+              </div>
+            </TitleBar>
+          )}
+          {embedded && (
+            // Tray mode: no TitleBar (a pane has no window chrome to drag or
+            // close), no ProjectPicker (the widget's own picker shares this
+            // window's store, so ToolRunDialog's project gating is already
+            // driven), no palette button (the widget has its own Ctrl+K).
+            <div className="control-center__chrome control-center__chrome--embedded">
               <input
                 className="control-center__search"
                 placeholder="Search tools... (name, description)"
@@ -228,7 +248,7 @@ export function ControlCenterApp() {
                 onChange={(e) => setSearch(e.target.value)}
               />
             </div>
-          </TitleBar>
+          )}
           <div className="control-center__body">
             <nav className="control-center__nav">
               <button

@@ -335,6 +335,9 @@ $script:DevKitBenignSidecarPatterns = @(
     '^\[devkit-rpc\] draining lanes\b'
     '^\[devkit-rpc\] shutdown complete\b'
     '^\[devkit-rpc\] stdin EOF\b'
+    # The deliberate stdin detach in Invoke-DevKitRpc.ps1 (the 25s spawn-stall
+    # fix) reports success at every startup - lifecycle chatter, not a fault.
+    '^\[devkit-rpc\] child stdin detached\b'
     '^\[devkit-rpc\]\[[a-z]+\] ready after\b'
 )
 

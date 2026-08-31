@@ -1698,17 +1698,113 @@ function ConvertFrom-DevKitGitStatusOutput {
     return ,$files
 }
 
+# ==================== THROTTLED BACKGROUND FETCH ====================
+# Why this exists: the graph is built from 'git log --all' over the LOCAL
+# object database, and remote-tracking refs only advance when something
+# fetches. On a repo whose PR branches are pushed by bots (dependabot) and
+# where nobody runs 'git fetch' by hand, every open PR is invisible to the
+# log - no lane, no pill, no ribbon, and the graph reads as a flat line on a
+# repo that actually has ten branches in flight. A throttled automatic fetch
+# keeps the picture honest without making the user reach for Fetch first.
+
+# Repo path (lowercased) -> UTC of the last ATTEMPT. The slow lane is the
+# only caller, so no cross-lane locking is needed.
+$script:DevKitGitAutoFetchLastAttempt = @{}
+
+function Test-DevKitGitAutoFetchDue {
+    <#
+    .SYNOPSIS
+        Whether a throttled background fetch is due. Pure - the decision is
+        unit-tested; the side effects live in Invoke-DevKitGitAutoFetch.
+    .DESCRIPTION
+        Due when there is no recorded attempt, when the interval has
+        elapsed, or when the stamp is in the FUTURE (clock skew - fetching
+        again is cheap, suppressing fetches for the whole skew is not).
+    #>
+    param(
+        [AllowNull()]$LastAttemptUtc = $null,
+        [Parameter(Mandatory = $true)]$NowUtc,
+        [int]$MinIntervalSeconds = 60
+    )
+    if ($null -eq $LastAttemptUtc) { return $true }
+    $elapsed = ($NowUtc - $LastAttemptUtc).TotalSeconds
+    if ($elapsed -lt 0) { return $true }
+    return ($elapsed -ge $MinIntervalSeconds)
+}
+
+function Invoke-DevKitGitAutoFetch {
+    <#
+    .SYNOPSIS
+        'git fetch --prune origin', throttled to at most one attempt per
+        repo per MinIntervalSeconds. Never throws and never prompts.
+    .DESCRIPTION
+        GIT_TERMINAL_PROMPT=0 is the load-bearing detail: a background poll
+        has no terminal, so a credential ask would hang the sidecar's slow
+        lane forever - the fetch must fail fast instead and leave the graph
+        exactly as informative as it was without one. The attempt is stamped
+        BEFORE running so a remote that always fails (offline, private repo
+        without stored credentials) is not retried on every 6-second poll.
+    #>
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)]$Git,
+        [int]$MinIntervalSeconds = 60
+    )
+
+    $key = $Path.Trim().ToLowerInvariant()
+    $last = $null
+    if ($script:DevKitGitAutoFetchLastAttempt.ContainsKey($key)) { $last = $script:DevKitGitAutoFetchLastAttempt[$key] }
+    if (-not (Test-DevKitGitAutoFetchDue -LastAttemptUtc $last -NowUtc ([DateTime]::UtcNow) -MinIntervalSeconds $MinIntervalSeconds)) { return }
+
+    $script:DevKitGitAutoFetchLastAttempt[$key] = [DateTime]::UtcNow
+    $hadPrompt = Test-Path Env:\GIT_TERMINAL_PROMPT
+    $prevPrompt = $env:GIT_TERMINAL_PROMPT
+    try {
+        $env:GIT_TERMINAL_PROMPT = '0'
+        [void](& $Git.Source '-C' $Path 'fetch' '--prune' 'origin' 2>&1 | Out-String)
+    } catch {
+        # A failed fetch is not a graph failure - the log below simply shows
+        # what the local object database already knows.
+    } finally {
+        if ($hadPrompt) { $env:GIT_TERMINAL_PROMPT = $prevPrompt } else { Remove-Item Env:\GIT_TERMINAL_PROMPT -ErrorAction SilentlyContinue }
+    }
+}
+
+function Test-DevKitGitSha {
+    <#
+    .SYNOPSIS
+        True when the value is exactly a full 40-hex git object id. Pure.
+    .DESCRIPTION
+        The extra tips that size the log window come from gh's API payload,
+        i.e. from the network - so they are validated before being allowed
+        to influence anything, and they never become revision arguments
+        (where a bad one would fail the whole log). A garbage value can do
+        no worse than never match a loaded commit.
+    #>
+    param([AllowNull()][AllowEmptyString()][string]$Value)
+    if ([string]::IsNullOrWhiteSpace($Value)) { return $false }
+    return ($Value -match '^[0-9a-fA-F]{40}$')
+}
+
 function Get-DevKitRepoOverview {
     <#
     .SYNOPSIS
         One snapshot of the active project's git state: current branch, ahead/
         behind vs upstream, dirty/stash counts, and - when -IncludeGraph is
-        set - a 40-commit parsed log plus its lane layout for the flyout's
-        drawn graph. Badge-only refreshes pass -IncludeGraph $false to skip
-        the log spawn + parse entirely (GraphSkipped flags that case so the
-        UI can tell "not collected" apart from "no commits").
+        set - a parsed log plus its lane layout for the flyout's drawn graph.
+        Badge-only refreshes pass -IncludeGraph $false to skip the log spawn
+        + parse entirely (GraphSkipped flags that case so the UI can tell
+        "not collected" apart from "no commits").
+    .PARAMETER ExtraTips
+        Full SHAs that MUST land inside the log window (the frontend passes
+        its open-PR headRefOids). The window starts at 40 commits and grows
+        - 120, then a hard 400 ceiling - until every well-formed tip is
+        loaded, because on a busy trunk, bot-stacked branches (a dependabot
+        chain ranks with the trunk commits around it) slide below any fixed
+        cap as the trunk advances, and a PR outside the window has nothing
+        for a pill or ribbon to attach to.
     #>
-    param([string]$Path, [bool]$IncludeGraph = $true)
+    param([string]$Path, [bool]$IncludeGraph = $true, [string[]]$ExtraTips = @())
 
     $result = [PSCustomObject]@{
         IsRepo    = $false
@@ -1746,6 +1842,14 @@ function Get-DevKitRepoOverview {
         }
         $result.IsRepo = $true
 
+        # Freshen remote-tracking refs before anything below reads them -
+        # throttled to one attempt per minute, and skipped entirely on
+        # badge-only refreshes (they do not read the log at all). Without
+        # this, bot-pushed PR branches (dependabot) never reach the graph.
+        if ($IncludeGraph) {
+            Invoke-DevKitGitAutoFetch -Path $Path -Git $git
+        }
+
         $branch = (& $git.Source '-C' $Path 'branch' '--show-current' 2>$null | Out-String).Trim()
         $result.Branch = if ($branch) { $branch } else { '(detached HEAD)' }
 
@@ -1757,8 +1861,32 @@ function Get-DevKitRepoOverview {
         }
 
         if ($IncludeGraph) {
-            $log = (& $git.Source '-C' $Path 'log' '--all' '--topo-order' '-n' '40' '--pretty=format:%x1e%H%x1f%P%x1f%an%x1f%ar%x1f%d%x1f%s' 2>$null | Out-String)
-            $commits = ConvertFrom-DevKitGitLogOutput -Output $log
+            # The -n cap is what pushes open PRs out of the chart on a busy
+            # trunk: a dependabot chain ranks with the trunk commits around
+            # it, so every new trunk commit slides it one row deeper until it
+            # falls off the bottom. Rather than fight the sort order, the
+            # window GROWS until every wanted tip is loaded - 40, 120, then a
+            # hard 400 ceiling, beyond which the UI's off-log honesty line
+            # takes over. Tips are never revision arguments (a bad one would
+            # fail the whole log); they only size the window.
+            $wantedTips = @()
+            foreach ($tip in @($ExtraTips)) {
+                if (Test-DevKitGitSha -Value $tip) { $wantedTips += $tip.ToLowerInvariant() }
+            }
+            $wantedTips = @($wantedTips | Select-Object -Unique)
+
+            $windowSizes = if ($wantedTips.Count -eq 0) { @(40) } else { @(40, 120, 400) }
+            $commits = @()
+            foreach ($windowSize in $windowSizes) {
+                $log = (& $git.Source '-C' $Path 'log' '--all' '--topo-order' '-n' ([string]$windowSize) '--pretty=format:%x1e%H%x1f%P%x1f%an%x1f%ar%x1f%d%x1f%s' 2>$null | Out-String)
+                $commits = ConvertFrom-DevKitGitLogOutput -Output $log
+                if ($wantedTips.Count -eq 0) { break }
+                $loaded = @{}
+                foreach ($commit in $commits) { $loaded[[string]$commit.Hash] = $true }
+                $missing = 0
+                foreach ($tip in $wantedTips) { if (-not $loaded.ContainsKey($tip)) { $missing++ } }
+                if ($missing -eq 0) { break }
+            }
             $result.Commits = $commits
             if ($commits.Count -gt 0) {
                 $result.Graph = ConvertTo-DevKitGitGraphLayout -Commits $commits
@@ -1809,6 +1937,12 @@ function Invoke-DevKitGitAction {
         $lines = @($result.Output -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
         $result.LastLine = if ($lines.Count -gt 0) { $lines[-1].Trim() } else { "git $Action finished with no output." }
         $result.Success = ($exitCode -eq 0)
+        if ($result.Success -and $Action -eq 'fetch') {
+            # Shares the auto-fetch throttle (see Invoke-DevKitGitAutoFetch):
+            # a manual fetch IS the freshest fetch there is, so the next
+            # overview tick must not immediately spend another one.
+            $script:DevKitGitAutoFetchLastAttempt[$Path.Trim().ToLowerInvariant()] = [DateTime]::UtcNow
+        }
     } catch {
         $result.LastLine = "$_"
     }
@@ -2010,7 +2144,7 @@ function Get-DevKitGitHubPullRequests {
     try {
         Push-Location -LiteralPath $Path
         try {
-            $out = (& $gh.Source 'pr' 'list' '--json' 'number,title,author,url,isDraft,headRefName,baseRefName,updatedAt,reviewDecision,labels' '--state' 'open' '--limit' ([string]($prDisplayLimit + 1)) 2>&1 | Out-String)
+            $out = (& $gh.Source 'pr' 'list' '--json' 'number,title,author,url,isDraft,headRefName,headRefOid,baseRefName,updatedAt,reviewDecision,labels' '--state' 'open' '--limit' ([string]($prDisplayLimit + 1)) 2>&1 | Out-String)
             $exitCode = $LASTEXITCODE
         } finally {
             Pop-Location

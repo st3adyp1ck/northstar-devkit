@@ -797,7 +797,10 @@ function Invoke-DevKitRpcMethod {
         'git.overview' {
             $path = [string](Get-DevKitRpcParam $Params 'path' '')
             $includeGraph = [bool](Get-DevKitRpcParam $Params 'includeGraph' $true)
-            return Get-DevKitRepoOverview -Path $path -IncludeGraph $includeGraph
+            # Open-PR head SHAs from the frontend's gh poll - the log window
+            # grows until they fit (see Get-DevKitRepoOverview's -ExtraTips).
+            $extraTips = @((Get-DevKitRpcParam $Params 'extraTips' @()) | ForEach-Object { [string]$_ })
+            return Get-DevKitRepoOverview -Path $path -IncludeGraph $includeGraph -ExtraTips $extraTips
         }
         'git.commitDetails' {
             $path = [string](Get-DevKitRpcParam $Params 'path' '')

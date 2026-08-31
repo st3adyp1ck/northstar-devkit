@@ -2,7 +2,75 @@
 
 All notable changes to Northstar DevKit are documented here.
 
-## [Unreleased]
+## [4.2.0] - 2026-08-30
+
+The commit graph learns about pull requests, the Control Center moves in
+beside the widget as a slide-out tray, and the embedded terminal stops
+booting into a blank pane.
+
+### Added
+
+- **Open-PR pills and hover ribbons in the commit graph**: every open PR
+  renders as a `#42` pill (drafts dashed) on the head commit it actually
+  points at - PR identity lives IN the chart, never in a separate legend
+  band above it. Click a pill for the PR's details; hover to light up that
+  PR's own commits as a ribbon. Matching is hash-exact via `gh`'s
+  `headRefOid`, with a branch-name fallback (`git/prLanes.ts`).
+- **Throttled background auto-fetch** (`Invoke-DevKitGitAutoFetch` in
+  `core/DevKit-WidgetCore.ps1`): the repo overview freshens remote refs
+  itself - at most one prompt-free attempt per minute per repo - so
+  bot-pushed branches like Dependabot's reach the log without anyone
+  pressing Fetch. The due-check is split out as a pure
+  `Test-DevKitGitAutoFetchDue` so it is unit-testable apart from its side
+  effects.
+- **Adaptive commit-log window**: `git.overview` now accepts `extraTips`
+  (the frontend's open-PR head SHAs) and `Get-DevKitRepoOverview` grows
+  the log from 40 up to 400 commits until every tip fits, so a busy trunk
+  can no longer push open PRs out of the chart.
+- **The Control Center as a slide-out tray in the docked widget**: the
+  same component mounts as `<ControlCenterApp embedded />` in the widget's
+  flyout pane stack, with the rail's DEVKIT brand plate as its tab.
+  Embedded mode drops the TitleBar (a pane has no window chrome), the
+  ProjectPicker (the widget's own picker shares the store), and the
+  `PALETTE_TOOL_EVENT` listener (the standalone window stays the command
+  palette's single tool-run target - two mounted instances consuming one
+  event would open the same dialog twice). The tray fills the rest of the
+  screen on open and persists a resize drag as `controlCenterFlyoutWidth`
+  (`null` = fill).
+- **Scheduled-task admin mode** (`tools/system/Set-DevKitAdminMode.ps1`)
+  and a **deep close-out variant**.
+- **`/dance`** - a hidden command-palette entry that makes the gauges
+  bounce, matched as a whole word rather than through the fuzzy scorer so
+  it can never be stumbled onto by a loose match.
+- **Tooltips on the destructive Quick Actions and Node/Ports buttons**,
+  spelling out what each one actually ends before you press it.
+
+### Changed
+
+- **Node & Ports is collapsed by default**, like the embedded terminal -
+  `lazyMount`, so its polls cost nothing until it is first opened.
+- **The commit graph is a single renderer again**: `GitGraph.tsx` and
+  `git/CommitGraph.tsx` are gone, leaving `git/PrGraph.tsx` as the one
+  drawing path. `CommitGraph.css` stays - it still carries the commit-row,
+  node and lane styles PrGraph draws with.
+
+### Fixed
+
+- **The embedded terminal no longer boots blank inside the flyout tray.**
+  The tray keeps its panes mounted while hidden, so `TerminalView` mounted
+  against a 0x0 host; opening xterm and spawning the session there left a
+  blank pane with a dead cursor that only a manual kill+restart (a remount
+  while visible) ever recovered from. Startup is now deferred until the
+  host has real dimensions, and every `fit()` goes through one guarded
+  path - a zero-size host computes 0 cols, and fitting a terminal whose
+  renderer has not initialized throws xterm's "Cannot read properties of
+  undefined (reading 'dimensions')", the TypeError this logged on every
+  tray open.
+- **`[devkit-rpc] child stdin detached` is treated as benign sidecar
+  chatter** rather than a fault: the deliberate stdin detach behind the
+  25s spawn-stall fix reports success at every single startup.
+
+## [4.1.0] - 2026-08-26
 
 ### Added
 
@@ -12,6 +80,24 @@ All notable changes to Northstar DevKit are documented here.
   Release with the NSIS installer, its `.sig`, and `latest.json` (the
   in-app updater's endpoint) - a human still reviews and publishes the
   draft. To cut a release: `git tag vX.Y.Z && git push origin vX.Y.Z`.
+- **Error center, flyout trays and the command palette**, plus a
+  JARVIS-style slide-out tray for the docked widget.
+- **Settings panel** with 10 themes, compass-rose branding and UI sounds,
+  alongside a general widget UX round-out.
+
+### Fixed
+
+- The **sidecar spawn stall**, and every broken wire found by the
+  cross-boundary audit.
+- **Real sidebar docking** - full-height, immovable and resize-locked -
+  with width-resizable docking and zoom-compensated window heights.
+- Widget width, so all four gauges fit, with a wrap fallback.
+- The installed app itself: verbatim paths, a lane-init race, the silent
+  console and real logging.
+
+### Removed
+
+- The **legacy WPF app**, retired now that the Tauri v2 rebuild is proven.
 
 ## [4.0.0] - 2026-08-04
 

@@ -378,6 +378,7 @@ export interface DevKitPreferences {
   widgetWidth: number;
   gitFlyoutWidth: number;
   notesFlyoutWidth: number;
+  controlCenterFlyoutWidth: number | null;
   envDriftSilencedProjects: string[];
   // Appearance/UX (2026 Settings panel) - defaults live in
   // tools/lib/DevKit-Common.ps1's Get-DevKitSettings; the name-level

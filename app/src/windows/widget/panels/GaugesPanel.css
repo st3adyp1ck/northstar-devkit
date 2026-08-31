@@ -41,6 +41,69 @@
   opacity: 0.7;
 }
 
+/* ---- the /dance easter egg: CommandPalette.tsx -> PALETTE_DANCE_EVENT ---- */
+
+.gauges-panel__row--dancing .devkit-gauge {
+  animation: gauges-panel-dance 700ms var(--ease-standard) 4 both;
+}
+
+/* Staggered so the four ripple rather than bob in unison. The last delay
+   plus 4x700ms is what DANCE_DURATION_MS in GaugesPanel.tsx has to cover -
+   change one, change the other. */
+.gauges-panel__row--dancing .devkit-gauge:nth-child(2) {
+  animation-delay: 90ms;
+}
+
+.gauges-panel__row--dancing .devkit-gauge:nth-child(3) {
+  animation-delay: 180ms;
+}
+
+.gauges-panel__row--dancing .devkit-gauge:nth-child(4) {
+  animation-delay: 270ms;
+}
+
+/* Two bounces per iteration, the second smaller, landing with a little
+   squash. Both ends are the identity transform on purpose: the class drops
+   off mid-transition otherwise, and a gauge left at scale(1.06) would snap.
+   That also keeps the hover/press transforms above intact - the animation
+   outranks them while it runs, then hands them back cleanly. */
+@keyframes gauges-panel-dance {
+  0% {
+    transform: translateY(0) rotate(0deg) scale(1);
+  }
+  15% {
+    transform: translateY(-10px) rotate(-7deg) scale(1.06);
+  }
+  32% {
+    transform: translateY(0) rotate(0deg) scale(0.95);
+  }
+  50% {
+    transform: translateY(-7px) rotate(6deg) scale(1.04);
+  }
+  68% {
+    transform: translateY(0) rotate(0deg) scale(0.97);
+  }
+  84% {
+    transform: translateY(-2px) rotate(-2deg) scale(1.01);
+  }
+  100% {
+    transform: translateY(0) rotate(0deg) scale(1);
+  }
+}
+
+/* No reduced-motion consolation prize here, unlike --loading above: that
+   one is load-bearing (it says "still reading sensors"), this one is a
+   joke. A joke you didn't consent to is just a gauge jumping at you. */
+@media (prefers-reduced-motion: reduce) {
+  .gauges-panel__row--dancing .devkit-gauge {
+    animation: none;
+  }
+}
+
+:root[data-animations="off"] .gauges-panel__row--dancing .devkit-gauge {
+  animation: none;
+}
+
 /* Hero-element hover/press polish, layered on top of Gauge.tsx's own base styling. */
 .gauges-panel__row .devkit-gauge--clickable {
   transition: transform var(--duration-fast) var(--ease-standard), background var(--duration-fast) var(--ease-standard);

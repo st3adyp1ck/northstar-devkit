@@ -143,6 +143,7 @@ Describe "Test-DevKitBenignSidecarLine" {
         Test-DevKitBenignSidecarLine -Message '[devkit-rpc][metrics] ready after 150.9871ms' | Should -BeTrue
         Test-DevKitBenignSidecarLine -Message '[devkit-rpc] draining lanes' | Should -BeTrue
         Test-DevKitBenignSidecarLine -Message '[devkit-rpc] shutdown complete' | Should -BeTrue
+        Test-DevKitBenignSidecarLine -Message '[devkit-rpc] child stdin detached (STD_INPUT_HANDLE -> inheritable NUL)' | Should -BeTrue
     }
 
     It "does NOT swallow a real sidecar fault" {

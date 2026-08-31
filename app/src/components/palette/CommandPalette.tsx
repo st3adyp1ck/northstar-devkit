@@ -12,12 +12,27 @@ import { ensureProjectsLoaded, notifyProjectsChanged, useProjectManagerStore } f
 import { GlassPanel } from "../primitives/GlassPanel";
 import { Badge } from "../primitives/Badge";
 import { highlightSegments, scoreCandidate } from "./fuzzy";
-import { PALETTE_TOOL_EVENT, usePaletteStore, type PaletteToolRequest } from "./paletteStore";
+import {
+  PALETTE_DANCE_EVENT,
+  PALETTE_TOOL_EVENT,
+  usePaletteStore,
+  type PaletteToolRequest,
+} from "./paletteStore";
 import type { Catalog, LinkedProject } from "../../lib/types";
 import "./CommandPalette.css";
 
-const GROUP_ORDER = ["Actions", "Projects", "Tools"] as const;
+const GROUP_ORDER = ["Actions", "Projects", "Tools", "Secret"] as const;
 type GroupName = (typeof GROUP_ORDER)[number];
+
+/**
+ * The one entry you can't browse to. Matched as a whole word - with or
+ * without the leading slash people expect from a chat command - instead of
+ * going through the fuzzy scorer, because "hidden" has to survive the
+ * palette's own helpfulness: it never joins `entries`, so an empty query
+ * can't list it and no loose fuzzy run (d-a-n across some tool's help text)
+ * can stumble onto it. You have to know the word.
+ */
+const DANCE_QUERY = /^\/?dance$/i;
 
 interface PaletteEntry {
   id: string;
@@ -183,6 +198,32 @@ export function CommandPalette() {
     [isControlCenter, requestTool],
   );
 
+  const startDance = useCallback(async () => {
+    playSound("success");
+    // The gauges live only in the widget, so surface it first - a /dance run
+    // from the Control Center with the widget hidden would otherwise be a
+    // party in an empty room. Same double-emit as runTool, for the same
+    // reason (a widget webview still booting misses the first); GaugesPanel
+    // drops the repeat rather than restarting the animation.
+    await showWindow("widget");
+    await emitTo("widget", PALETTE_DANCE_EVENT);
+    window.setTimeout(() => {
+      void emitTo("widget", PALETTE_DANCE_EVENT).catch(() => {});
+    }, 500);
+  }, []);
+
+  const danceEntry = useMemo<PaletteEntry>(
+    () => ({
+      id: "secret:dance",
+      group: "Secret",
+      title: "🕺 Dance",
+      subtitle: "Make the gauges bounce",
+      meta: "you found it",
+      run: () => startDance(),
+    }),
+    [startDance],
+  );
+
   // useProjectStore.setActive already does the projects.setActive RPC and a
   // full store refresh; the broadcast is what carries the switch to the
   // other window's store.
@@ -281,6 +322,13 @@ export function CommandPalette() {
       if (match) scored.push({ entry, score: match.score, positions: match.positions });
     }
 
+    // Injected here rather than in `entries` so it exists only for the exact
+    // query that summons it (see DANCE_QUERY). An unbeatable score keeps it
+    // on top - and puts its group first - so the payoff is one Enter away.
+    if (DANCE_QUERY.test(q)) {
+      scored.push({ entry: danceEntry, score: Number.MAX_SAFE_INTEGER, positions: [] });
+    }
+
     // With a query, one global ranking decides both row order and which
     // group leads; without one, the fixed Actions/Projects/Tools order and
     // each source's natural order are more predictable than any score.
@@ -316,7 +364,7 @@ export function CommandPalette() {
       }
     }
     return { rows: nextRows, items: nextItems };
-  }, [entries, query]);
+  }, [entries, query, danceEntry]);
 
   // Any change to the result set puts the cursor back on the best row.
   useEffect(() => {

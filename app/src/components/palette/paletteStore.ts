@@ -25,6 +25,15 @@ export interface PaletteToolRequest {
  */
 export const PALETTE_TOOL_EVENT = "devkit://palette-run-tool";
 
+/**
+ * Tauri event asking the widget's gauges to bounce - the payload-free twin
+ * of PALETTE_TOOL_EVENT, travelling the other way. The gauges only exist in
+ * the widget window, so a `/dance` typed anywhere has to arrive as an event;
+ * emitting to the widget's own label works even when the widget is the
+ * window that asked, which keeps CommandPalette's two cases to one path.
+ */
+export const PALETTE_DANCE_EVENT = "devkit://palette-dance";
+
 interface PaletteState {
   open: boolean;
   /** Pending tool selection awaiting a host that can open its run dialog. */

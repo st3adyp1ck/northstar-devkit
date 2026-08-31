@@ -164,7 +164,7 @@ See [AGENTS.md](AGENTS.md) for the full architecture writeup.
 ## 🖥️ Usage
 
 ### Control Center
-Open it via the widget's title-bar **DEVKIT** button:
+Open it two ways: docked, click the **DEVKIT** plate at the foot of the tray rail and it slides out as a tray inside the same window — or for the full-size standalone window, use the floating widget's title-bar **DEVKIT** button or the system-tray menu:
 
 - **Browse or search** the full tool catalog — every tool rendered as a card from its `_module.psd1` manifest, grouped in the left rail (Development, Version Control & Containers, System & Workflow, Maintenance & Agents, Network) with live search across the top.
 - Cards carry **Project** (runs against your Active Project), **Input** (needs parameters), and **Caution** (changes system state) badges at a glance.
@@ -172,11 +172,11 @@ Open it via the widget's title-bar **DEVKIT** button:
 - **Caution** tools ask for confirmation first (per the widget's **confirmDestructive** setting).
 
 ### Companion Widget
-The widget is DevKit's main face — it opens from the Start Menu/Desktop icon straight to the desktop and tray. Its title-bar **DEVKIT** button opens the Control Center:
+The widget is DevKit's main face — it opens from the Start Menu/Desktop icon straight to the desktop and tray. Docked, the **DEVKIT** plate at the foot of the tray rail slides the Control Center out as a tray in the same window; floating, the title-bar **DEVKIT** button opens it as its own window:
 
 - **Gauges**: CPU / Memory / GPU dials with temperatures where the machine exposes them ("n/a" when it doesn't), plus a Disk Free dial and a reboot-pending hint. Click a dial for a flyout of its top processes with a guarded kill button; the Memory flyout adds a one-click **Free Memory**.
-- **Node & Ports**: every running `node` process with its memory, age, and listening ports — click a port to open it in your browser, or kill just that one process. Flags ports stuck inside a Windows-reserved range (Hyper-V/winnat).
-- **Git**: a drawn commit graph with colored lanes and gradient curves where a branch flows into its parent, branch/tag pills, a HEAD ring, ahead/behind counts and stash count, and fetch/pull/push. Click any commit to expand its details inline (message, author, per-file stats).
+- **Node & Ports**: collapsed by default — expand it to see every running `node` process with its memory, age, and listening ports; click a port to open it in your browser, or kill just that one process. Flags ports stuck inside a Windows-reserved range (Hyper-V/winnat).
+- **Git**: a drawn commit graph with colored lanes and gradient curves where a branch flows into its parent, branch/tag pills, a HEAD ring, open-PR pills (`#42`, drafts dashed) on the head commits they point at — click one for the PR's details, hover to see that PR's commits light up as a ribbon — ahead/behind counts and stash count, and fetch/pull/push. Click any commit to expand its details inline (message, author, per-file stats). Remote refs freshen themselves via a throttled background fetch (about once a minute per repo, and it can never pop a credential prompt), so bot-pushed branches like Dependabot's show up without you pressing Fetch first — and the log window grows from 40 up to 400 commits until every open PR's head fits, so a busy trunk can't push your PRs out of the chart.
 - **GitHub**: the active project's open pull requests and issues, read straight from the `gh` CLI, one click to open either in the browser.
 - **MCP**: expandable **Claude Code** / **Kimi Code** boxes listing that project's MCP servers alongside your user-scope ones, with Connected / Disconnected / Requires Auth badges.
 - **Notes/On-Deck**: quick per-project sticky notes, plus an on-deck list whose items advance Not Started → In Progress → Done with a click.

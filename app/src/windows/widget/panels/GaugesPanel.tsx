@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import { AnimatePresence, motion } from "framer-motion";
+import { listen } from "@tauri-apps/api/event";
 import { usePolledRpc } from "../../../hooks/usePolledRpc";
 import { useConfirmDestructive } from "../../../hooks/useConfirmDestructive";
 import { rpcCall, RpcClientError } from "../../../lib/ipc";
@@ -9,6 +10,7 @@ import { Gauge } from "../../../components/Gauge";
 import { GlassPanel } from "../../../components/primitives/GlassPanel";
 import { Button } from "../../../components/primitives/Button";
 import { Badge } from "../../../components/primitives/Badge";
+import { PALETTE_DANCE_EVENT } from "../../../components/palette/paletteStore";
 import type {
   SystemMetrics,
   TopCpuProcessRow,
@@ -24,6 +26,15 @@ type GaugeKind = "cpu" | "mem" | "gpu" | "disk" | null;
 
 /** 30 samples x the 2s poll below = roughly the last minute of readings. */
 const HISTORY_CAPACITY = 30;
+
+/**
+ * How long the /dance easter egg holds its class, in ms. MUST cover the
+ * whole run defined in GaugesPanel.css: 4 iterations x 700ms plus the 270ms
+ * stagger on the last gauge. Overshooting is harmless (the animation has
+ * already settled on its final frame); cutting it short would snap a gauge
+ * back mid-bounce.
+ */
+const DANCE_DURATION_MS = 3150;
 
 /** One poll's worth of the three metrics that move fast enough to trend. */
 interface MetricSample {
@@ -58,7 +69,35 @@ export function GaugesPanel() {
   const [openGauge, setOpenGauge] = useState<GaugeKind>(null);
   const [history, setHistory] = useState<MetricSample[]>([]);
   const [retrying, setRetrying] = useState(false);
+  const [dancing, setDancing] = useState(false);
   const lastSampleAt = useRef(0);
+  const danceTimer = useRef<number | null>(null);
+
+  // The /dance easter egg (CommandPalette.tsx). A live timer IS the "already
+  // dancing" flag, which is what makes the palette's deliberate double-emit
+  // a no-op here: without the guard the second delivery would restart the
+  // stagger 500ms in and leave the gauges out of step with each other.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    void listen(PALETTE_DANCE_EVENT, () => {
+      if (cancelled || danceTimer.current !== null) return;
+      setDancing(true);
+      danceTimer.current = window.setTimeout(() => {
+        danceTimer.current = null;
+        setDancing(false);
+      }, DANCE_DURATION_MS);
+    }).then((un) => {
+      // Resolved after unmount - drop it rather than leak a live listener.
+      if (cancelled) un();
+      else unlisten = un;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+      if (danceTimer.current !== null) window.clearTimeout(danceTimer.current);
+    };
+  }, []);
 
   // One entry per SUCCESSFUL poll, keyed off dataUpdatedAt rather than the
   // `metrics` object: react-query's structural sharing hands back the very
@@ -126,7 +165,13 @@ export function GaugesPanel() {
         {pending && <span className="panel-header__hint">reading sensors…</span>}
         {stale && <span className="panel-header__hint gauges-panel__stale">last known — sidecar not answering</span>}
       </div>
-      <div className={clsx("gauges-panel__row", pending && "gauges-panel__row--loading")}>
+      <div
+        className={clsx(
+          "gauges-panel__row",
+          pending && "gauges-panel__row--loading",
+          dancing && "gauges-panel__row--dancing",
+        )}
+      >
         <Gauge
           label="CPU"
           percent={metrics?.CpuPercent ?? null}

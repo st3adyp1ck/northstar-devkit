@@ -5,11 +5,13 @@
  * file imports nothing of its own for those and only adds the PR layer, so
  * the history looks identical whether or not there are PRs to draw.
  *
- * The overlay's whole readability rests on one distinction: SOLID means it
- * is in the repository, DASHED means it is proposed. Ribbons are wide and
- * translucent so the crisp 2.4px commit lanes stay legible straight through
- * them; pending arcs sit on top, thin and dashed, because there is nothing
- * underneath them to respect.
+ * PRs live INSIDE the one chart, never in a section above it: a #42 pill on
+ * the head commit's row (CommitGraph.css carries the pill style, next to the
+ * git-ref modifiers it extends), a wide translucent ribbon along the commits
+ * the branch owns - kept translucent so the crisp 2.4px commit lanes stay
+ * legible straight through it - and a ring on the head / a dashed ring on
+ * the fork. PRs the log window can't see get one slim line under the chart,
+ * not a stub apiece.
  */
 
 .pr-graph {
@@ -34,117 +36,18 @@
   border: 1px solid var(--surface-border);
 }
 
-/* ---------- legend ----------
-   The Graph tab has to stand on its own now that the PR list lives behind
-   another tab, so every drawn lane is named here, in its own color, and the
-   chip is the hover/click handle for its ribbon. */
-
-.pr-graph__legend {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  flex-shrink: 0;
-  max-height: 118px;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding-right: 2px;
-}
-
+/* Slim status line for "the PR overlay itself is unavailable" (gh missing,
+   poll failed, still loading) - the only PR text allowed above the chart. */
 .pr-graph__note {
   flex-shrink: 0;
 }
 
-.pr-chip {
-  all: unset;
-  box-sizing: border-box;
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  width: 100%;
-  min-width: 0;
-  padding: 3px var(--space-2) 3px 0;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  font-size: 10px;
-  color: var(--text-tertiary);
-  transition: background var(--duration-fast) var(--ease-standard);
-}
-
-.pr-chip:hover,
-.pr-chip--lit {
-  background: var(--surface-hover);
-}
-
-.pr-chip:focus-visible {
-  outline: none;
-  box-shadow: var(--shadow-focus-ring);
-}
-
-/* A short length of the PR's own lane, so the legend row and the ribbon in
-   the gutter are recognisably the same object. */
-.pr-chip__wire {
+/* The off-log honesty line: said once, in words, where a reader who misses
+   a PR will look for it - never as a pile of stubs above the chart. */
+.pr-graph__offlog {
   flex-shrink: 0;
-  width: 16px;
-  height: 3px;
-  margin-left: 2px;
-  border-radius: var(--radius-pill);
-  background: var(--pr-color, var(--accent));
-  box-shadow: 0 0 6px color-mix(in srgb, var(--pr-color, var(--accent)) 55%, transparent);
-}
-
-/* Draft: the same dotted material its ribbon is drawn with. */
-.pr-chip--draft .pr-chip__wire {
-  background: repeating-linear-gradient(
-    to right,
-    var(--pr-color, var(--accent)) 0 2px,
-    transparent 2px 5px
-  );
-  box-shadow: none;
-}
-
-.pr-chip--lit .pr-chip__wire {
-  height: 4px;
-}
-
-.pr-chip__num {
-  flex-shrink: 0;
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  color: var(--pr-color, var(--accent-strong));
-  font-weight: 700;
-}
-
-.pr-chip__title {
-  min-width: 0;
-  flex: 1 1 auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--text-secondary);
-}
-
-.pr-chip--lit .pr-chip__title {
-  color: var(--text-primary);
-}
-
-/* "We could not draw all of this" - said, never implied. */
-.pr-chip__hint {
-  flex-shrink: 0;
-  padding: 1px 6px;
-  border-radius: var(--radius-pill);
-  background: color-mix(in srgb, var(--warning) 12%, transparent);
-  border: 1px solid color-mix(in srgb, var(--warning) 28%, transparent);
-  color: var(--warning);
-  white-space: nowrap;
-}
-
-.pr-chip--partial .pr-chip__wire {
-  opacity: 0.6;
-}
-
-.pr-chip--overflow {
-  cursor: default;
-  padding-left: var(--space-2);
+  font-size: var(--text-2xs);
+  line-height: 1.4;
   color: var(--text-tertiary);
 }
 
@@ -158,10 +61,6 @@
   opacity: 0.55;
 }
 
-.pr-graph__pending {
-  opacity: 0.9;
-}
-
 /* Everything that is not the lit lane steps back far enough to stop
    competing, but never all the way to invisible - the other PRs are still
    part of the picture. */
@@ -173,25 +72,8 @@
   transition: opacity var(--duration-fast) var(--ease-standard);
 }
 
-/* Marching ants ONLY on the lane the reader is pointing at: a graph where
-   every dashed arc crawls at once is a graph nobody can read. Gated on both
-   motion axes - the OS setting and the app's own Animations toggle - because
-   an infinite animation cannot be collapsed by zeroing a duration token the
-   way a discrete transition can. */
-@media (prefers-reduced-motion: no-preference) {
-  :root:not([data-animations="off"]) .pr-graph__pending--live {
-    animation: pr-graph-flow 1.4s linear infinite;
-  }
-}
-
-@keyframes pr-graph-flow {
-  to {
-    stroke-dashoffset: -22;
-  }
-}
-
 /* A commit row that belongs to the lit PR wears that PR's color on its
-   leading edge - the third leg of the chip <-> ribbon <-> row link. The
+   leading edge - the third leg of the pill <-> ribbon <-> row link. The
    selected row's own accent edge still wins, since selection is the stronger
    state. */
 .commit-graph__row--pr-lit {
@@ -202,10 +84,4 @@
 .commit-graph__row--pr-lit.commit-graph__row--selected {
   background: var(--surface-active);
   box-shadow: inset 2px 0 0 var(--lane-color, var(--accent));
-}
-
-@container (max-width: 330px) {
-  .pr-chip__hint {
-    display: none;
-  }
 }

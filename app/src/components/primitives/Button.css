@@ -3,10 +3,13 @@
   align-items: center;
   justify-content: center;
   gap: var(--space-2);
-  border-radius: var(--radius-md);
+  /* Squared-off modern edge (6px) rather than the old soft-rounded md -
+     one token swap, so every variant, size, and theme inherits it. */
+  border-radius: var(--radius-sm);
   border: 1px solid transparent;
   font-weight: 600;
   letter-spacing: 0.01em;
+  cursor: pointer;
   transition: background var(--duration-fast) var(--ease-standard),
     border-color var(--duration-fast) var(--ease-standard),
     transform var(--duration-fast) var(--ease-standard),
@@ -95,6 +98,9 @@
 .devkit-btn--primary {
   background: linear-gradient(180deg, var(--sapphire-500), var(--sapphire-700));
   color: var(--text-on-accent);
+  /* A hairline edge in the gradient's lighter tone - what keeps the squared
+     shape reading crisp instead of flat against glass panels. */
+  border-color: color-mix(in srgb, var(--sapphire-300) 35%, transparent);
   box-shadow: var(--shadow-sm);
 }
 
@@ -128,6 +134,8 @@
 .devkit-btn--danger {
   background: linear-gradient(180deg, var(--ember-500), var(--ember-700));
   color: #fff;
+  /* Same hairline-edge trick as the primary - see above. */
+  border-color: color-mix(in srgb, var(--ember-400) 35%, transparent);
   box-shadow: var(--shadow-sm);
 }
 

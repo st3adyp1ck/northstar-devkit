@@ -1,5 +1,5 @@
 /**
- * Commit graph. --graph-gutter is published per-render by CommitGraph.tsx
+ * Commit graph. --graph-gutter is published per-render by PrGraph.tsx
  * (it depends on the repo's lane count), and every row reserves exactly that
  * much space on its leading edge so the drawn lanes and the text columns
  * share one grid.
@@ -135,6 +135,34 @@
 .commit-graph__ref--tag {
   color: var(--signal-sand);
   border-color: color-mix(in srgb, var(--signal-sand) 40%, transparent);
+}
+
+/* PR pills are short (#42) and few per row, so their container skips the
+   git-ref container's 45% squeeze. */
+.commit-graph__refs--prs {
+  max-width: none;
+}
+
+/* A PR pill is a ref-shaped link to the pull request whose head IS this
+   commit - the git-graph ref idiom, drawn in the PR's own stable lane color
+   (set inline as --pr-color) rather than a shared hue. */
+.commit-graph__ref--pr {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: var(--pr-color, var(--accent-strong));
+  border-color: color-mix(in srgb, var(--pr-color, var(--accent)) 55%, transparent);
+  background: color-mix(in srgb, var(--pr-color, var(--accent)) 14%, transparent);
+  cursor: pointer;
+}
+
+.commit-graph__ref--pr:hover {
+  background: color-mix(in srgb, var(--pr-color, var(--accent)) 26%, transparent);
+}
+
+/* Draft: the same dashed material its ribbon and head ring are drawn with. */
+.commit-graph__ref--pr-draft {
+  border-style: dashed;
+  opacity: 0.85;
 }
 
 .commit-graph__subject {

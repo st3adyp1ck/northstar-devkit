@@ -18,9 +18,11 @@ interface FlyoutTabRailProps {
   /** Glyph style, straight off preferences.iconTheme. */
   iconTheme: IconTheme;
   onSelect: (id: string) => void;
-  /** The brand plate at the foot of the rail - what the titlebar's DEVKIT button used to do. */
+  /** The brand plate at the foot of the rail - the Control Center tray's tab. */
   onBrand: () => void;
-  /** Tooltip/label for the brand plate, e.g. "Open the DevKit Control Center". */
+  /** True while the Control Center tray is the open one - the plate lights like any other active tab. */
+  brandActive?: boolean;
+  /** Tooltip/label for the brand plate, e.g. "Open the Control Center tray". */
   brandTitle: string;
 }
 
@@ -48,6 +50,7 @@ export function FlyoutTabRail({
   iconTheme,
   onSelect,
   onBrand,
+  brandActive = false,
   brandTitle,
 }: FlyoutTabRailProps) {
   return (
@@ -78,7 +81,14 @@ export function FlyoutTabRail({
       {/* A plate, not a button: full rail width, square, seated on a lit
           seam, with the rose silkscreened over a legend. It should read as
           the bottom section of the instrument's chassis. */}
-      <button type="button" className="flyout-rail__brand" aria-label={brandTitle} title={brandTitle} onClick={onBrand}>
+      <button
+        type="button"
+        className={clsx("flyout-rail__brand", brandActive && "flyout-rail__brand--active")}
+        aria-label={brandTitle}
+        aria-pressed={brandActive}
+        title={brandTitle}
+        onClick={onBrand}
+      >
         <span className="flyout-rail__brand-seam" aria-hidden="true" />
         <RailIcon name="devkit" theme={iconTheme} className="flyout-rail__brand-mark" />
         <span className="flyout-rail__brand-label">DEVKIT</span>

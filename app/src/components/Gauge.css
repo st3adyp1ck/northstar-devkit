@@ -5,7 +5,10 @@
   gap: var(--space-1);
   background: none;
   border: none;
-  padding: var(--space-2);
+  /* space-1 (4px) sides, not space-2: box-sizing is border-box, so the 92px
+     gauge only had 76px inside it and "24.9/127.4 GB" wrapped. 84px fits it
+     on the one line the sub slot now reserves. */
+  padding: var(--space-2) var(--space-1);
   border-radius: var(--radius-lg);
   transition: background var(--duration-fast) var(--ease-standard);
   position: relative;
@@ -57,11 +60,24 @@
   font-size: var(--text-2xs);
   color: var(--text-tertiary);
   font-variant-numeric: tabular-nums;
+  /* One reserved line, never two: wrapping was what dragged the sparkline
+     up and down as readings changed length ("24.9/127.4 GB" vs "9.1/127.4
+     GB"). A value too long for the gauge clips with an ellipsis instead of
+     reflowing the column. */
+  align-self: stretch;
+  height: 14px;
+  line-height: 14px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Trend line under the readout. Stretches to the gauge's own width (the
    column is center-aligned, so it needs to opt out) and reserves a fixed
-   height so the gauge doesn't reflow as the buffer fills. */
+   height so the gauge doesn't reflow as the buffer fills. Rendered even
+   with NO history (Disk Free): the empty slot is what keeps all four
+   columns ending on the same baseline. */
 .devkit-gauge__spark {
   align-self: stretch;
   display: block;

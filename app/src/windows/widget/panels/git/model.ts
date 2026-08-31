@@ -24,6 +24,8 @@ export interface GitHubLabel {
 export interface GitHubPrRow extends GitHubPullRequest {
   isDraft?: boolean;
   headRefName?: string;
+  /** Hash of the PR's head commit - the exact, rename-proof anchor resolveHeadNode prefers over the branch name. */
+  headRefOid?: string;
   baseRefName?: string;
   updatedAt?: string;
   /** "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" | "" (gh sends an empty string, not null, when unreviewed). */
