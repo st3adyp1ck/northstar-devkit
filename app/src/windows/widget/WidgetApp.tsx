@@ -21,8 +21,10 @@ import {
   type FlyoutPaneDef,
 } from "../../components/flyouts/FlyoutPaneStack";
 import { RailIcon, normalizeIconTheme, type RailIconName } from "../../components/flyouts/railIcons";
+import { orderTrays } from "../../components/flyouts/tabOrder";
 import { useWidgetFlyout } from "../../components/flyouts/useWidgetFlyout";
 import { showWindow, toggleWindow } from "../../lib/ipc";
+import { asArray } from "../../lib/arrays";
 import { playSound } from "../../lib/sounds";
 import { GaugesPanel } from "./panels/GaugesPanel";
 import { NodePortsPanel } from "./panels/NodePortsPanel";
@@ -52,9 +54,11 @@ function CollapseChevron({ side }: { side: "Left" | "Right" }) {
 }
 
 /**
- * The four trays, in rail order, with their content elements created once at
- * module scope so a tray that is already mounted is never rebuilt when the
- * icon theme (or anything else) changes underneath it.
+ * The trays, in DEFAULT rail order - preferences.flyoutTabOrder rearranges
+ * them (see orderTrays), which is why nothing below may index into this
+ * array by position. Content elements are created once at module scope so a
+ * tray that is already mounted is never rebuilt when the icon theme (or the
+ * order) changes underneath it.
  */
 const TRAYS: ReadonlyArray<{
   id: string;
@@ -67,6 +71,7 @@ const TRAYS: ReadonlyArray<{
   { id: "terminal", label: "Terminal", icon: "terminal", content: <TerminalPanel />, fill: true },
   { id: "files", label: "Files", icon: "files", content: <FilesPanel /> },
   { id: "notes", label: "Notes", icon: "notes", content: <NotesOnDeckPanel /> },
+  { id: "mcp", label: "MCP Servers", icon: "mcp", content: <McpPanel /> },
 ];
 
 /** Keeps a stored/absent flyout width inside something the window can actually show. */
@@ -141,9 +146,9 @@ interface WidgetGeometry {
  * panel's own polled data resolves or a project gets linked/unlinked
  * underneath an already-mounted slot.
  *
- * Docked, the column is only the glanceable half: gauges, quick actions,
- * ports, MCP and GitHub stay inline, while Git / Terminal / Files / Notes
- * move into slide-out trays on the inner edge (see components/flyouts).
+ * Docked, the column is only the glanceable half: gauges, quick actions
+ * and ports stay inline, while Git / Terminal / Files / Notes / MCP move
+ * into slide-out trays on the inner edge (see components/flyouts).
  * Floating keeps the original single scrolling column with all nine.
  */
 export function WidgetApp() {
@@ -155,6 +160,7 @@ export function WidgetApp() {
   const defaultFlyoutWidth = useSettingsStore((s) => s.settings?.preferences.flyoutWidth);
   const ccFlyoutWidth = useSettingsStore((s) => s.settings?.preferences.controlCenterFlyoutWidth);
   const iconThemePref = useSettingsStore((s) => s.settings?.preferences.iconTheme);
+  const flyoutTabOrderPref = useSettingsStore((s) => s.settings?.preferences.flyoutTabOrder);
   const railWidthPref = useSettingsStore((s) => s.settings?.preferences.railWidth);
   const railIconSizePref = useSettingsStore((s) => s.settings?.preferences.railIconSize);
   const widgetSavedWidth = useSettingsStore((s) => s.settings?.preferences.widgetSavedWidth);
@@ -217,9 +223,13 @@ export function WidgetApp() {
 
   const flyout = useWidgetFlyout({ side, widthFor, mainRef });
 
+  // The rail's saved arrangement, applied to the trays this build ships.
+  // asArray: a single-id order can come off the wire as a bare string.
+  const orderedTrays = useMemo(() => orderTrays(TRAYS, asArray<string>(flyoutTabOrderPref)), [flyoutTabOrderPref]);
+
   const flyoutPanes = useMemo<FlyoutPaneDef[]>(
     () => [
-      ...TRAYS.map((tray) => ({
+      ...orderedTrays.map((tray) => ({
         id: tray.id,
         label: tray.label,
         // The pane header is chrome, not rail furniture: it follows the icon
@@ -240,11 +250,21 @@ export function WidgetApp() {
         fill: true,
       },
     ],
-    [iconTheme],
+    [iconTheme, orderedTrays],
   );
   const flyoutTabs = useMemo<FlyoutTabDef[]>(
-    () => TRAYS.map(({ id, label, icon }) => ({ id, label, icon })),
-    [],
+    () => orderedTrays.map(({ id, label, icon }) => ({ id, label, icon })),
+    [orderedTrays],
+  );
+
+  // A drag on the rail hands back the complete new id order; persisting it
+  // is all there is to do - orderedTrays re-derives from the store's echo.
+  const handleTabReorder = useCallback(
+    (ids: string[]) => {
+      playSound("click");
+      void updateSettings({ flyoutTabOrder: ids });
+    },
+    [updateSettings],
   );
 
   // The floating titlebar DEVKIT button's way in (there is no rail to hold a
@@ -588,7 +608,7 @@ export function WidgetApp() {
                     <NodePortsPanel active={nodePortsOpen} />
                   </Expander>
                 </motion.div>
-                {/* Docked, these four live in trays instead (below). */}
+                {/* Docked, these five live in trays instead (below). */}
                 {!docked && (
                   <motion.div variants={item}>
                     <GitPanel />
@@ -602,9 +622,11 @@ export function WidgetApp() {
                   and the docked layout shows them only in the Git tray.
                   Rendering <GitHubPanel/> here as well listed every PR twice.
                 */}
-                <motion.div variants={item}>
-                  <McpPanel />
-                </motion.div>
+                {!docked && (
+                  <motion.div variants={item}>
+                    <McpPanel />
+                  </motion.div>
+                )}
                 {!docked && (
                   <>
                     <motion.div variants={item}>
@@ -621,7 +643,7 @@ export function WidgetApp() {
                   </>
                 )}
                 {/*
-                  Docked, four of the nine panels moved into trays and the
+                  Docked, five of the nine panels moved into trays and the
                   column now ends well short of the bottom of a full-height
                   sidebar. Rather than backfill that with more data - which
                   would undo the point of moving them out - the run of empty
@@ -644,6 +666,7 @@ export function WidgetApp() {
                   side={side}
                   iconTheme={iconTheme}
                   onSelect={flyout.toggle}
+                  onReorder={handleTabReorder}
                   onBrand={toggleControlCenterTray}
                   brandActive={flyout.activeId === "control-center"}
                   brandTitle="Open the Control Center tray"

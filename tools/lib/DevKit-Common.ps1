@@ -91,6 +91,7 @@ function Get-DevKitSettings {
             # is the default for flyouts that don't have their own).
             flyoutWidth        = 380
             controlCenterFlyoutWidth = $null  # $null = fill the remaining screen on open; a resize drag persists a number
+            flyoutTabOrder     = @()           # rail tab order by tray id; empty = the code's default order. Written by drag-reordering the rail.
             globalHotkey       = 'CommandOrControl+Alt+D'  # summon/dismiss the widget
             runHistoryLimit    = 50            # tool runs retained in history
             # Icon rail (the vertical strip of flyout tabs on the widget's

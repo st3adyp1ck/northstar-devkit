@@ -392,6 +392,15 @@ export interface DevKitPreferences {
   uiSoundVolume: number;
   /** Default width for flyout trays without their own (git/notes have theirs above). */
   flyoutWidth: number;
+  /**
+   * The rail's tab order, as tray ids, persisted by drag-reordering the
+   * rail. Empty means "code default order". Read through orderTrays
+   * (components/flyouts/tabOrder.ts): stale ids are dropped and trays this
+   * build has that the saved order doesn't know are appended, so the value
+   * survives trays being added or removed across versions. And through
+   * asArray - a single saved id can arrive as a bare string off the wire.
+   */
+  flyoutTabOrder: string[];
   /** Global shortcut that summons/dismisses the widget, in Tauri accelerator syntax. */
   globalHotkey: string;
   /** How many tool runs the run-history store retains. */

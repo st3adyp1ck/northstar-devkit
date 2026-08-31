@@ -57,6 +57,9 @@
 .flyout-rail__tab {
   position: relative;
   width: 100%;
+  /* Pointer-drag rearranging owns vertical gestures on these buttons -
+     without this a touch drag scrolls/overscrolls instead of reordering. */
+  touch-action: none;
   /* Proportional to the strip, so a wider rail gets taller tabs and the
      glyphs keep the same optical breathing room at any railWidth. */
   height: calc(var(--flyout-rail-w, 44px) * 0.84);
@@ -122,6 +125,21 @@
 .flyout-rail__tab:hover .flyout-rail__light,
 .flyout-rail__tab:focus-visible .flyout-rail__light {
   opacity: 0.5;
+}
+
+/* ---------- tab drag-rearranging ---------- */
+/* While a drag is live every OTHER tab animates into its displaced slot,
+   so the rail reads as a physical rack making room. The dragged tab itself
+   must NOT transition - it is glued to the pointer. */
+.flyout-rail--reordering .flyout-rail__tab {
+  transition: transform var(--duration-fast) var(--ease-standard);
+}
+
+.flyout-rail__tab--dragging {
+  transition: none;
+  z-index: 2;
+  color: var(--accent-strong);
+  opacity: 0.92;
 }
 
 .flyout-rail__tab--active .flyout-rail__light {

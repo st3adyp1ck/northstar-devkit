@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePolledRpc } from "../../../hooks/usePolledRpc";
 import { useProjectStore } from "../../../stores/useProjectStore";
 import { asArray } from "../../../lib/arrays";
@@ -7,6 +7,7 @@ import { Badge } from "../../../components/primitives/Badge";
 import { Expander } from "../../../components/primitives/Expander";
 import { ServerIcon } from "./icons";
 import type { McpReport, McpClientStatus, McpServerEntry } from "../../../lib/types";
+import { useOnScreen } from "./git/paneVisibility";
 import "./McpPanel.css";
 
 /**
@@ -54,11 +55,17 @@ export function McpPanel() {
   // an idle check is genuinely expensive here.
   const [openBoxes, setOpenBoxes] = useState(0);
   const anyOpen = openBoxes > 0;
+  // Docked, this panel is a tray pane, and the tray keeps shut panes
+  // MOUNTED - so "a box is expanded" alone would keep spawning MCP checks
+  // into a tray nobody has open. Same aria-hidden signal as the other tray
+  // panels; the floating layout has no pane ancestor and reads always-on.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const onScreen = useOnScreen(rootRef);
   const { data, pending, failed, stale, errorMessage } = usePolledRpc<McpReport>(
     "mcp.report",
     { projectPath: active?.path ?? "" },
     60000,
-    anyOpen,
+    anyOpen && onScreen,
   );
 
   // The failed branch below UNMOUNTS the Expanders, so ones that were open
@@ -71,7 +78,7 @@ export function McpPanel() {
 
   return (
     <GlassPanel>
-      <div className="panel-header">
+      <div ref={rootRef} className="panel-header">
         <span className="panel-header__icon">
           <ServerIcon />
         </span>

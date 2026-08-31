@@ -32,7 +32,7 @@ import "./WidgetFlyout.css";
  */
 
 export type IconTheme = "outline" | "solid" | "duotone";
-export type RailIconName = "git" | "terminal" | "files" | "notes" | "devkit";
+export type RailIconName = "git" | "terminal" | "files" | "notes" | "mcp" | "devkit";
 
 const ICON_THEMES: readonly IconTheme[] = ["outline", "solid", "duotone"];
 
@@ -89,6 +89,25 @@ const GLYPHS: Record<RailIconName, Glyph> = {
         <path d="M13.5 3.8V9.1H18.8" />
         <path d="M8.4 13.4H15.6" />
         <path d="M8.4 16.6H12.8" />
+      </>
+    ),
+  },
+  // MCP - a two-bay server stack: each bay a closed silhouette, with a
+  // status dot and a vent rule as the interior work. Reads as "servers" at
+  // rail size in all three themes without leaning on colour.
+  mcp: {
+    shape: (
+      <>
+        <rect x="3.2" y="4.4" width="17.6" height="6.4" rx="2" />
+        <rect x="3.2" y="13.2" width="17.6" height="6.4" rx="2" />
+      </>
+    ),
+    inner: (
+      <>
+        <circle cx="7" cy="7.6" r="1.1" />
+        <circle cx="7" cy="16.4" r="1.1" />
+        <path d="M11.2 7.6H17.6" />
+        <path d="M11.2 16.4H17.6" />
       </>
     ),
   },

@@ -4,6 +4,23 @@ All notable changes to Northstar DevKit are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- **MCP Servers is a tray now.** The panel moved out of the docked
+  sidebar's column into its own slide-out tray, with a server-stack glyph
+  on the rail beside Git / Terminal / Files / Notes. Floating keeps it
+  inline (there is no rail to hold a tray when the widget floats), and the
+  panel's spawn-on-expand polling now also parks itself whenever its tray
+  is shut, like every other tray panel.
+- **The rail's tabs are drag-arrangeable.** Grab any tray tab and drag it
+  to a new slot - the other tabs step aside as you go - or press
+  Alt+Up/Down on a focused tab (focus follows the moved tab, so repeated
+  presses walk it up or down the rail). The arrangement persists as
+  `preferences.flyoutTabOrder` and survives trays being added or removed
+  across versions: unknown ids are dropped, new trays append in default
+  order. The DEVKIT plate stays seated at the foot of the rail - it is
+  chassis, not a tab.
+
 ### Fixed
 
 - **The idle widget no longer eats the machine.** Measured on the installed
