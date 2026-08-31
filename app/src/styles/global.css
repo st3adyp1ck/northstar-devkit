@@ -4,6 +4,22 @@
   box-sizing: border-box;
 }
 
+/*
+ * A window that is not on screen must cost nothing. main.tsx's
+ * WindowEffectsGate stamps this attribute while the OS window is hidden
+ * (tray-hidden widget, the Control Center window before its first open).
+ * Chromium's own background throttling never applies here - occlusion
+ * tracking is disabled for transparent windows - so without this a single
+ * infinite spinner in a hidden window keeps the compositor at 60fps
+ * indefinitely (measured: ~2/3 of a core across the process tree).
+ */
+:root[data-devkit-window-hidden] *,
+:root[data-devkit-window-hidden] *::before,
+:root[data-devkit-window-hidden] *::after {
+  animation-play-state: paused !important;
+  transition-duration: 0s !important;
+}
+
 html,
 body,
 #root {

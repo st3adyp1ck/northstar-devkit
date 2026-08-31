@@ -63,14 +63,22 @@ pub async fn terminal_spawn(
     app: AppHandle,
     registry: State<'_, TerminalRegistry>,
     cwd: Option<String>,
+    cols: Option<u16>,
+    rows: Option<u16>,
 ) -> Result<String, String> {
     let shell = locate_shell()?;
 
     let pty_system = native_pty_system();
+    // Open at the caller's REAL size (xterm has already measured its host
+    // when it calls this), not a nominal 80x24. Spawning wide and then
+    // shrinking mid-profile-load is what made PSReadLine's ListView
+    // prediction initialize against a width that was about to vanish - the
+    // tray pane is ~42 columns, ListView needs 50 - so every tray open
+    // printed its yellow "temporarily disabled" warning across the boot.
     let pair = pty_system
         .openpty(PtySize {
-            rows: 24,
-            cols: 80,
+            rows: rows.filter(|r| *r > 0).unwrap_or(24),
+            cols: cols.filter(|c| *c > 0).unwrap_or(80),
             pixel_width: 0,
             pixel_height: 0,
         })

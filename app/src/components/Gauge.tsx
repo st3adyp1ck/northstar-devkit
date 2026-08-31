@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef } from "react";
 import clsx from "clsx";
 import { Sparkline } from "./Sparkline";
 import "./Gauge.css";
@@ -30,24 +30,19 @@ const TONE_VAR: Record<NonNullable<GaugeProps["tone"]>, string> = {
 };
 
 /**
- * Reads --duration-gauge off the root so the rAF loop's fill duration
- * follows the same reduced-motion contract as every CSS transition in the
- * app (tokens.css zeroes it under prefers-reduced-motion) instead of a
- * hardcoded ms value that would silently ignore that setting.
- */
-function gaugeDurationMs(): number {
-  if (typeof window === "undefined") return 480;
-  const raw = getComputedStyle(document.documentElement).getPropertyValue("--duration-gauge").trim();
-  const value = parseFloat(raw);
-  if (Number.isNaN(value)) return 480;
-  return raw.endsWith("ms") ? value : value * 1000;
-}
-
-/**
- * SVG arc gauge, animated via a spring-eased rAF loop rather than WPF
- * Storyboards - this is the fix for the old widget's "hovering a gauge
- * spikes CPU/GPU" bug: no per-frame layout/paint work beyond updating one
- * `stroke-dashoffset`, and the loop stops entirely once the value settles.
+ * SVG arc gauge, animated by a plain CSS transition on stroke-dashoffset.
+ *
+ * This REPLACED a rAF loop that eased the value through setState. The loop
+ * was honest about stopping when settled, but real metrics never settle:
+ * CPU/mem/GPU jitter on nearly every 2s poll, so with three gauges the
+ * widget sustained ~40 React commits per second at idle - each one
+ * re-rasterizing the arc's drop-shadow filter over the panel's
+ * backdrop-blur. A CSS transition costs ONE commit per poll and hands the
+ * tween to the compositor's timeline; --duration-gauge keeps the
+ * reduced-motion contract (tokens.css zeroes it) with no JS reader. Moves
+ * under one percentage point snap with no transition at all, so poll
+ * jitter the eye can't see (an arc point is >1%) costs one paint, not 480ms
+ * of them.
  */
 export function Gauge({
   label,
@@ -59,44 +54,24 @@ export function Gauge({
   history,
   historyCapacity,
 }: GaugeProps) {
-  const [display, setDisplay] = useState(percent ?? 0);
-  const rafRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    const target = percent ?? 0;
-    const start = display;
-    const durationMs = gaugeDurationMs();
-
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-
-    if (durationMs <= 0) {
-      // Reduced motion: jump straight to the settled value, no rAF loop.
-      setDisplay(target);
-      return;
-    }
-
-    const startTime = performance.now();
-
-    function tick(now: number) {
-      const t = Math.min(1, (now - startTime) / durationMs);
-      const eased = 1 - Math.pow(1 - t, 3);
-      setDisplay(start + (target - start) * eased);
-      if (t < 1) {
-        rafRef.current = requestAnimationFrame(tick);
-      } else {
-        rafRef.current = null;
-      }
-    }
-    rafRef.current = requestAnimationFrame(tick);
-    return () => {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [percent]);
+  const target = percent ?? 0;
+  // The snap-vs-transition decision is sticky per VALUE change, not per
+  // render: GaugesPanel re-renders again immediately after each poll (its
+  // history effect), and a per-render comparison let that second pass set
+  // transition back to "none" before the browser had begun the tween -
+  // every arc move became a snap. Written during render on purpose; the
+  // decision has to reach the same commit as the offset it governs.
+  const prevTargetRef = useRef(target);
+  const animRef = useRef(false);
+  if (target !== prevTargetRef.current) {
+    animRef.current = Math.abs(target - prevTargetRef.current) >= 1;
+    prevTargetRef.current = target;
+  }
+  const animateArc = animRef.current;
 
   const radius = (size - 12) / 2;
   const circumference = 2 * Math.PI * radius;
-  const offset = circumference * (1 - display / 100);
+  const offset = circumference * (1 - target / 100);
   const color = TONE_VAR[tone];
 
   return (
@@ -131,7 +106,12 @@ export function Gauge({
               strokeDasharray={circumference}
               strokeDashoffset={offset}
               transform={`rotate(-90 ${size / 2} ${size / 2})`}
-              style={{ filter: `drop-shadow(0 0 6px ${color})` }}
+              style={{
+                filter: `drop-shadow(0 0 6px ${color})`,
+                transition: animateArc
+                  ? "stroke-dashoffset var(--duration-gauge, 480ms) var(--ease-standard, ease-out)"
+                  : "none",
+              }}
             />
           )}
         </svg>

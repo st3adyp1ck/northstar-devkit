@@ -198,6 +198,7 @@
 }
 
 .devkit-sidecar--ok .devkit-sidecar__dot {
+  position: relative;
   width: 6px;
   height: 6px;
   background: var(--success);
@@ -207,22 +208,34 @@
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--success) 32%, transparent),
     0 0 5px color-mix(in srgb, var(--success) 50%, transparent),
     0 0 11px color-mix(in srgb, var(--success) 20%, transparent);
+}
+
+/* The breathe lives on a pseudo-element carrying the PEAK halo, whose
+   opacity is what animates. Animating box-shadow itself (the previous
+   shape) is a paint-only interpolation: the renderer re-rasterized this
+   halo at 60fps for the life of every visible window, since the sidecar is
+   healthy essentially always. Shadow painted once + opacity tween keeps the
+   identical look on the compositor instead. Only the halo moves - the
+   dot's own size and position are static, so nothing next to it shifts. */
+.devkit-sidecar--ok .devkit-sidecar__dot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--success) 40%, transparent),
+    0 0 8px color-mix(in srgb, var(--success) 72%, transparent),
+    0 0 18px color-mix(in srgb, var(--success) 32%, transparent);
+  opacity: 0;
   animation: devkit-sidecar-breathe 4.2s ease-in-out infinite;
 }
 
-/* Only the halo moves - the dot's own size and position are static, so this
-   never nudges the controls next to it. */
 @keyframes devkit-sidecar-breathe {
   0%,
   100% {
-    box-shadow: 0 0 0 1px color-mix(in srgb, var(--success) 28%, transparent),
-      0 0 4px color-mix(in srgb, var(--success) 42%, transparent),
-      0 0 9px color-mix(in srgb, var(--success) 16%, transparent);
+    opacity: 0;
   }
   50% {
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--success) 40%, transparent),
-      0 0 8px color-mix(in srgb, var(--success) 72%, transparent),
-      0 0 18px color-mix(in srgb, var(--success) 32%, transparent);
+    opacity: 1;
   }
 }
 
@@ -260,14 +273,16 @@
    halo when it stops; only the breathing goes. */
 @media (prefers-reduced-motion: reduce) {
   .devkit-sidecar--down .devkit-sidecar__dot,
-  .devkit-sidecar--ok .devkit-sidecar__dot {
+  .devkit-sidecar--ok .devkit-sidecar__dot,
+  .devkit-sidecar--ok .devkit-sidecar__dot::after {
     animation: none;
   }
 }
 
 /* App-level twin of the media query above - see tokens.css's data-animations block. */
 :root[data-animations="off"] .devkit-sidecar--down .devkit-sidecar__dot,
-:root[data-animations="off"] .devkit-sidecar--ok .devkit-sidecar__dot {
+:root[data-animations="off"] .devkit-sidecar--ok .devkit-sidecar__dot,
+:root[data-animations="off"] .devkit-sidecar--ok .devkit-sidecar__dot::after {
   animation: none;
 }
 

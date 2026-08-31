@@ -44,7 +44,19 @@ const XTERM_FONT_FAMILY = '"Cascadia Code", "Cascadia Mono", Consolas, monospace
 const PROMPT_INIT =
   "function prompt { $e=[char]27; $p=\"$($executionContext.SessionState.Path.CurrentLocation)\"; " +
   "if ($HOME -and $p.StartsWith($HOME, [System.StringComparison]::OrdinalIgnoreCase)) { $p = '~' + $p.Substring($HOME.Length) }; " +
-  "\"$e[1;36m$p$e[0m $e[94m$([char]0x276F)$e[0m \" }; Clear-Host\r";
+  "\"$e[1;36m$p$e[0m $e[94m$([char]0x276F)$e[0m \" }; " +
+  // PSReadLine's ListView prediction pane needs a >=50-column console and
+  // warns in yellow on EVERY render where it doesn't fit - and the tray
+  // pane is ~42 columns, so a profile that sets ListView (a perfectly good
+  // choice in a real terminal) filled the embedded terminal's boot with
+  // that warning, re-printed after each prompt. Downgrade to inline
+  // prediction here, where it's too narrow; the user's profile and their
+  // real terminals are untouched. Get-Module, NOT Get-Command: Get-Command
+  // triggers module auto-loading, which would silently re-import PSReadLine
+  // for someone whose profile deliberately removed it - Get-Module only
+  // reports what is ALREADY loaded. Best-effort: no PSReadLine, no change.
+  "try { if ((Get-Module PSReadLine) -and $Host.UI.RawUI.WindowSize.Width -lt 54) { Set-PSReadLineOption -PredictionViewStyle InlineView } } catch {}; " +
+  "Clear-Host\r";
 
 /**
  * Reusable embedded terminal - a real ConPTY `pwsh` session owned by Rust
@@ -173,7 +185,16 @@ export function TerminalView({ cwd, className }: TerminalViewProps) {
         term.open(host);
         safeFit();
 
-        const id = await invoke<string>("terminal_spawn", { cwd: cwd ?? null });
+        // Spawn the ConPTY at the size xterm just measured, not a nominal
+        // 80x24. The old spawn-wide-then-shrink sequence resized the
+        // console out from under the loading profile - PSReadLine would
+        // initialize its ListView prediction against 80 columns and then
+        // find ~42, warning in yellow on every subsequent prompt render.
+        const id = await invoke<string>("terminal_spawn", {
+          cwd: cwd ?? null,
+          cols: term.cols > 0 ? term.cols : null,
+          rows: term.rows > 0 ? term.rows : null,
+        });
         if (disposed) {
           // Unmounted while the spawn was in flight - clean up the
           // session we just created rather than leaking it.

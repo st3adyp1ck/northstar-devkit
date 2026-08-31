@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import clsx from "clsx";
 import { usePolledRpc } from "../../../hooks/usePolledRpc";
 import { useProjectStore } from "../../../stores/useProjectStore";
@@ -8,6 +8,7 @@ import { GlassPanel } from "../../../components/primitives/GlassPanel";
 import { Badge } from "../../../components/primitives/Badge";
 import { FolderIcon } from "./icons";
 import type { DirChild, DirChildrenResult } from "../../../lib/types";
+import { useOnScreen } from "./git/paneVisibility";
 import "./FilesPanel.css";
 
 /**
@@ -100,13 +101,18 @@ function TreeNode({ node, depth, ctl }: { node: DirChild; depth: number; ctl: Tr
 
 export function FilesPanel() {
   const active = useProjectStore((s) => s.active);
+  // Same shut-tray gating as GitPanel/NotesOnDeckPanel: the tray keeps this
+  // pane mounted while hidden, and mounted must not mean a 15s directory
+  // scan nobody can see.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const onScreen = useOnScreen(rootRef);
   const {
     data: root,
     pending: rootPending,
     failed: rootFailed,
     stale: rootStale,
     errorMessage: rootRpcError,
-  } = usePolledRpc<DirChildrenResult>("files.children", active ? { path: active.path } : undefined, 15000, !!active);
+  } = usePolledRpc<DirChildrenResult>("files.children", active ? { path: active.path } : undefined, 15000, !!active && onScreen);
 
   const [childrenByPath, setChildrenByPath] = useState<Record<string, DirChild[]>>({});
   const [errorByPath, setErrorByPath] = useState<Record<string, string>>({});
@@ -166,7 +172,7 @@ export function FilesPanel() {
 
   return (
     <GlassPanel>
-      <div className="panel-header">
+      <div ref={rootRef} className="panel-header">
         <span className="panel-header__icon">
           <FolderIcon />
         </span>

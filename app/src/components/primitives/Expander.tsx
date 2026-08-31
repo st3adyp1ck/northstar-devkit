@@ -18,6 +18,14 @@ interface ExpanderProps extends PropsWithChildren {
    * section exists on the page.
    */
   lazyMount?: boolean;
+  /**
+   * Observe open/close without taking the state over (the Expander stays
+   * uncontrolled). For parents whose side effects should only run while
+   * someone is actually looking - McpPanel polls `claude mcp list`, which
+   * spawns every configured MCP server per check, only while one of its
+   * boxes is open.
+   */
+  onOpenChange?: (open: boolean) => void;
 }
 
 /**
@@ -26,16 +34,17 @@ interface ExpanderProps extends PropsWithChildren {
  * it degrades gracefully to an instant snap under prefers-reduced-motion
  * since --duration-slow collapses to 0ms there - see tokens.css).
  */
-export function Expander({ title, actionSlot, defaultOpen = false, className, lazyMount = false, children }: ExpanderProps) {
+export function Expander({ title, actionSlot, defaultOpen = false, className, lazyMount = false, onOpenChange, children }: ExpanderProps) {
   const [open, setOpen] = useState(defaultOpen);
   const [everOpened, setEverOpened] = useState(defaultOpen);
 
+  // Plain reads/writes rather than an updater function: onOpenChange is a
+  // side effect, and React runs updater functions twice under StrictMode.
   function toggle() {
-    setOpen((v) => {
-      const next = !v;
-      if (next) setEverOpened(true);
-      return next;
-    });
+    const next = !open;
+    if (next) setEverOpened(true);
+    setOpen(next);
+    onOpenChange?.(next);
   }
 
   const shouldRenderChildren = !lazyMount || everOpened;

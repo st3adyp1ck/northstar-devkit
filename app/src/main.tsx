@@ -1,8 +1,9 @@
-import { StrictMode, type ReactNode } from "react";
+import { StrictMode, useEffect, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { CommandPalette } from "./components/palette/CommandPalette";
+import { useVisibility } from "./hooks/useVisibility";
 import { initUiSounds } from "./lib/sounds";
 import { initErrorCapture } from "./lib/errorCapture";
 import "./styles/global.css";
@@ -52,10 +53,31 @@ const windowKind = new URLSearchParams(window.location.search).get("window") ?? 
  * own tree has crashed. It's inside the QueryClientProvider so its catalog
  * fetch shares the Control Center's ["catalog.get"] cache entry.
  */
+/**
+ * Stamps `data-devkit-window-hidden` on <html> while this OS window is not
+ * on screen; global.css pauses every CSS animation and transition under it.
+ *
+ * This is not an optimization garnish - it is load-bearing for "the widget
+ * is lightweight". Chromium disables its occlusion tracking for transparent
+ * windows, so a hidden DevKit window never gets background throttling: an
+ * 800ms spinner in the never-shown Control Center window kept the GPU
+ * process compositing a transparent, blurred surface at 60fps forever.
+ * Measured on the installed 4.2.0 build at idle: pausing animations took
+ * the whole process tree from 81% of a core to 15%.
+ */
+function WindowEffectsGate() {
+  const visible = useVisibility();
+  useEffect(() => {
+    document.documentElement.toggleAttribute("data-devkit-window-hidden", !visible);
+  }, [visible]);
+  return null;
+}
+
 function Shell({ children }: { children: ReactNode }) {
   return (
     <StrictMode>
       <QueryClientProvider client={queryClient}>
+        <WindowEffectsGate />
         <ErrorBoundary>{children}</ErrorBoundary>
         <CommandPalette />
       </QueryClientProvider>

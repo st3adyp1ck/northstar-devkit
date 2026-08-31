@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from "react";
+import { useRef, useState, type CSSProperties } from "react";
 import clsx from "clsx";
 import { usePolledRpc } from "../../../hooks/usePolledRpc";
 import { useProjectStore } from "../../../stores/useProjectStore";
@@ -8,6 +8,7 @@ import { GlassPanel } from "../../../components/primitives/GlassPanel";
 import { Badge } from "../../../components/primitives/Badge";
 import { Button } from "../../../components/primitives/Button";
 import type { ProjectNote, OnDeckItem, OnDeckStatus } from "../../../lib/types";
+import { useOnScreen } from "./git/paneVisibility";
 import "./NotesOnDeckPanel.css";
 
 /** Small fixed palette drawn from tokens.css's signal colors - one pick per new note, round-robin. */
@@ -52,6 +53,12 @@ export function NotesOnDeckPanel() {
   const active = useProjectStore((s) => s.active);
   const [tab, setTab] = useState<"notes" | "ondeck">("notes");
   const params = active ? { projectPath: active.path } : undefined;
+  // Docked, this panel lives in a flyout tray that keeps its panes MOUNTED
+  // while shut (a tray holds live drafts) - so mounted must not mean
+  // polling. Same aria-hidden signal GitPanel reads; a floating widget has
+  // no pane ancestor and reads as always on screen.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const onScreen = useOnScreen(rootRef);
   const {
     data: notes,
     isLoading: notesLoading,
@@ -63,12 +70,12 @@ export function NotesOnDeckPanel() {
     // there is no undo. `notesFailed` gates both the empty state and Add.
     failed: notesFailed,
     errorMessage: notesError,
-  } = usePolledRpc<ProjectNote[]>("notes.get", params, 10000, !!active);
+  } = usePolledRpc<ProjectNote[]>("notes.get", params, 10000, !!active && onScreen);
   const {
     data: items,
     isLoading: itemsLoading,
     refetch: refetchItems,
-  } = usePolledRpc<OnDeckItem[]>("ondeck.get", params, 10000, !!active);
+  } = usePolledRpc<OnDeckItem[]>("ondeck.get", params, 10000, !!active && onScreen);
   const [noteDraft, setNoteDraft] = useState("");
   const [itemDraft, setItemDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -179,7 +186,7 @@ export function NotesOnDeckPanel() {
 
   return (
     <GlassPanel>
-      <div className="panel-tabs">
+      <div ref={rootRef} className="panel-tabs">
         <button type="button" className={clsx("panel-tab", tab === "notes" && "panel-tab--active")} onClick={() => setTab("notes")}>
           Notes <Badge tone={tab === "notes" ? "accent" : "neutral"}>{noteList.length}</Badge>
         </button>

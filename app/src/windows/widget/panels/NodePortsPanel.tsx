@@ -50,8 +50,16 @@ const KILL_ALL_NODE = { label: "Kill All Node", folder: "ports", script: "Kill-A
 const KILL_PORT = { label: "Kill Port", folder: "ports", script: "Kill-Port.ps1", args: ["-Force"] };
 const CLEAR_CACHE = { label: "Clear NPM Cache", folder: "node", script: "Clear-NpmCache.ps1", args: [] as string[] };
 
-export function NodePortsPanel() {
-  const { data, refetch, pending, failed, stale, errorMessage } = usePolledRpc<NodeSnapshot>("metrics.node", undefined, 3000);
+/**
+ * `active` is the hosting Expander's open state. The panel stays MOUNTED
+ * while collapsed (lazyMount keeps it alive so an in-flight kill/run can't
+ * be torn down by toggling the section) - but mounted must not mean
+ * polling: metrics.node enumerates processes and TCP tables every 3s, and
+ * before this flag it kept doing so forever once the section had been
+ * opened a single time.
+ */
+export function NodePortsPanel({ active = true }: { active?: boolean } = {}) {
+  const { data, refetch, pending, failed, stale, errorMessage } = usePolledRpc<NodeSnapshot>("metrics.node", undefined, 3000, active);
   const processes = useMemo(() => sortForDisplay(asArray(data?.Processes)), [data]);
   const otherPorts = asArray(data?.OtherPorts);
   const reservedPorts = asArray(data?.ReservedPorts);

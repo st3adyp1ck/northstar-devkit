@@ -4,6 +4,76 @@ All notable changes to Northstar DevKit are documented here.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The idle widget no longer eats the machine.** Measured on the installed
+  4.2.0 build sitting untouched: the process tree burned **81% of a CPU
+  core**, most of it the WebView2 GPU process compositing at 60fps. Three
+  causes, all fixed:
+  - **The hidden Control Center window thought it was visible.** Chromium
+    disables occlusion tracking for transparent windows, so the never-shown
+    window reported `document.visibilityState === "visible"`, defeating
+    every visibility-gated poll - and its 800ms loading spinner spun at
+    60fps into a window nobody had ever seen (43% of a core in the GPU
+    process plus 25% in that window's renderer, measured). `useVisibility`
+    now also asks the OS (`getCurrentWindow().isVisible()`) at mount, and a
+    new `WindowEffectsGate` stamps `data-devkit-window-hidden` on any
+    hidden window, under which global.css pauses every animation and
+    transition. Pausing animations alone took the tree from 81% to 15% in
+    a controlled A/B on the installed build.
+  - **The MCP panel spawned your entire MCP server fleet three times a
+    minute.** `mcp.report` polled every 20s, each report runs
+    `claude mcp list` twice (neutral + project scope), and that command
+    health-checks by CONNECTING - spawning every configured stdio server
+    as a real process (~1 GB of transient process tree measured hanging
+    off the sidecar). The report now runs only while one of the panel's
+    boxes is actually expanded, at 60s; collapsed boxes show the last
+    known state or "not checked".
+  - **`claude mcp list` had no deadline.** One wedged server hung the
+    check forever and stranded the whole spawned fleet as orphans.
+    `Invoke-DevKitMcpList` now runs it as a child process with a 25s
+    timeout (two sequential runs must fit the RPC's 60s budget) and kills
+    the process TREE (`taskkill /T`) on expiry. Resolution goes through
+    `Get-DevKitWindowsExecutable`, and a `claude.ps1` npm shim runs via the
+    current PowerShell host - a bare `Get-Command` would have handed
+    `CreateProcess` a script it cannot launch on npm-installed CLIs.
+- **Minimize now counts as hidden.** The titlebar's Minimize button went
+  through neither the tray-hide event nor `document.hidden` (occlusion
+  tracking is off for transparent windows), so a minimized window kept
+  every poll and animation at full idle cost. The Rust side now emits the
+  visibility event on minimize/restore transitions, for both windows.
+- **The gauges stopped re-rendering at 40 commits/second.** The arc eased
+  through a rAF `setState` loop, and real CPU/mem/GPU readings jitter on
+  nearly every 2s poll - so three gauges kept React committing ~40 times a
+  second at idle, each frame re-rasterizing a drop-shadow over the panel's
+  backdrop blur. The arc is now a CSS `stroke-dashoffset` transition (one
+  commit per poll, reduced-motion contract inherited from
+  `--duration-gauge`), and moves under one percentage point snap without
+  animating at all.
+- **Decorative glows stopped costing paint.** The healthy sidecar dot
+  animated `box-shadow` - a paint-per-frame property - 60fps for the life
+  of every window; the peak halo now sits on a pseudo-element whose
+  opacity breathes instead. The widget rail's breathe ran even while the
+  rail was held at `opacity: 0` in the expanded layout; it is now scoped
+  to the collapsed sliver, the only state where the rail is visible.
+- **Mounted no longer means polling.** Node & Ports kept its 3s
+  process/TCP enumeration running forever once the section had been opened
+  a single time (`lazyMount` keeps panels mounted on purpose); its
+  Expander's new `onOpenChange` now gates the poll. Notes/On-Deck (10s)
+  and Files (15s) polled inside a SHUT flyout tray; both now read the same
+  pane-visibility signal GitPanel already used.
+- **The embedded terminal no longer boots into PSReadLine's yellow
+  "ListView temporarily disabled" wall.** The ConPTY spawned at a nominal
+  80x24 and was resized to the tray's real ~42 columns mid-profile-load;
+  PSReadLine's ListView prediction needs 50 columns and re-warned on every
+  prompt render. `terminal_spawn` now opens the pty at the size xterm
+  actually measured, and the injected first command downgrades the
+  prediction view to `InlineView` when the pane is narrower than 54
+  columns - your profile and real terminals keep ListView untouched. (The
+  pause before the prompt is your own PowerShell profile loading -
+  measured 1.3s vs 0.2s without - and is unchanged: the embedded terminal
+  deliberately loads your real profile.)
+
 ### Changed
 
 - **Releases publish themselves** (`.github/workflows/release.yml`,

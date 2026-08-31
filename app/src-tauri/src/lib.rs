@@ -290,6 +290,36 @@ fn run_app() {
                 let _ = window.hide();
                 emit_visibility(window, window.label(), false);
             }
+            // Minimize is a THIRD hide path (the titlebar's own Minimize
+            // button, the taskbar) and it goes through neither
+            // set_window_visible (so no devkit://visibility event) nor the
+            // page's document.hidden (Chromium's occlusion tracking is off
+            // for transparent windows). Left untold, a minimized window
+            // kept every poll and animation running at full idle cost.
+            // tao forwards WM_SIZE with no SIZE_MINIMIZED guard (see
+            // commands::is_iconic), so Resized fires on the way down AND on
+            // restore - is_minimized() is the state, the TRANSITION is
+            // detected here so a plain resize drag doesn't spam an event
+            // per tick. Both windows, hence before the widget-only gate.
+            if let WindowEvent::Resized(_) = event {
+                use std::collections::HashMap;
+                use std::sync::{Mutex, OnceLock};
+                static MINIMIZED: OnceLock<Mutex<HashMap<String, bool>>> = OnceLock::new();
+                let minimized = window.is_minimized().unwrap_or(false);
+                let mut map = MINIMIZED
+                    .get_or_init(|| Mutex::new(HashMap::new()))
+                    .lock()
+                    .unwrap();
+                let prev = map.insert(window.label().to_string(), minimized);
+                if prev.unwrap_or(false) != minimized {
+                    // Restore only counts as visible if the window is also
+                    // actually shown - restoring can't normally happen while
+                    // hidden, but a wrong `true` here would wake a
+                    // tray-hidden window's polling.
+                    let shown = !minimized && window.is_visible().unwrap_or(true);
+                    emit_visibility(window, window.label(), shown);
+                }
+            }
             if window.label() != "widget" {
                 return;
             }

@@ -48,7 +48,8 @@ export function useVisibility(): boolean {
     let cancelled = false;
 
     void (async () => {
-      const label = getCurrentWindow().label;
+      const win = getCurrentWindow();
+      const label = win.label;
       const un = await listen<VisibilityEventPayload>("devkit://visibility", (e) => {
         if (e.payload.label === label) setVisible(e.payload.visible);
       });
@@ -59,6 +60,31 @@ export function useVisibility(): boolean {
         un();
       } else {
         unlisten = un;
+      }
+      // THEN ask the OS what is actually true right now. Neither signal
+      // above covers a window that was created hidden and never shown: no
+      // set_window_visible call has run for it, so the devkit:// event
+      // never fires - and `document.hidden` turns out to be FALSE there
+      // anyway (measured on WebView2 151: the webview reports "visible"
+      // for the never-shown window, because Chromium disables occlusion
+      // tracking entirely for transparent windows). That is exactly the
+      // Control Center window at boot, which therefore spent its life
+      // polling and spinning a loading spinner at 60fps into a window
+      // nobody had ever seen - about a third of a core, measured.
+      //
+      // The OS answer is used AS-IS, not ANDed with !document.hidden: the
+      // docstring's contingency is document.hidden stuck TRUE on a
+      // created-hidden window, and folding it in here would nail this
+      // window invisible forever on exactly that WebView2 version. This is
+      // a one-shot seed in a last-write-wins design - the two listeners
+      // above keep correcting it, and events/responses do not share one
+      // ordered channel, so no ordering guarantee is claimed beyond "the
+      // seed reflects the OS state at resolution time".
+      try {
+        const actuallyVisible = await win.isVisible();
+        if (!cancelled) setVisible(actuallyVisible);
+      } catch {
+        // Query failed - keep whatever the other two signals said.
       }
     })();
 

@@ -121,7 +121,6 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  animation: widget-rail-breathe 2.4s ease-in-out infinite;
 }
 
 .widget-rail__line {
@@ -130,6 +129,15 @@
   border-radius: var(--radius-pill);
   background: linear-gradient(to bottom, transparent, var(--accent), transparent);
   box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 60%, transparent);
+}
+
+/* The breathe runs ONLY while the rail can be seen - i.e. collapsed to the
+   sliver, where the rail is the whole widget. In the ordinary expanded
+   state the rail sits at opacity:0 (above), and an animation inside an
+   invisible element still runs: two infinite opacity tweens ticking the
+   compositor forever behind a fully drawn panel column. */
+.widget-app--collapsed .widget-rail__glyph,
+.widget-app--collapsed .widget-rail__line {
   animation: widget-rail-breathe 2.4s ease-in-out infinite;
 }
 
@@ -143,16 +151,19 @@
   50% { opacity: 1; }
 }
 
+/* Selectors carry the same .widget-app--collapsed scope as the animation
+   declaration above - a bare .widget-rail__glyph override would LOSE the
+   specificity contest against it and reduced motion would stop working. */
 @media (prefers-reduced-motion: reduce) {
-  .widget-rail__glyph,
-  .widget-rail__line {
+  .widget-app--collapsed .widget-rail__glyph,
+  .widget-app--collapsed .widget-rail__line {
     animation: none;
     opacity: 0.9;
   }
 }
 
-:root[data-animations="off"] .widget-rail__glyph,
-:root[data-animations="off"] .widget-rail__line {
+:root[data-animations="off"] .widget-app--collapsed .widget-rail__glyph,
+:root[data-animations="off"] .widget-app--collapsed .widget-rail__line {
   animation: none;
   opacity: 0.9;
 }

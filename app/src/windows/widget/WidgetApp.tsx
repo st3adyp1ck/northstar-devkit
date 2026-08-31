@@ -177,6 +177,8 @@ export function WidgetApp() {
   // `WidgetState::collapsed` in commands.rs is the authority, because Rust is
   // what actually parks the OS window off its edge.
   const [collapsed, setCollapsed] = useState(false);
+  /** The Node & Ports Expander's open state - gates its 3s poll (see below). */
+  const [nodePortsOpen, setNodePortsOpen] = useState(false);
   const mainRef = useRef<HTMLDivElement | null>(null);
 
   const widthFor = useCallback(
@@ -578,9 +580,12 @@ export function WidgetApp() {
                   {/* Collapsed by default, like the terminal: lazyMount means
                       the panel (and its process/port polls) costs nothing
                       until first opened, then stays mounted so an in-flight
-                      tool run can never be torn down by toggling it shut. */}
-                  <Expander title="Node & Ports" lazyMount>
-                    <NodePortsPanel />
+                      tool run can never be torn down by toggling it shut.
+                      onOpenChange is the other half: mounted-but-collapsed
+                      must not keep the 3s process/TCP enumeration running,
+                      which "opened once, then closed" used to do forever. */}
+                  <Expander title="Node & Ports" lazyMount onOpenChange={setNodePortsOpen}>
+                    <NodePortsPanel active={nodePortsOpen} />
                   </Expander>
                 </motion.div>
                 {/* Docked, these four live in trays instead (below). */}
