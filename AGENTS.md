@@ -71,11 +71,12 @@ DevKit/
 │                              # the WPF app; stale, not yet repointed
 │
 ├── .github/
-│   ├── workflows/ci.yml           # PSScriptAnalyzer + PS syntax check + Pester,
-│   │                              # on every push/PR to main - PowerShell only
-│   │                              # today, see "App Architecture" > CI below
+│   ├── workflows/ci.yml           # 4 parallel jobs on every push/PR to main:
+│   │                              # version triple, PowerShell (PSScriptAnalyzer
+│   │                              # + syntax + Pester), Rust workspace, frontend
+│   │                              # (tsc + vitest + vite build)
 │   ├── workflows/release.yml      # vX.Y.Z tag -> builds+signs the Tauri app ->
-│   │                              # opens a DRAFT GitHub Release
+│   │                              # PUBLISHES the GitHub Release (not a draft)
 │   ├── ISSUE_TEMPLATE/
 │   └── PULL_REQUEST_TEMPLATE.md
 │
@@ -682,14 +683,20 @@ means it'll work from the other.
   no custom `Uninstall.ps1` any more - NSIS generates its own uninstaller
   as part of the bundle.
 - **CI** (`.github/workflows/release.yml`): pushing a `vX.Y.Z` tag builds
-  and signs the app on `windows-latest` and opens a **draft** GitHub
-  Release - a human must click "Publish release" before the updater
-  endpoint goes live. `.github/workflows/ci.yml` currently runs only the
-  PowerShell side (PSScriptAnalyzer, a syntax check, Pester) on every
-  push/PR to `main`; the Rust and frontend checks in `dev/RELEASING.md`'s
-  checklist (`cargo clippy`/`cargo test`, `tsc`/`vite build`) are run
-  manually before cutting a release rather than in CI today - see
-  Testing below.
+  and signs the app on `windows-latest` and **publishes** the GitHub
+  Release. It is not a draft (`releaseDraft: false` since v4.2.0): the
+  updater endpoint only ever resolves to published releases, so a draft
+  reaches no machine at all, and "tag, then remember to click Publish" is
+  a step that gets skipped exactly once. The tag IS the release - so tag
+  from a green `main`, because a bad build ships immediately and a machine
+  that already took it stays on it until the next tag.
+- `.github/workflows/ci.yml` runs four jobs in parallel on every push/PR to
+  `main`: **Version triple** (VERSION / Cargo.toml / tauri.conf.json must
+  agree), **PowerShell** (PSScriptAnalyzer, a syntax check, Pester),
+  **Rust workspace** (`cargo check`/`clippy`/`test`) and **Frontend**
+  (`tsc --noEmit`, `vitest run`, `vite build`). It deliberately does NOT
+  run a full `tauri build` - far too slow for a PR gate, and release.yml
+  already does it on every tag. See Testing below.
 
 ## Usage Patterns
 
@@ -820,10 +827,12 @@ npx tsc --noEmit
 npx vite build
 ```
 
-The Pester suite runs automatically in CI (`.github/workflows/ci.yml`) on
-every push/PR to `main`. The Rust and frontend checks above do not run in
-CI yet - they're run manually before cutting a release, per
-`dev/RELEASING.md`'s checklist.
+All of the above run automatically in CI (`.github/workflows/ci.yml`) on
+every push/PR to `main` - the Pester suite, the Rust workspace checks, and
+the frontend's `tsc`/`vitest`/`vite build` - alongside the version-triple
+check. Running them locally before cutting a release is still worthwhile
+(a red CI run after a tag is a released red build, since release.yml
+publishes immediately), but they are no longer manual-only.
 
 Everything else - anything that shells out to git/docker/npm, mutates
 PATH/env vars/DNS, kills processes, or drives the real desktop UI - is

@@ -2,6 +2,23 @@
 
 All notable changes to Northstar DevKit are documented here.
 
+## [Unreleased]
+
+### Changed
+
+- **Releases publish themselves** (`.github/workflows/release.yml`,
+  `releaseDraft: false`). A `vX.Y.Z` tag now builds, signs and PUBLISHES in
+  one go instead of leaving a draft for someone to click. The updater's
+  endpoint only ever resolves to published releases, so a draft reaches no
+  machine at all - and "tag, then remember to publish" is a step that gets
+  skipped exactly once. The trade-off is stated where it matters: a bad
+  build ships the moment it is tagged, and deleting the release
+  un-advertises it without rolling anyone back, so tag from a green `main`.
+- **Docs corrected to match CI.** `AGENTS.md` described
+  `.github/workflows/ci.yml` as PowerShell-only in two places; it has in
+  fact run four parallel jobs (version triple, PowerShell, Rust workspace,
+  frontend) for some time, and now runs vitest as well.
+
 ## [4.2.0] - 2026-08-30
 
 The commit graph learns about pull requests, the Control Center moves in

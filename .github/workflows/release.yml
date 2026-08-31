@@ -6,10 +6,21 @@ name: Release
 # Builds the Tauri app in app/ (NSIS only, Windows-only - see
 # app/src-tauri/tauri.conf.json), signs the updater artifacts with the
 # minisign key in the TAURI_SIGNING_PRIVATE_KEY(_PASSWORD) secrets, and
-# publishes a DRAFT GitHub Release (installer + .sig + latest.json) for a
-# human to review and publish. The updater's endpoint
-# (releases/latest/download/latest.json) only resolves once a release is
-# published, so drafts are invisible to the in-app updater until then.
+# PUBLISHES a GitHub Release (installer + .sig + latest.json) immediately.
+#
+# Live on tag, deliberately. The updater's endpoint
+# (releases/latest/download/latest.json) only resolves to PUBLISHED releases,
+# so a draft reaches nobody - and "push the tag, then remember to go and
+# click Publish" is a step that gets skipped exactly once before someone
+# wonders why their machines are versions behind. A release is only created
+# if the whole build succeeds, and the version-triple check below fails
+# inside a minute if anything disagrees, so a tag that gets this far has
+# already cleared the gates that matter.
+#
+# The trade-off, stated plainly: a bad build ships the moment it is tagged,
+# and a machine that has already taken it stays on it until the next tag.
+# Deleting the release un-advertises it but does not roll anyone back. Tag
+# from a green main.
 
 on:
   push:
@@ -154,5 +165,6 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: 'Northstar DevKit ${{ github.ref_name }}'
           releaseBody: 'See CHANGELOG.md for the full list of changes in this release.'
-          releaseDraft: true
+          # false = live the moment the build succeeds; see the header.
+          releaseDraft: false
           prerelease: false

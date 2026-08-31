@@ -74,7 +74,7 @@ DevKit was rebuilt from the ground up — from a PowerShell/WPF app into a Tauri
 - **A long-lived PowerShell sidecar**, not a process-per-click. `core/Invoke-DevKitRpc.ps1` speaks NDJSON-RPC over stdin/stdout across three worker lanes plus a dedicated writer runspace, and the Rust side (`crates/devkit-host`) respawns it with backoff if it ever dies.
 - **Tool output streams live**, inline, into the Control Center's run dialog or the widget's Quick Actions panel — no more a separate terminal window popping up per tool.
 - **A new `devkit` CLI** — a ratatui terminal menu that replaces `DevKit.bat`, with arrow-key nav, `/` search, a `p`-suffix project override, digit-jump, and a native Windows file picker for tools that need one. Built from source only for now: `cargo build --release -p devkit-cli`.
-- **A signed installer and real auto-update**, built and published through a GitHub Actions release pipeline — push a `vX.Y.Z` tag, the pipeline builds and signs it, a human reviews and publishes the draft release, and the in-app updater picks it up within 24h (or immediately via "Check for Updates").
+- **A signed installer and real auto-update**, built and published through a GitHub Actions release pipeline — push a `vX.Y.Z` tag and the pipeline builds it, signs it, and publishes the GitHub Release in one go; the in-app updater picks it up within 24h (or immediately via "Check for Updates").
 
 See [AGENTS.md](AGENTS.md) for the full architecture writeup.
 

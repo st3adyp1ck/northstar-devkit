@@ -119,16 +119,31 @@ git push origin vX.Y.Z
 
 This triggers `.github/workflows/release.yml`: it verifies the tag against
 the version triple, builds the app on `windows-latest`, signs the updater
-artifacts with the `TAURI_SIGNING_PRIVATE_KEY` repo secret, and opens a
-**draft** GitHub Release with the NSIS installer, its `.sig`, and
-`latest.json`.
+artifacts with the `TAURI_SIGNING_PRIVATE_KEY` repo secret, and **publishes**
+a GitHub Release with the NSIS installer, its `.sig`, and `latest.json`.
 
-## 6. Review and publish
+## 6. Confirm it went live
 
-Open the draft release, sanity-check the attached installer/assets, then
-click **Publish release**. Only then does the in-app updater's endpoint
-(`releases/latest/download/latest.json`) actually resolve to it - a
-draft is invisible to installed copies of DevKit.
+The release publishes itself - there is no second click. As of v4.2.0
+`releaseDraft: false`, because a draft resolves for nobody: the updater's
+endpoint only ever points at published releases, so a tag whose release is
+left in draft reaches no machine at all.
+
+So the tag IS the release. Check it actually landed:
+
+```powershell
+gh release view v4.2.0            # draft: false, and marked Latest
+curl -sL https://github.com/st3adyp1ck/northstar-devkit/releases/latest/download/latest.json
+```
+
+That second command is the exact URL installed copies of DevKit hit; the
+`version` it reports is what they will be offered. If it still shows the
+PREVIOUS version, the release did not publish and no amount of pressing
+"Check for Updates" will help.
+
+**This means a bad build ships the moment you tag it**, and a machine that
+has already updated stays on it until the next tag - deleting the release
+un-advertises it but rolls nobody back. Tag from a green `main`.
 
 ## What the installer ships
 
