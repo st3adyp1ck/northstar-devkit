@@ -126,10 +126,28 @@ export function TerminalView({ cwd, className }: TerminalViewProps) {
     let sentCols = -1;
     let sentRows = -1;
 
+    // A hidden pane keeps its FULL-SIZE box on purpose (xterm measures
+    // itself off it - see paneVisibility.ts), and every pane shares the
+    // stack's one --flyout-w. So opening a DIFFERENT tray relayouts this
+    // one to that tray's width: the Control Center tray opens at
+    // fill-the-screen, which resized this hidden ConPTY from ~50 to ~215
+    // columns and reflowed its whole scrollback - then again on close.
+    // Resizes are held while the pane is hidden and applied when it comes
+    // back, so the shell only ever repaints for a size someone can see.
+    // aria-hidden is the signal, the same one paneVisibility.ts reads.
+    const pane = host?.closest(".widget-flyout__pane") ?? null;
+    const paneHidden = () => pane instanceof HTMLElement && pane.getAttribute("aria-hidden") === "true";
+    let paneObserver: MutationObserver | null = null;
+    let deferredResize = false;
+
     function pushResize(id: string) {
       if (resizeTimer) clearTimeout(resizeTimer);
       resizeTimer = setTimeout(() => {
         resizeTimer = null;
+        if (paneHidden()) {
+          deferredResize = true;
+          return;
+        }
         if (!safeFit()) return;
         if (term.cols === sentCols && term.rows === sentRows) return;
         sentCols = term.cols;
@@ -199,6 +217,19 @@ export function TerminalView({ cwd, className }: TerminalViewProps) {
       });
       resizeObserver.observe(host);
     }
+    // Coming back into view is not a geometry change on its own, so it
+    // would not wake the ResizeObserver - this is what applies a resize
+    // that was held while the pane was hidden.
+    if (pane instanceof HTMLElement) {
+      paneObserver = new MutationObserver(() => {
+        if (paneHidden() || !deferredResize) return;
+        deferredResize = false;
+        if (sessionId) pushResize(sessionId);
+        else safeFit();
+      });
+      paneObserver.observe(pane, { attributes: true, attributeFilter: ["aria-hidden"] });
+    }
+
     const onWindowResize = () => {
       if (sessionId) pushResize(sessionId);
     };
@@ -212,6 +243,7 @@ export function TerminalView({ cwd, className }: TerminalViewProps) {
       if (resizeTimer) clearTimeout(resizeTimer);
       window.removeEventListener("resize", onWindowResize);
       resizeObserver?.disconnect();
+      paneObserver?.disconnect();
       unlisten?.();
       if (sessionId) {
         void invoke("terminal_kill", { sessionId }).catch(() => {});

@@ -325,7 +325,7 @@ export function ControlCenterApp({ embedded = false }: { embedded?: boolean }) {
               {!isLoading && !isError && visibleModules.length === 0 && (
                 search.trim() ? (
                   <EmptyState
-                    icon="\u{1F50D}"
+                    icon={"\u{1F50D}"}
                     title={`No tools match "${search.trim()}"`}
                     description="Try a different search term, or clear it to browse all tools."
                     action={

@@ -31,8 +31,8 @@
 
     THE TRADE-OFF, stated plainly: the task elevates whatever exe its
     registered path points at, with no prompt. The per-user install folder
-    (%LOCALAPPDATA%\Programs\DevKit) is writable by anything running as you,
-    so replacing DevKit.exe afterwards is a silent elevation path - keep
+    (%LOCALAPPDATA%\DevKit) is writable by anything running as you, so
+    replacing devkit-app.exe afterwards is a silent elevation path - keep
     Admin Mode only while it earns its keep, and -Off removes all of it.
     While elevated, EVERY DevKit surface runs as Administrator: all ~65
     tools, the Control Center, and the embedded terminal - a tool bug's
@@ -49,7 +49,7 @@
     Same one-time self-elevation flow when not already elevated.
 .PARAMETER ExePath
     Explicit path to the DevKit app exe to elevate. Default resolution:
-    the per-user install (%LOCALAPPDATA%\Programs\DevKit\DevKit.exe), then
+    the per-user install (%LOCALAPPDATA%\DevKit\devkit-app.exe), then
     a repo release build (target\release\devkit-app.exe).
 .PARAMETER DryRun
     Report exactly what WOULD be registered or removed, and change nothing.
@@ -113,6 +113,14 @@ function Get-DevKitAppExeCandidates {
 
     $candidates = @()
     if (-not [string]::IsNullOrWhiteSpace($LocalAppData)) {
+        # The real per-user install: NSIS with installMode 'currentUser'
+        # puts $INSTDIR at %LOCALAPPDATA%\<productName>, and productName is
+        # "DevKit" while the binary keeps its Cargo name devkit-app.exe.
+        # 'Programs\DevKit\DevKit.exe' was neither half right, so on an
+        # installed app resolution fell straight through to the repo build
+        # and Admin Mode could only ever be enabled from a source checkout.
+        # Kept below purely as a fallback for anyone who has that layout.
+        $candidates += (Join-Path (Join-Path $LocalAppData 'DevKit') 'devkit-app.exe')
         $candidates += (Join-Path (Join-Path $LocalAppData 'Programs\DevKit') 'DevKit.exe')
     }
     if (-not [string]::IsNullOrWhiteSpace($RepoRoot)) {
@@ -301,6 +309,20 @@ function Get-DevKitAdminModeContext {
         } catch {
             $ctx.ExeResolveError = $_.Exception.Message
         }
+    } else {
+        # -Off never needs the exe (the task it removes knows its own
+        # action), but it DOES need the planned shortcut LOCATIONS: they are
+        # the documented fallback for a missing or stale marker, and they are
+        # what the "nothing to do" check reads to notice orphaned shortcuts.
+        # Leaving this empty on the disable path made both of those dead: a
+        # marker-less -Off reported "Admin Mode is not enabled" and walked
+        # away from shortcuts that were sitting right there. The paths are
+        # deterministic and do not depend on the exe.
+        $ctx.ShortcutPaths = @(
+            @($desktopDir, $programsDir) |
+                Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+                ForEach-Object { Join-Path $_ $script:DevKitAdminShortcutFileName }
+        )
     }
 
     try {
@@ -335,6 +357,14 @@ function Register-DevKitAdminMode {
         Returns report lines; throws on failure.
     #>
     param([Parameter(Mandatory = $true)]$Context)
+    # Every mutating call below must be fatal. New-Item, Set-Content and
+    # Register-ScheduledTask all report failure NON-terminatingly, and the
+    # default 'Continue' let a denied task registration (locked-down Task
+    # Scheduler, an ASR rule blocking the .vbs write) sail past: the caller
+    # got its "Registered task ... / Admin Mode is ON." report, the marker
+    # was written, the Run value had already been deleted - and nothing had
+    # actually been created. Stop makes the caller's try/catch real.
+    $ErrorActionPreference = 'Stop'
     $lines = @()
 
     $vbsDir = Split-Path -Parent $Context.VbsPath
@@ -362,6 +392,12 @@ function Register-DevKitAdminMode {
         $runKeyPath = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run'
         Remove-ItemProperty -Path $runKeyPath -Name $Context.AutostartRunName -ErrorAction Stop
         $lines += "Removed Run key value '$($Context.AutostartRunName)' - Windows will not auto-start an elevated app from the Run key, so Start-with-Windows moves onto the task"
+        # The tray's own 'Start with Windows' item reads the Run key through
+        # tauri_plugin_autostart, which knows nothing about the task - so it
+        # now reads as OFF while the app really does start with Windows, and
+        # ticking it would add a SECOND, non-elevated autostart racing the
+        # elevated one. Say so plainly rather than let it be discovered.
+        $lines += "NOTE: the tray's 'Start with Windows' item will now show OFF even though DevKit still starts with Windows (via the task's logon trigger). Leave it alone while Admin Mode is on - ticking it adds a second, NON-elevated autostart. '-Off' restores the Run key and the two agree again."
     }
 
     $userName = [Security.Principal.WindowsIdentity]::GetCurrent().Name
@@ -376,20 +412,34 @@ function Register-DevKitAdminMode {
         Description = 'Launches Northstar DevKit with administrator privileges. Created by Set-DevKitAdminMode.ps1; remove it with Set-DevKitAdminMode.ps1 -Off.'
         Force       = $true
     }
-    if ($Context.AutostartRunName) {
+    # Start-with-Windows has to survive a SECOND enable. By then run 1 has
+    # already moved the Run value onto the task, so AutostartRunName is
+    # $null - and on that path Register-ScheduledTask -Force would rewrite
+    # the task with no trigger at all, leaving the app auto-starting from
+    # neither the Run key nor the task. The context already knows the task
+    # has a logon trigger and what the marker recorded; consult both.
+    $markerMoved = [bool]($Context.Marker -and $Context.Marker.autostartMoved)
+    $wantsLogonTrigger = ([bool]$Context.AutostartRunName) -or $Context.TaskHasLogonTrigger -or $markerMoved
+    if ($wantsLogonTrigger) {
         $registerParams['Trigger'] = New-ScheduledTaskTrigger -AtLogOn -User $userName
     }
     [void](Register-ScheduledTask @registerParams)
-    $lines += "Registered task '$($Context.TaskName)' -> $($Context.Exe) (highest privileges, no per-launch prompt)$(if ($Context.AutostartRunName) { ', with a logon trigger for Start-with-Windows' })"
+    $lines += "Registered task '$($Context.TaskName)' -> $($Context.Exe) (highest privileges, no per-launch prompt)$(if ($wantsLogonTrigger) { ', with a logon trigger for Start-with-Windows' })"
 
+    # Same reasoning as the trigger above, for the record -Off restores
+    # FROM. A re-run has no Run value left to move, so writing this run's
+    # (null) values would erase the only memory of what the first run took
+    # away - and -Off could never put Start-with-Windows back.
+    $runValueName = if ($Context.AutostartRunName) { $Context.AutostartRunName } elseif ($markerMoved) { $Context.Marker.runValueName } else { $null }
+    $runValueData = if ($Context.AutostartRunName) { $Context.AutostartRunData } elseif ($markerMoved) { $Context.Marker.runValueData } else { $null }
     Write-DevKitAdminModeMarker -MarkerPath $Context.MarkerPath -Data ([ordered]@{
         exePath        = $Context.Exe
         taskName       = $Context.TaskName
         vbsPath        = $Context.VbsPath
         shortcutPaths  = @($Context.ShortcutPaths)
-        autostartMoved = [bool]$Context.AutostartRunName
-        runValueName   = $Context.AutostartRunName
-        runValueData   = $Context.AutostartRunData
+        autostartMoved = ([bool]$Context.AutostartRunName) -or $markerMoved
+        runValueName   = $runValueName
+        runValueData   = $runValueData
     })
     $lines += "Wrote state marker $($Context.MarkerPath) (what '-Off' reads to undo all of this)"
     return , $lines
@@ -403,6 +453,10 @@ function Unregister-DevKitAdminMode {
         Admin Mode moved it. Returns report lines; throws on failure.
     #>
     param([Parameter(Mandatory = $true)]$Context)
+    # Matches Register-DevKitAdminMode: a half-completed disable must fail
+    # loudly, not report success. Every call below already passes
+    # -ErrorAction Stop; this keeps that true for anything added later.
+    $ErrorActionPreference = 'Stop'
     $lines = @()
 
     if ($Context.TaskExists) {

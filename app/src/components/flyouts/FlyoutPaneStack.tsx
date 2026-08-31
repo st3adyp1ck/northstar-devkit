@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import clsx from "clsx";
 import { motion } from "framer-motion";
 import { staggerContainerVariants, slideItemVariants } from "../../windows/widget/panels/motion";
@@ -124,6 +124,19 @@ export function FlyoutPaneStack({
     return { min: PANE_MIN_WIDTH, max: Math.max(PANE_MIN_WIDTH, max) };
   }, [activeId]);
 
+  /**
+   * The ceiling the resizer REPORTS has to be the one the drag enforces. The
+   * Control Center tray's is the screen rather than the 900px panel cap, so
+   * publishing PANE_MAX_WIDTH left an opened tray reporting an aria-valuenow
+   * well past its own aria-valuemax. Resolved in an effect because
+   * resizeBounds measures live layout, which a render must not do.
+   */
+  const [resizeMax, setResizeMax] = useState(PANE_MAX_WIDTH);
+  useEffect(() => {
+    if (activeId === null) return;
+    setResizeMax(resizeBounds().max);
+  }, [activeId, resizeBounds]);
+
   const flushDraft = useCallback(
     (commit: boolean) => {
       const next = draftRef.current;
@@ -244,7 +257,10 @@ export function FlyoutPaneStack({
             aria-label="Resize tray"
             aria-valuenow={Math.round(shownWidth)}
             aria-valuemin={PANE_MIN_WIDTH}
-            aria-valuemax={PANE_MAX_WIDTH}
+            // Never below the width actually on screen: the effect above
+            // resolves the real ceiling a tick after the tray opens, and
+            // valuenow must not outrun valuemax in the meantime.
+            aria-valuemax={Math.max(resizeMax, Math.round(shownWidth))}
             tabIndex={0}
             onPointerDown={beginDrag}
             onPointerMove={trackDrag}

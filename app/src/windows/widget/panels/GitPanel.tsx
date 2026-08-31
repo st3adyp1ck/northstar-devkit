@@ -107,12 +107,20 @@ export function GitPanel() {
   // cannot simply swap places. The ref hands each render the PREVIOUS
   // render's tips: at worst one render of lag, and the queryFn closure
   // always sees the latest params on the next 6s tick regardless.
+  //
+  // They ride as UNKEYED params on purpose. The tips only size the backend's
+  // log window; they do not change which repo is being asked about. In the
+  // query key they would mint a fresh, empty cache entry every time a PR was
+  // opened, merged or pushed to - blanking the branch header, the actions
+  // and the graph back to skeletons, and downgrading the "last known" stale
+  // state to a hard "Could not reach the DevKit sidecar".
   const prTipsRef = useRef<string[]>([]);
   const overview = usePolledRpc<GitOverview>(
     "git.overview",
-    path ? { path, includeGraph: true, extraTips: prTipsRef.current } : undefined,
+    path ? { path, includeGraph: true } : undefined,
     OVERVIEW_POLL_MS,
     !!path && onScreen,
+    { extraTips: prTipsRef.current },
   );
   const { refetch } = overview;
   const data = overview.data;
@@ -143,18 +151,19 @@ export function GitPanel() {
   const prLanes = useMemo(() => buildPrLanes(graph, prRows, accentHex), [graph, prRows, accentHex]);
   /**
    * A PR carries its lane color into the PR list only if the Graph tab has
-   * SOMETHING of it - a pill on its head row, a ribbon along its commits, or
-   * at least a base lane it would land on. A PR with neither end in the log
-   * gets no color, and its row shows an empty channel instead: the list must
-   * not imply a lane the graph cannot show.
+   * SOMETHING of it - a pill on its head row or a ribbon along its commits.
+   * A PR with no head in the log gets no color, and its row shows an empty
+   * channel instead: the list must not imply a lane the graph cannot show.
+   *
+   * `path.length > 0` is the whole test. A bare `baseLane` used to earn a
+   * color back when PrGraph drew a pending arc into a band above row 0, but
+   * that band is gone: with an empty path the renderer produces no head, no
+   * fork, no ribbon and no fade - literally zero pixels - so colouring those
+   * rows drew a lane wire next to the very PRs the graph's own off-log line
+   * reports it could not place.
    */
   const drawnLaneColors = useMemo(
-    () =>
-      new Map(
-        prLanes
-          .filter((lane) => lane.path.length > 0 || lane.baseLane !== null)
-          .map((lane) => [lane.number, lane.color]),
-      ),
+    () => new Map(prLanes.filter((lane) => lane.path.length > 0).map((lane) => [lane.number, lane.color])),
     [prLanes],
   );
   const laneColor = useCallback((number: number) => drawnLaneColors.get(number), [drawnLaneColors]);

@@ -38,12 +38,22 @@ booting into a blank pane.
   screen on open and persists a resize drag as `controlCenterFlyoutWidth`
   (`null` = fill).
 - **Scheduled-task admin mode** (`tools/system/Set-DevKitAdminMode.ps1`)
-  and a **deep close-out variant**.
+  and a **deep close-out variant**. Enabling it moves Start-with-Windows off
+  the Run key and onto the task's logon trigger (Windows will not auto-start
+  an elevated app from the Run key), so the tray's own **Start with Windows**
+  item reads that state from Admin Mode's marker: while Admin Mode is on it
+  shows ticked and greyed, `(managed by Admin Mode)`. Ticking it there would
+  otherwise have added a second, non-elevated autostart racing the elevated
+  one. `-Off` restores the Run key and hands the item back.
 - **`/dance`** - a hidden command-palette entry that makes the gauges
   bounce, matched as a whole word rather than through the fuzzy scorer so
   it can never be stumbled onto by a loose match.
 - **Tooltips on the destructive Quick Actions and Node/Ports buttons**,
   spelling out what each one actually ends before you press it.
+- **Vitest now runs in CI** (`.github/workflows/ci.yml`). The frontend job
+  gated only `tsc --noEmit` and `vite build`, so every frontend assertion
+  (fuzzy matching, git lane/label colours, PR lane assignment, the
+  markdown-lite renderer) could break without turning a single check red.
 
 ### Changed
 

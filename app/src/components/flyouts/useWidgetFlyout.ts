@@ -19,9 +19,21 @@ const WINDOW_SETTLE_MS = 240;
  * Modals that own the Escape key while they're up. SettingsDialog listens on
  * `window` without stopping propagation, so without this check one Escape
  * would close both the dialog and the tray.
+ *
+ * ToolRunDialog is the one that has NO Escape handler of its own, and it
+ * became reachable from a tray the moment ControlCenterApp started mounting
+ * as an embedded pane: Escape from a tool's argument field fell straight
+ * through to the tray, shutting it (and narrowing the OS window) around a
+ * dialog whose run then continued with its console gone. Listed here,
+ * Escape does nothing over that dialog - exactly as in the standalone
+ * Control Center window, which has no tray listener at all.
+ *
+ * ErrorCenter and ProjectManagerDialog close on Escape without stopping
+ * propagation, so they had the same double-dismiss. CommandPalette is
+ * deliberately absent: it calls stopPropagation() on Escape itself.
  */
 const DIALOG_OVERLAY_SELECTOR =
-  ".settings-dialog__overlay, .confirm-dialog__overlay, .update-dialog__overlay";
+  ".settings-dialog__overlay, .confirm-dialog__overlay, .update-dialog__overlay, .tool-run-dialog__overlay, .error-center__overlay, .project-manager__overlay";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));

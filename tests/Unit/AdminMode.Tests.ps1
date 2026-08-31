@@ -23,17 +23,22 @@ Describe "Get-DevKitAppExeCandidates" {
 
     It "prefers the per-user install over a repo release build" {
         $candidates = @(Get-DevKitAppExeCandidates -LocalAppData 'C:\Users\u\AppData\Local' -RepoRoot 'D:\repo')
-        $candidates.Count | Should -Be 2
-        $candidates[0] | Should -Be 'C:\Users\u\AppData\Local\Programs\DevKit\DevKit.exe'
-        $candidates[1] | Should -Be 'D:\repo\target\release\devkit-app.exe'
+        $candidates.Count | Should -Be 3
+        # The REAL NSIS layout for installMode 'currentUser' is
+        # %LOCALAPPDATA%\<productName>\<mainBinaryName>. Regression: this
+        # asserted Programs\DevKit\DevKit.exe, a path that exists nowhere,
+        # so Admin Mode could not be enabled on an installed app at all.
+        $candidates[0] | Should -Be 'C:\Users\u\AppData\Local\DevKit\devkit-app.exe'
+        $candidates[1] | Should -Be 'C:\Users\u\AppData\Local\Programs\DevKit\DevKit.exe'
+        $candidates[2] | Should -Be 'D:\repo\target\release\devkit-app.exe'
     }
 
     It "skips blank roots instead of emitting rooted half-paths" {
         @(Get-DevKitAppExeCandidates -LocalAppData '' -RepoRoot 'D:\repo').Count | Should -Be 1
         # With both blank it falls back to the real LOCALAPPDATA for the
-        # install candidate only - nothing repo-shaped may appear.
+        # install candidates only - nothing repo-shaped may appear.
         $candidates = @(Get-DevKitAppExeCandidates -LocalAppData 'C:\Users\u\AppData\Local' -RepoRoot '')
-        $candidates.Count | Should -Be 1
+        $candidates.Count | Should -Be 2
         $candidates[0] | Should -Not -Match 'target'
     }
 }

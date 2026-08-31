@@ -190,7 +190,21 @@ export function WidgetApp() {
         // (see FlyoutPaneStack's resizeBounds), so a fill-width drag would
         // outlive the 900px panel cap only to be snapped back here.
         if (typeof ccFlyoutWidth === "number" && ccFlyoutWidth > 0) {
-          return Math.max(PANE_MIN_WIDTH, Math.round(ccFlyoutWidth));
+          const stored = Math.max(PANE_MIN_WIDTH, Math.round(ccFlyoutWidth));
+          // Still bounded by what the screen can give TODAY. The stored
+          // width was legitimate on the monitor it was dragged on, but a
+          // smaller screen, a wider rail or a changed work area makes it
+          // wider than Rust can size the window - and derive_rect clips
+          // the request, so the overflow is simply unreachable, with no
+          // scrollbar. Only applied when the geometry is actually
+          // measurable: remainingScreenWidth falls back to 520, which must
+          // never cap a real stored width.
+          const available = typeof window !== "undefined" ? (window.screen?.availWidth ?? 0) : 0;
+          const base = sidebarBaseWidthRef.current;
+          if (available > 0 && base !== null && base > 0) {
+            return Math.min(stored, remainingScreenWidth(base));
+          }
+          return stored;
         }
         return remainingScreenWidth(sidebarBaseWidthRef.current);
       }

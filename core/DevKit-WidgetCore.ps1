@@ -1711,6 +1711,12 @@ function ConvertFrom-DevKitGitStatusOutput {
 # only caller, so no cross-lane locking is needed.
 $script:DevKitGitAutoFetchLastAttempt = @{}
 
+# Repo path (lowercased) -> @{ Stamp = <the auto-fetch attempt this was
+# learned under>; Tips = @{ sha -> $true } }. Which extra tips turned out
+# not to be in this clone AT ALL, so the log window is not grown looking for
+# them again on the very next poll. See Get-DevKitRepoOverview's -ExtraTips.
+$script:DevKitGitUnreachableTips = @{}
+
 function Test-DevKitGitAutoFetchDue {
     <#
     .SYNOPSIS
@@ -1738,12 +1744,26 @@ function Invoke-DevKitGitAutoFetch {
         'git fetch --prune origin', throttled to at most one attempt per
         repo per MinIntervalSeconds. Never throws and never prompts.
     .DESCRIPTION
-        GIT_TERMINAL_PROMPT=0 is the load-bearing detail: a background poll
-        has no terminal, so a credential ask would hang the sidecar's slow
-        lane forever - the fetch must fail fast instead and leave the graph
-        exactly as informative as it was without one. The attempt is stamped
-        BEFORE running so a remote that always fails (offline, private repo
-        without stored credentials) is not retried on every 6-second poll.
+        Failing fast instead of asking is the load-bearing detail: a
+        background poll has no terminal, so a credential ask would hang the
+        sidecar's slow lane forever - and every git.*/github.* call rides
+        that same lane, so the Git AND GitHub panels would both time out
+        behind it. The fetch must fail fast and leave the graph exactly as
+        informative as it was without one.
+
+        That takes THREE guards, not one. GIT_TERMINAL_PROMPT=0 only
+        suppresses git's own terminal prompt; it does nothing to the
+        credential helper, and Git for Windows ships Git Credential Manager
+        configured by default - a helper subprocess that pops its own GUI
+        sign-in window and blocks the fetch until someone dismisses it. So
+        the helper chain is cleared for this one invocation
+        (credential.helper= , an empty value, is git's documented way to
+        reset the list) and GCM's own kill switch is set as well, in case a
+        system-scope config re-adds a helper underneath us.
+
+        The attempt is stamped BEFORE running so a remote that always fails
+        (offline, private repo without stored credentials) is not retried on
+        every 6-second poll.
     #>
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -1761,12 +1781,25 @@ function Invoke-DevKitGitAutoFetch {
     $prevPrompt = $env:GIT_TERMINAL_PROMPT
     try {
         $env:GIT_TERMINAL_PROMPT = '0'
-        [void](& $Git.Source '-C' $Path 'fetch' '--prune' 'origin' 2>&1 | Out-String)
+        # A stalled transfer must not outlive the host's 60s RPC timeout:
+        # give up once throughput sits under 1 KB/s for 10s. git applies no
+        # time bound of its own, and this call holds the shared 'slow' lane
+        # that every git.* and github.* method queues behind.
+        [void](& $Git.Source '-c' 'credential.helper=' '-c' 'credential.interactive=false' `
+            '-c' 'http.lowSpeedLimit=1000' '-c' 'http.lowSpeedTime=10' `
+            '-C' $Path 'fetch' '--prune' 'origin' 2>&1 | Out-String)
     } catch {
         # A failed fetch is not a graph failure - the log below simply shows
         # what the local object database already knows.
     } finally {
         if ($hadPrompt) { $env:GIT_TERMINAL_PROMPT = $prevPrompt } else { Remove-Item Env:\GIT_TERMINAL_PROMPT -ErrorAction SilentlyContinue }
+        # Re-stamp from the END of the attempt. The pre-run stamp above is
+        # what stops a crashed attempt retrying immediately, but on its own
+        # it measures the interval from the START: a fetch that takes longer
+        # than MinIntervalSeconds is therefore due again the instant it
+        # returns, and a repo slow enough to blow the 60s RPC timeout would
+        # fetch back-to-back forever, holding the slow lane the whole time.
+        $script:DevKitGitAutoFetchLastAttempt[$key] = [DateTime]::UtcNow
     }
 }
 
@@ -1784,6 +1817,37 @@ function Test-DevKitGitSha {
     param([AllowNull()][AllowEmptyString()][string]$Value)
     if ([string]::IsNullOrWhiteSpace($Value)) { return $false }
     return ($Value -match '^[0-9a-fA-F]{40}$')
+}
+
+function Select-DevKitGitWantedTips {
+    <#
+    .SYNOPSIS
+        The extra tips still worth growing the log window for: full 40-hex
+        ids only, lowercased and deduped, minus any already proven absent
+        from this clone. Pure, so the escalation policy is testable apart
+        from the git spawns it drives.
+    .PARAMETER UnreachableTips
+        Hashtable used as a set of lowercased SHAs that a previous overview
+        could not find at the widest window - see Get-DevKitRepoOverview.
+        Pass $null or an empty hashtable to consider every tip.
+    .OUTPUTS
+        [string[]] - always an array, including for the 0- and 1-tip cases.
+    #>
+    param(
+        [AllowNull()][string[]]$ExtraTips,
+        [AllowNull()][hashtable]$UnreachableTips
+    )
+
+    $wanted = @()
+    foreach ($tip in @($ExtraTips)) {
+        if (-not (Test-DevKitGitSha -Value $tip)) { continue }
+        $lower = $tip.ToLowerInvariant()
+        if ($null -ne $UnreachableTips -and $UnreachableTips.ContainsKey($lower)) { continue }
+        if ($wanted -notcontains $lower) { $wanted += $lower }
+    }
+    # Comma operator: a single wanted tip must still arrive as an array, or
+    # the caller's .Count becomes the SHA's string length.
+    return , @($wanted)
 }
 
 function Get-DevKitRepoOverview {
@@ -1869,14 +1933,39 @@ function Get-DevKitRepoOverview {
             # hard 400 ceiling, beyond which the UI's off-log honesty line
             # takes over. Tips are never revision arguments (a bad one would
             # fail the whole log); they only size the window.
-            $wantedTips = @()
-            foreach ($tip in @($ExtraTips)) {
-                if (Test-DevKitGitSha -Value $tip) { $wantedTips += $tip.ToLowerInvariant() }
+            # Some tips can never be found however wide the window gets: a PR
+            # from a FORK has its head in refs/pull/*, which 'fetch --prune
+            # origin' does not bring down, so that SHA is simply not in this
+            # clone. Without a memo of that, $missing stays above zero and
+            # every single 6-second poll pays all three window sizes - three
+            # git log spawns, a layout pass over 400 commits and a ~10x
+            # larger payload - forever, on the common case of one fork PR.
+            #
+            # The memo is scoped to the auto-fetch attempt it was learned
+            # under (that call happens above, before this block). A newer
+            # attempt may have landed the objects, so a changed stamp throws
+            # the memo away and the window is allowed to grow again - which
+            # caps the wasted escalation at one per fetch interval instead of
+            # one per poll, and still self-heals.
+            $tipKey = $Path.Trim().ToLowerInvariant()
+            $fetchStamp = $null
+            if ($script:DevKitGitAutoFetchLastAttempt.ContainsKey($tipKey)) { $fetchStamp = $script:DevKitGitAutoFetchLastAttempt[$tipKey] }
+            $memo = $script:DevKitGitUnreachableTips[$tipKey]
+            if ($null -eq $memo -or $memo.Stamp -ne $fetchStamp) {
+                $memo = @{ Stamp = $fetchStamp; Tips = @{} }
+                $script:DevKitGitUnreachableTips[$tipKey] = $memo
             }
-            $wantedTips = @($wantedTips | Select-Object -Unique)
+            # Plain assignment, NOT @(...): the helper returns ,$array (the
+            # file's idiom for keeping a 1-element result an array), and
+            # wrapping that in @() re-wraps the EMPTY case into a 1-element
+            # array holding an empty one - so .Count would read 1 with no
+            # tips wanted at all, and re-arm the very escalation this
+            # memo exists to stop.
+            $wantedTips = Select-DevKitGitWantedTips -ExtraTips $ExtraTips -UnreachableTips $memo.Tips
 
             $windowSizes = if ($wantedTips.Count -eq 0) { @(40) } else { @(40, 120, 400) }
             $commits = @()
+            $loaded = @{}
             foreach ($windowSize in $windowSizes) {
                 $log = (& $git.Source '-C' $Path 'log' '--all' '--topo-order' '-n' ([string]$windowSize) '--pretty=format:%x1e%H%x1f%P%x1f%an%x1f%ar%x1f%d%x1f%s' 2>$null | Out-String)
                 $commits = ConvertFrom-DevKitGitLogOutput -Output $log
@@ -1887,6 +1976,8 @@ function Get-DevKitRepoOverview {
                 foreach ($tip in $wantedTips) { if (-not $loaded.ContainsKey($tip)) { $missing++ } }
                 if ($missing -eq 0) { break }
             }
+            # Anything still absent at the widest window is not in this clone.
+            foreach ($tip in $wantedTips) { if (-not $loaded.ContainsKey($tip)) { $memo.Tips[$tip] = $true } }
             $result.Commits = $commits
             if ($commits.Count -gt 0) {
                 $result.Graph = ConvertTo-DevKitGitGraphLayout -Commits $commits

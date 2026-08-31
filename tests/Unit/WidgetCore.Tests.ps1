@@ -371,6 +371,63 @@ Describe "Test-DevKitGitSha" {
     }
 }
 
+Describe "Select-DevKitGitWantedTips" {
+
+    BeforeAll {
+        $script:tipA = 'a' * 40
+        $script:tipB = 'b' * 40
+    }
+
+    It "keeps valid ids, lowercased" {
+        $got = Select-DevKitGitWantedTips -ExtraTips @(('A' * 40)) -UnreachableTips $null
+        $got | Should -Be @($script:tipA)
+    }
+
+    It "drops invalid ids rather than passing them to git" {
+        $got = Select-DevKitGitWantedTips -ExtraTips @('deadbeef', '', ('g' * 40), $script:tipA) -UnreachableTips $null
+        $got | Should -Be @($script:tipA)
+    }
+
+    It "dedupes ids that differ only by case" {
+        $got = Select-DevKitGitWantedTips -ExtraTips @($script:tipA, ('A' * 40), $script:tipA) -UnreachableTips $null
+        @($got).Count | Should -Be 1
+    }
+
+    It "drops tips already proven absent from this clone" {
+        $memo = @{ $script:tipA = $true }
+        $got = Select-DevKitGitWantedTips -ExtraTips @($script:tipA, $script:tipB) -UnreachableTips $memo
+        $got | Should -Be @($script:tipB)
+    }
+
+    It "returns an empty array when every tip is unreachable (so the window stays at 40)" {
+        $memo = @{ $script:tipA = $true; $script:tipB = $true }
+        $got = Select-DevKitGitWantedTips -ExtraTips @($script:tipA, $script:tipB) -UnreachableTips $memo
+        @($got).Count | Should -Be 0
+    }
+
+    It "returns a true 1-element array, not a bare string (regression: .Count would be 40)" {
+        $got = Select-DevKitGitWantedTips -ExtraTips @($script:tipA) -UnreachableTips $null
+        $got.Count | Should -Be 1
+        , $got | Should -BeOfType [System.Object[]]
+    }
+
+    It "handles null and empty input without throwing" {
+        # Assigned first, deliberately: the helper returns ,$array, and
+        # @(call) would re-wrap an empty result into a 1-element array. The
+        # production caller assigns for exactly this reason.
+        $fromNull = Select-DevKitGitWantedTips -ExtraTips $null -UnreachableTips $null
+        $fromEmpty = Select-DevKitGitWantedTips -ExtraTips @() -UnreachableTips @{}
+        $fromNull.Count | Should -Be 0
+        $fromEmpty.Count | Should -Be 0
+    }
+
+    It "reports Count 0 for an all-unreachable set the way the caller reads it (regression: the escalation re-armed)" {
+        $memo = @{ $script:tipA = $true }
+        $wanted = Select-DevKitGitWantedTips -ExtraTips @($script:tipA) -UnreachableTips $memo
+        $wanted.Count | Should -Be 0
+    }
+}
+
 
 Describe "ConvertFrom-DevKitGitShow" {
 

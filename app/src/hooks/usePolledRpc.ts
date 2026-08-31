@@ -55,6 +55,16 @@ function describeRpcError(error: unknown): string {
  * legitimately poll methods that take no params at all, and treating their
  * `undefined` as "disabled" would silently stop them polling forever.
  *
+ * `unkeyedParams` are merged into the REQUEST but deliberately left out of
+ * the query key - for params that tune how the backend answers without
+ * changing WHAT is being asked. git.overview's `extraTips` is the case this
+ * exists for: those are the open-PR head SHAs, and folding them into the key
+ * meant every push to any open PR minted a fresh cache entry with no data,
+ * flashing the whole pane back to its skeleton and turning the honest
+ * "last known" stale state into a hard "can't reach it". Excluded from the
+ * key, a change is simply picked up by the next poll (queryFn is rebuilt
+ * every render, so it always closes over the latest value).
+ *
  * Returns the full UseQueryResult (unchanged for existing callers) plus the
  * PolledRpcStatus flags above - see that type for why panels should read
  * `failed`/`stale` rather than inferring health from `data` alone.
@@ -64,11 +74,12 @@ export function usePolledRpc<T>(
   params: Record<string, unknown> | undefined,
   intervalMs: number,
   enabled = true,
+  unkeyedParams?: Record<string, unknown>,
 ): PolledRpcResult<T> {
   const visible = useVisibility();
   const query = useQuery({
     queryKey: [method, params ?? null],
-    queryFn: () => rpcCall<T>(method, params),
+    queryFn: () => rpcCall<T>(method, params && unkeyedParams ? { ...params, ...unkeyedParams } : params),
     enabled,
     refetchInterval: visible && enabled ? intervalMs : false,
     refetchIntervalInBackground: false,

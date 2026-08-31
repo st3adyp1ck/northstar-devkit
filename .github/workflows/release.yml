@@ -113,16 +113,26 @@ jobs:
         working-directory: app
         run: pnpm install --frozen-lockfile
 
-      # The installer ships the devkit CLI at <installroot>\devkit.exe (a
-      # bundle resource in tauri.conf.json), which is what makes
-      # tools/system/Install-ShellIntegration.ps1 and
-      # Register-DevKitTerminalProfile.ps1 work on an installed app - both
-      # probe that exact path first.
+      # Builds the devkit CLI and stages it at app/src-tauri/bin/devkit.exe.
       #
-      # tauri.conf.json's beforeBuildCommand does this too, so in the happy
-      # path the build below is a cache hit. It is spelled out here anyway so
-      # that a CLI compile error shows up as its own red step with its own
-      # log, instead of as a cryptic "beforeBuildCommand failed".
+      # HEADS UP - as of v4.2.0 nothing BUNDLES it yet. tauri.conf.json's
+      # beforeBuildCommand is still plain `pnpm build` and its bundle
+      # resources do not list "bin/devkit.exe", so the exe staged here is
+      # simply ignored by the installer and an installed app has no
+      # <installroot>\devkit.exe. tools/system/Install-ShellIntegration.ps1
+      # and Register-DevKitTerminalProfile.ps1 both probe that path first and
+      # hard-exit when it is missing, so shell/terminal integration works
+      # only from a source checkout for now.
+      #
+      # This step is kept because it compiles the CLI on every release tag -
+      # a CLI compile error shows up as its own red step with its own log
+      # rather than surfacing later - and because it is half of what the
+      # bundling change needs. Applying the rest is deliberately deferred:
+      # see the "Not yet applied: bundling the CLI into the installer"
+      # section in CLAUDE.md for the ordering constraint that makes it more
+      # than a two-line edit (tauri_utils hard-fails a missing resource path
+      # under `cargo check`, so from that moment every cargo command on a
+      # fresh clone needs the CLI built and staged first).
       - name: Build and stage the devkit CLI
         shell: pwsh
         run: |

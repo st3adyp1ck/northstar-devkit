@@ -437,9 +437,16 @@ export const PrGraph = memo(function PrGraph({
                             e.stopPropagation();
                             onHighlightPr(lane.number);
                           }}
+                          // Hand the highlight BACK to the row rather than
+                          // clearing it: the pointer is still inside the row,
+                          // and React will not re-fire the row's own
+                          // onMouseEnter for a move that never left it - so
+                          // clearing here dropped the highlight the row
+                          // should still be holding. Leaving the row for good
+                          // is handled by the row's own onMouseLeave.
                           onMouseLeave={(e) => {
                             e.stopPropagation();
-                            onHighlightPr(null);
+                            onHighlightPr(rowPrs ? rowPrs[0] : null);
                           }}
                         >
                           #{lane.number}

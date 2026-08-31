@@ -37,3 +37,6 @@ node_modules/
 dist/
 app/src-tauri/gen/
 app/.vite/
+
+# Playwright MCP scratch (page snapshots written by the browser tooling)
+.playwright-mcp/

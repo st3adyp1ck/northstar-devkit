@@ -269,6 +269,27 @@
   flex: 1 1 auto;
 }
 
+/* A modal opened INSIDE a tray (the Control Center pane's tool-run dialog,
+   its confirm dialogs) is position:fixed, but .widget-flyout's own z-index
+   makes it a stacking context - so the modal's z-index resolves against the
+   tray's 15, not the page, and paints UNDER .flyout-rail (20), which stays
+   opaque and clickable across it.
+
+   Lifted only while such a modal is actually up. The rail and the tray are
+   flex siblings that do not overlap in the docked layout, so this is inert
+   for every ordinary state, and 26 clears the overlay mode's own 25. */
+.widget-flyout:has(
+    .tool-run-dialog__overlay,
+    .confirm-dialog__overlay,
+    .settings-dialog__overlay,
+    .update-dialog__overlay,
+    .error-center__overlay,
+    .project-manager__overlay,
+    .command-palette__overlay
+  ) {
+  z-index: 26;
+}
+
 /* The stack hugs the rail, so the pane is revealed from the sidebar outward. */
 .widget-flyout--dock-left {
   justify-content: flex-start;

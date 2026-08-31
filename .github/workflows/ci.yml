@@ -340,5 +340,14 @@ jobs:
       - name: TypeScript typecheck
         run: npx tsc --noEmit
 
+      # Invoked directly: package.json has no "test" script, so `pnpm test`
+      # would silently do nothing. These are the only tests the frontend has
+      # (fuzzy matching, git lane/label colours, PR lane assignment, the
+      # markdown-lite renderer) and none of them were gated before - a broken
+      # prLanes.ts would have reached a release with tsc and the build both
+      # green, because neither one runs a single assertion.
+      - name: Vitest
+        run: npx vitest run
+
       - name: Vite production build
         run: npx vite build
