@@ -3,6 +3,12 @@
 A short checklist for cutting a new version of the Tauri app (`app/`,
 `cli/`, `crates/devkit-host`).
 
+> **Automated:** the `/release` command (`.claude/commands/release.md`)
+> runs this whole checklist end-to-end - gates, bump, CHANGELOG, tag,
+> build watch, and the updater check. This file remains the authority on
+> WHY each step exists; if the two ever disagree, reconcile before
+> releasing.
+
 ## 1. Bump the version
 
 Three files declare a version and **all three must agree**:
@@ -48,36 +54,38 @@ $tauri   = (Get-Content app/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).v
 
 ## 2. Update `CHANGELOG.md`
 
-New `## [x.y.z] - YYYY-MM-DD` section, following the existing Added /
-Fixed / Changed structure.
+Notes accumulate under `## [Unreleased]` as work happens (`### Added` /
+`### Changed` / `### Fixed`). At release time, RENAME that header to
+`## [x.y.z] - YYYY-MM-DD` (today, local) - don't add a new section above
+or below it, and don't leave a fresh empty `[Unreleased]` stub behind (the
+next change adds one). If there is no `[Unreleased]` section when you go
+to release, something is wrong - every release should have accumulated
+notes; stop and figure out why before proceeding.
 
 ## 3. Run the full check locally before tagging
 
-This is the same set CI runs, in the same order. **Build the CLI first** -
-see the note below on why the Rust workspace will not even `cargo check`
-without it.
+This is the same set CI runs. (No CLI pre-staging is needed today:
+`tauri.conf.json` does not yet list `bin/devkit.exe` as a resource, so
+bare cargo commands work on a fresh clone - see "When the CLI bundling
+lands" below for what changes on the day it does.)
 
 ```powershell
-# 1. The devkit CLI, staged where the bundler expects it. Required before
-#    any cargo command that touches app/src-tauri (see "Why the CLI must be
-#    built first" below).
-cargo build --release -p devkit-cli
-New-Item -ItemType Directory -Force -Path app/src-tauri/bin | Out-Null
-Copy-Item -Force target/release/devkit.exe app/src-tauri/bin/devkit.exe
-
-# 2. PowerShell suite (covers tools/lib, core/, tests/Unit - the RPC
-#    sidecar's logic layer)
+# 1. PowerShell suite (covers tools/lib, core/, tests/Unit - the RPC
+#    sidecar's logic layer) plus the enforced analyzer gate
 Invoke-Pester -Path tests/Unit
+Invoke-ScriptAnalyzer -Path . -Recurse -Severity ParseError, Error -ExcludeRule PSAvoidUsingComputerNameHardcoded
 
-# 3. Rust workspace
+# 2. Rust workspace
 cargo check --workspace
 cargo clippy --workspace --all-targets
 cargo test --workspace
 
-# 4. Frontend
+# 3. Frontend (vitest is invoked directly - package.json has no "test"
+#    script, so `pnpm test` would silently run nothing)
 cd app
 pnpm install --frozen-lockfile
 npx tsc --noEmit
+npx vitest run
 npx vite build
 ```
 
@@ -100,20 +108,25 @@ machine with a production install, or uninstall the production copy first.
 ## 4. Commit and push
 
 ```powershell
-git commit -m "Release vX.Y.Z"
+git commit -m "chore: vX.Y.Z"
 git push origin main
 ```
 
 CI (`.github/workflows/ci.yml`) runs four parallel jobs on
 `windows-latest`: the version triple, PowerShell (analyzer gate, syntax
 check over `.ps1`/`.psm1`/`.psd1`, Pester), the Rust workspace
-(check/clippy/test), and the frontend (`tsc --noEmit` + `vite build`). It
-deliberately does **not** build the installer - that is release-only.
+(check/clippy/test), and the frontend (`tsc --noEmit`, `vitest run`, and
+a production `vite build`). It deliberately does **not** build the
+installer - that is release-only.
 
 ## 5. Tag and push the tag
 
+Annotated, not lightweight - every existing tag (v4.0.0-v4.2.0) carries a
+message, and tooling that reads tag annotations (`git for-each-ref`, GitHub's
+own release-from-tag view) expects one:
+
 ```powershell
-git tag vX.Y.Z
+git tag -a vX.Y.Z -m "Northstar DevKit vX.Y.Z"
 git push origin vX.Y.Z
 ```
 
@@ -124,15 +137,19 @@ a GitHub Release with the NSIS installer, its `.sig`, and `latest.json`.
 
 ## 6. Confirm it went live
 
-The release publishes itself - there is no second click. As of v4.2.0
-`releaseDraft: false`, because a draft resolves for nobody: the updater's
-endpoint only ever points at published releases, so a tag whose release is
-left in draft reaches no machine at all.
+The release publishes itself - there is no second click. `releaseDraft:
+false` landed in commit b0791e6 ("ci: publish releases on tag instead of
+leaving a draft"), pushed AFTER the v4.2.0 tag - so v4.2.0 itself was
+built as a draft and published by hand, and v4.3.0 is the first tag this
+auto-publish path actually applies to. A draft resolves for nobody: the
+updater's endpoint only ever points at published releases, so a tag whose
+release is left in draft reaches no machine at all - which is exactly why
+the flip was made.
 
 So the tag IS the release. Check it actually landed:
 
 ```powershell
-gh release view v4.2.0            # draft: false, and marked Latest
+gh release view vX.Y.Z            # draft: false, and marked Latest
 curl -sL https://github.com/st3adyp1ck/northstar-devkit/releases/latest/download/latest.json
 ```
 
@@ -156,23 +173,26 @@ install root (`%LOCALAPPDATA%\DevKit\`, since `installMode` is
 | `core/` | `<installroot>\core\` - the RPC sidecar |
 | `tools/` | `<installroot>\tools\` - the ~65 tool scripts |
 | `VERSION` | `<installroot>\VERSION` |
-| `app/src-tauri/bin/devkit.exe` | `<installroot>\devkit.exe` - the ratatui CLI |
 
-Shipping the CLI is what makes `tools\system\Install-ShellIntegration.ps1`
-and `tools\system\Register-DevKitTerminalProfile.ps1` work on an installed
-app. Both resolve the install root as two levels above `tools\system\` and
-probe `<installroot>\devkit.exe` **first**, falling back to
-`target\release\devkit.exe` and `target\debug\devkit.exe`, which only exist
-in a dev checkout. Before the CLI was bundled, both tools simply refused to
-run on an installed copy.
+**The `devkit` CLI is NOT bundled yet.** `release.yml` builds and stages
+`app/src-tauri/bin/devkit.exe` on every tag, but `tauri.conf.json` neither
+runs that staging in `beforeBuildCommand` nor lists `bin/devkit.exe` as a
+resource, so the staged exe is ignored and an installed app has no
+`<installroot>\devkit.exe`. `tools\system\Install-ShellIntegration.ps1`
+and `Register-DevKitTerminalProfile.ps1` both probe that exact path first
+and hard-exit when it is missing, so shell/terminal integration works only
+from a source checkout for now.
 
-### Why the CLI must be built first
+### When the CLI bundling lands
 
-`app/src-tauri/bin/devkit.exe` is a build artifact, not a checked-in file,
-and `tauri-build`'s build script hard-fails with `ResourcePathNotFound`
-when a configured resource is missing. Build scripts run under `cargo
-check` too, so on a fresh clone **every** cargo command that touches
-`app/src-tauri` fails until the CLI has been built and staged:
+Applying it is two edits to `tauri.conf.json` - a `beforeBuildCommand`
+that runs `cargo build --release -p devkit-cli` and copies the exe to
+`app/src-tauri/bin/`, plus a `"bin/devkit.exe": "devkit.exe"` resources
+entry - and it carries a real ordering constraint: `tauri-build`
+hard-fails with `ResourcePathNotFound` when a configured resource is
+missing, and build scripts run under `cargo check` too, so from that
+moment on EVERY cargo command that touches `app/src-tauri` on a fresh
+clone fails until the CLI has been built and staged:
 
 ```powershell
 cargo build --release -p devkit-cli
@@ -180,18 +200,14 @@ New-Item -ItemType Directory -Force -Path app/src-tauri/bin | Out-Null
 Copy-Item -Force target/release/devkit.exe app/src-tauri/bin/devkit.exe
 ```
 
-`pnpm tauri build` does this for you - it is the tail of
-`beforeBuildCommand` in `tauri.conf.json` - so a full build is
-self-contained. It is only the bare `cargo check` / `clippy` / `test` path
-that needs the staging step run by hand once. Both CI workflows run it as
-an explicit first step for the same reason.
-
-The staging copy exists so that the resource never points inside `target/`
-itself. Pointing it at `target/release/devkit.exe` directly would work for
-a release build, but a **debug** build of the app would then copy the
-release CLI over `target/debug/devkit.exe` while Cargo still considers that
-path fresh - so `cargo run -p devkit-cli` would silently run the release
-binary. `app/src-tauri/bin/` sidesteps that entirely.
+`app/src-tauri/bin/` will also need a `.gitignore` entry, and this
+runbook's "run the full check locally" section will need the staging step
+put back at the top. The staging copy (rather than pointing the resource
+inside `target/`) is deliberate: a resource at `target/release/devkit.exe`
+would let a **debug** app build copy the release CLI over
+`target/debug/devkit.exe` while Cargo still considers that path fresh, so
+`cargo run -p devkit-cli` would silently run the release binary.
+See also the matching section in `CLAUDE.md`.
 
 ### `devkit` is not on `PATH`, on purpose
 
@@ -251,7 +267,7 @@ real PATH mutated or its containers destroyed. What CI does cover:
   `tools/*/_module.psd1` menu manifest, and a PSScriptAnalyzer gate.
 - **Rust** - `cargo check`, `cargo clippy --all-targets` and `cargo test`
   across the whole workspace.
-- **Frontend** - `tsc --noEmit` and a production `vite build`.
+- **Frontend** - `tsc --noEmit`, the vitest suite, and a production `vite build`.
 
 Everything else - real installs, the updater round-trip, tray behaviour,
 the tool scripts against live systems - is verified manually per the
