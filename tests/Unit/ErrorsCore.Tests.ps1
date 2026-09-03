@@ -5,7 +5,8 @@
 .DESCRIPTION
     Covers the pure halves fixtures-in/entries-out - the tracing log-line
     parser, the tracing-level and Windows-event-level severity mappings, the
-    benign-sidecar allowlist, and the entry-shape mapping the frontend store
+    benign-sidecar allowlist, the known-transient event classifier, and the
+    entry-shape mapping the frontend store
     (app/src/stores/useErrorStore.ts) depends on - plus the file-touching
     halves against TestDrive: tail reads (including one under a live writer
     holding the file open the way tracing_appender does), rotated-file
@@ -420,6 +421,63 @@ Describe "ConvertTo-DevKitSystemErrorEntry" {
         $keys = @((ConvertTo-DevKitSystemErrorEntry -EventRecord (New-TestEventRecord)).Keys)
         $keys.Count | Should -Be 7
         $keys | Should -Not -Contain 'dedupeKey'
+    }
+}
+
+Describe "Get-DevKitKnownTransientEventNote" {
+
+    It "recognizes the confirmed transient (provider, id) pairs" {
+        Get-DevKitKnownTransientEventNote -Provider 'Microsoft-Windows-WindowsUpdateClient' -EventId 20 | Should -Match 'retries on its own'
+        Get-DevKitKnownTransientEventNote -Provider 'Microsoft-Windows-Perflib' -EventId 1023 | Should -Match 'lodctr /R'
+        Get-DevKitKnownTransientEventNote -Provider 'Microsoft-Windows-HAL' -EventId 21 | Should -Match 'BIOS/UEFI'
+        Get-DevKitKnownTransientEventNote -Provider 'Application Hang' -EventId 1002 | Should -Match 'self-resolved'
+    }
+
+    It "matches the short source name too (the Microsoft-Windows- prefix is normalized away)" {
+        Get-DevKitKnownTransientEventNote -Provider 'Perflib' -EventId 1023 | Should -Not -BeNullOrEmpty
+    }
+
+    It "returns `$null for anything not in the table - no heuristics" {
+        Get-DevKitKnownTransientEventNote -Provider 'Microsoft-Windows-Perflib' -EventId 1024 | Should -BeNullOrEmpty
+        Get-DevKitKnownTransientEventNote -Provider 'Application Hang' -EventId 1001 | Should -BeNullOrEmpty
+        Get-DevKitKnownTransientEventNote -Provider 'Perflib-ish' -EventId 1023 | Should -BeNullOrEmpty
+        Get-DevKitKnownTransientEventNote -Provider '' -EventId 1023 | Should -BeNullOrEmpty
+        Get-DevKitKnownTransientEventNote -Provider 'Perflib' -EventId $null | Should -BeNullOrEmpty
+    }
+}
+
+Describe "ConvertTo-DevKitSystemErrorEntry known-transient classification" {
+
+    It "demotes a known-transient event to warning and annotates the detail" {
+        $e = ConvertTo-DevKitSystemErrorEntry -EventRecord (New-TestEventRecord -Level 2 -Provider 'Microsoft-Windows-Perflib' -Id 1023 -Message 'Windows cannot load the extensible counter DLL C:\WINDOWS\system32\sysmain.dll')
+        $e.severity | Should -Be 'warning'
+        $e.meta.knownTransient | Should -BeTrue
+        $e.detail | Should -Match 'known-transient'
+        $e.detail | Should -Match 'lodctr /R'
+        # The original message survives the annotation.
+        $e.detail | Should -Match 'sysmain\.dll'
+    }
+
+    It "keeps the title one-line (the note rides in detail only)" {
+        $e = ConvertTo-DevKitSystemErrorEntry -EventRecord (New-TestEventRecord -Provider 'Application Hang' -Id 1002 -Message 'The program dllhost.exe stopped interacting with Windows and was closed.')
+        $e.title | Should -Be 'The program dllhost.exe stopped interacting with Windows and was closed.'
+    }
+
+    It "does NOT classify an ordinary event from an unrelated provider" {
+        $e = ConvertTo-DevKitSystemErrorEntry -EventRecord (New-TestEventRecord -Level 2 -Provider 'Service Control Manager' -Id 7031)
+        $e.severity | Should -Be 'error'
+        $e.meta.Contains('knownTransient') | Should -BeFalse
+    }
+
+    It "does NOT classify the same event id from a different provider" {
+        $e = ConvertTo-DevKitSystemErrorEntry -EventRecord (New-TestEventRecord -Level 2 -Provider 'SomeOtherProvider' -Id 1023)
+        $e.severity | Should -Be 'error'
+        $e.meta.Contains('knownTransient') | Should -BeFalse
+    }
+
+    It "still emits exactly the seven contract keys for a classified event" {
+        $keys = @((ConvertTo-DevKitSystemErrorEntry -EventRecord (New-TestEventRecord -Provider 'Microsoft-Windows-HAL' -Id 21)).Keys)
+        $keys.Count | Should -Be 7
     }
 }
 

@@ -11,6 +11,9 @@
                            same defensive posture about "No events were
                            found" being a NORMAL outcome - as
                            tools/maintenance/Get-RecentEventErrors.ps1.
+                           Confirmed transient host-OS events are DEMOTED
+                           to warning with a "what to do" note, never
+                           dropped - see KNOWN-TRANSIENT SYSTEM EVENTS.
       - errors.app         DevKit's OWN failures, parsed out of the rolling
                            tracing log under
                            %LOCALAPPDATA%\NorthstarDevKit\logs\devkit.log*.
@@ -192,6 +195,68 @@ function Get-DevKitEventSeverity {
     }
 }
 
+# ==================== KNOWN-TRANSIENT SYSTEM EVENTS ====================
+#
+# errors.system reports EVERY Critical/Error in the System and Application
+# logs, so routine host-OS chatter (an update failing because an app was
+# open, a counter DLL momentarily replaced during servicing) lands in the
+# Error Center indistinguishable from a fault that actually needs action.
+# This table classifies CONFIRMED transient/self-healing (provider, event
+# id) pairs - exact matches only, never substrings or heuristics, the same
+# philosophy as the benign-sidecar allowlist below. A classified event is
+# DEMOTED to warning and annotated with what it is and what to do, never
+# dropped: recurrence is itself the actionable signal (e.g. Perflib 1023
+# firing OUTSIDE a servicing window means the counter database genuinely
+# needs rebuilding), and the store's count=N dedupe row is where that
+# recurrence stays visible.
+#
+# Add an entry only after a real machine report has confirmed the event is
+# transient and self-resolving.
+
+$script:DevKitKnownTransientEvents = @{
+    # Installation Failure - e.g. 0x80073D02 (ERROR_PACKAGES_IN_USE): the
+    # app was running while the Store serviced its package.
+    'WindowsUpdateClient|20' = 'Windows Update could not service a package because it was in use (e.g. error 0x80073D02). Windows retries on its own - only a repeat failure for the SAME app needs action (close it, then retry from the Microsoft Store).'
+    # Extensible counter DLL load failure, almost always logged while OS
+    # servicing has the DLL momentarily replaced.
+    'Perflib|1023'           = 'A performance-counter DLL was momentarily unavailable, usually during OS servicing. If this repeats OUTSIDE update windows, run "sfc /scannow" then "lodctr /R" from an elevated prompt.'
+    # The firmware's ACPI Time and Alarm Device method failed while setting
+    # the hardware clock. Not OS-fixable.
+    'HAL|21'                 = 'The firmware failed to program the ACPI Time and Alarm Device (the hardware real-time clock). Not OS-fixable - check the hardware vendor for a BIOS/UEFI update. Harmless unless something relies on RTC wake alarms.'
+    # A program stopped responding and Windows closed it - self-resolved by
+    # design.
+    'Application Hang|1002'  = 'An application hung and Windows closed it (self-resolved). Noise unless the same program starts recurring with a pattern.'
+}
+
+function Get-DevKitKnownTransientEventNote {
+    <#
+    .SYNOPSIS
+        The "what this is / what to do" annotation for a CONFIRMED
+        transient Windows event, or $null when the (provider, id) pair is
+        not in the known-transient table.
+    .DESCRIPTION
+        Exact match only - no heuristics. Provider names are compared
+        case-insensitively (PowerShell hashtable keys already are) and with
+        any "Microsoft-Windows-" prefix stripped, so the long provider name
+        Get-WinEvent returns ("Microsoft-Windows-Perflib") and the short
+        source name Event Viewer shows ("Perflib") hit the same entry.
+    #>
+    param(
+        [AllowNull()][AllowEmptyString()][string]$Provider,
+        $EventId
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Provider)) { return $null }
+    if ($null -eq $EventId) { return $null }
+
+    $normalized = $Provider.Trim() -replace '^Microsoft-Windows-', ''
+    $key = "$normalized|$EventId"
+    if ($script:DevKitKnownTransientEvents.Contains($key)) {
+        return $script:DevKitKnownTransientEvents[$key]
+    }
+    return $null
+}
+
 function ConvertTo-DevKitSystemErrorEntry {
     <#
     .SYNOPSIS
@@ -241,14 +306,27 @@ function ConvertTo-DevKitSystemErrorEntry {
         $detail = "(no message text - the provider's message resource is missing or unregistered)"
     }
 
-    return (New-DevKitErrorEntry -Source 'system' -Severity (Get-DevKitEventSeverity $level) `
-            -Timestamp $timeCreated -Title $title -Detail $detail -Origin $provider -Meta @{
-            eventId   = $eventId
-            logName   = $logName
-            recordId  = $recordId
-            level     = $level
-            levelName = $levelName
-        })
+    $severity = Get-DevKitEventSeverity $level
+    $meta = @{
+        eventId   = $eventId
+        logName   = $logName
+        recordId  = $recordId
+        level     = $level
+        levelName = $levelName
+    }
+
+    $knownNote = Get-DevKitKnownTransientEventNote -Provider $provider -EventId $eventId
+    if ($null -ne $knownNote) {
+        # Demote, never drop - see the table's comment for why recurrence
+        # must stay visible. The title is untouched (and stays one line);
+        # the note rides in detail, which the store's dedupe key excludes.
+        $detail = "$detail`n`nDevKit note (known-transient event, demoted from $severity): $knownNote"
+        $severity = 'warning'
+        $meta.knownTransient = $true
+    }
+
+    return (New-DevKitErrorEntry -Source 'system' -Severity $severity `
+            -Timestamp $timeCreated -Title $title -Detail $detail -Origin $provider -Meta $meta)
 }
 
 function Get-DevKitSystemErrors {

@@ -2,6 +2,25 @@
 
 All notable changes to Northstar DevKit are documented here.
 
+## [4.4.0] - 2026-09-03
+
+### Changed
+
+- **The Error Center now classifies known-transient Windows events instead
+  of ranking them as real errors.** `errors.system` reports every
+  Critical/Error in the System and Application logs, so routine host-OS
+  chatter landed indistinguishable from faults that actually need action.
+  Confirmed transient (provider, event id) pairs - seeded with Windows
+  Update "package in use" install failures (WindowsUpdateClient 20),
+  Perflib counter-DLL load failures during OS servicing (1023), firmware
+  RTC programming failures (HAL 21), and self-resolved application hangs
+  (Application Hang 1002) - are demoted to warning and annotated with what
+  the event is and what to do about it, never dropped: recurrence stays
+  visible in the store's count=N dedupe row, which is exactly the signal
+  that a "transient" event is not transient on that machine. Exact-match
+  classification only, no heuristics - the same philosophy as the
+  sidecar's benign-line allowlist.
+
 ## [4.3.0] - 2026-08-31
 
 ### Added

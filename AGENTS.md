@@ -115,7 +115,11 @@ DevKit/
 │   ├── Invoke-DevKitRpc.ps1        # The sidecar process entry point
 │   ├── RpcMethods.ps1              # The ~40-method dispatch table
 │   ├── RpcProtocol.ps1             # NDJSON line-encoding helpers
-│   ├── DevKit.Core.psm1            # Dot-sources tools/lib/* + the two files
+│   ├── DevKit-Errors.ps1           # The Error Center's collectors
+│   │                              # (errors.system / errors.app /
+│   │                              # errors.clearAppLogs) + the known-transient
+│   │                              # Windows event classification table
+│   ├── DevKit.Core.psm1            # Dot-sources tools/lib/* + the core files
 │   │                              # below into one flat module
 │   ├── DevKit-WidgetCore.ps1       # Pure logic, moved here from gui/: metrics,
 │   │                              # git overview, notes/on-deck, files, MCP status
