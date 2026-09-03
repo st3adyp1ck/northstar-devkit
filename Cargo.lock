@@ -1231,7 +1231,7 @@ dependencies = [
 
 [[package]]
 name = "devkit"
-version = "4.3.0"
+version = "4.4.0"
 dependencies = [
  "anyhow",
  "devkit-host",
@@ -1261,7 +1261,7 @@ dependencies = [
 
 [[package]]
 name = "devkit-cli"
-version = "4.3.0"
+version = "4.4.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -1280,7 +1280,7 @@ dependencies = [
 
 [[package]]
 name = "devkit-host"
-version = "4.3.0"
+version = "4.4.0"
 dependencies = [
  "anyhow",
  "dunce",
