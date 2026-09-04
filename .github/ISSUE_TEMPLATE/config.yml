@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Questions and ideas
+    url: https://github.com/st3adyp1ck/northstar-devkit/discussions
+    about: Ask a question or float an idea before it becomes a feature request.
+  - name: Support / general enquiries
+    url: mailto:thesage@northstarcoding.com
+    about: Email the maintainers directly for anything that is not a bug or feature request.
+  - name: Report a security vulnerability
+    url: https://github.com/st3adyp1ck/northstar-devkit/security/advisories/new
+    about: Report privately. Please do not open a public issue for security problems.

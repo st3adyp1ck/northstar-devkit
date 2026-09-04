@@ -1,5 +1,6 @@
 import { useMemo, type CSSProperties, type ReactNode } from "react";
 import clsx from "clsx";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { usePolledRpc, type PolledRpcResult } from "../../../hooks/usePolledRpc";
 import { asArray } from "../../../lib/arrays";
 import { playSound } from "../../../lib/sounds";
@@ -30,6 +31,22 @@ import "./GitHubPanel.css";
  */
 const GITHUB_POLL_MS = 20000;
 
+/**
+ * Unlike every other panel, these two poll through `gh` to a remote API that
+ * rate-limits. Retrying a failing call every 20s for as long as the flyout is
+ * open is exactly what keeps you limited, so consecutive failures back off
+ * 20s -> 40s -> 80s ... up to ten minutes, collapsing back to GITHUB_POLL_MS on
+ * the first success. Sidecar-backed panels keep their fixed fast interval.
+ */
+const GITHUB_MAX_BACKOFF_MS = 600000;
+
+/** Mirrors GitDetail's helper - best-effort hand-off to the OS browser. */
+function openExternal(url: string) {
+  openUrl(url).catch(() => {
+    // best-effort - no in-app fallback if the OS can't hand off to a browser
+  });
+}
+
 export interface GitHubLists {
   prs: PolledRpcResult<GitHubListResult<GitHubPrRow>>;
   issues: PolledRpcResult<GitHubListResult<GitHubIssueRow>>;
@@ -47,8 +64,12 @@ export interface GitHubLists {
 export function useGitHubLists(path: string | null, live: boolean): GitHubLists {
   const params = path ? { path } : undefined;
   const enabled = live && !!path;
-  const prs = usePolledRpc<GitHubListResult<GitHubPrRow>>("github.prs", params, GITHUB_POLL_MS, enabled);
-  const issues = usePolledRpc<GitHubListResult<GitHubIssueRow>>("github.issues", params, GITHUB_POLL_MS, enabled);
+  const prs = usePolledRpc<GitHubListResult<GitHubPrRow>>(
+    "github.prs", params, GITHUB_POLL_MS, enabled, undefined, GITHUB_MAX_BACKOFF_MS,
+  );
+  const issues = usePolledRpc<GitHubListResult<GitHubIssueRow>>(
+    "github.issues", params, GITHUB_POLL_MS, enabled, undefined, GITHUB_MAX_BACKOFF_MS,
+  );
   // Memoised because asArray allocates: the PR rows feed buildPrLanes, whose
   // whole point is to run only when the data actually changed. react-query's
   // structural sharing already hands back the identical payload across an
@@ -104,7 +125,15 @@ export function listStateMessage<T>(
       <div className="git-state git-state--warn">
         <span>
           GitHub CLI not found.
-          <span className="git-state__detail">Install `gh` and sign in to see pull requests and issues here.</span>
+          <span className="git-state__detail">
+            {"Install "}
+            <button type="button" className="git-state__link" onClick={() => openExternal("https://cli.github.com")}>
+              the GitHub CLI
+            </button>
+            {" and run "}
+            <code>gh auth login</code>
+            {" to see pull requests and issues here."}
+          </span>
         </span>
       </div>
     );

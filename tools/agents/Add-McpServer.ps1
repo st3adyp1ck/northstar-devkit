@@ -40,7 +40,7 @@
     .\Add-McpServer.ps1 -Name my-server -Command npx -CommandArgs '-y','my-mcp-server'
     .\Add-McpServer.ps1 -Name my-server -Command npx -CommandArgs '-y','my-mcp-server' -Scope user
     .\Add-McpServer.ps1 -Name my-server -Command node -CommandArgs 'server.js' -Scope project -ProjectPath C:\my-project
-    .\Add-McpServer.ps1 -Name github -Transport http -Url https://api.githubcopilot.com/mcp -Headers 'Authorization: Bearer ghp_xxx'
+    .\Add-McpServer.ps1 -Name github -Transport http -Url https://api.githubcopilot.com/mcp -Headers 'Authorization: Bearer <your-token>'
 #>
 [CmdletBinding(DefaultParameterSetName = 'Local')]
 param(

@@ -20,8 +20,12 @@ import { useVisibility } from "./useVisibility";
  *  - `stale`    - data on screen, but the latest refresh failed (last known values)
  *  - `errorMessage` - what to actually tell the user
  *
- * Polling keeps running through an error (refetchInterval is unaffected by
- * query status), so every panel self-heals the moment the sidecar returns.
+ * Polling keeps running at full rate through an error, so every panel
+ * self-heals the moment the sidecar returns. That is right for the sidecar,
+ * whose outages are local and end abruptly - but wrong for a remote API that
+ * rate-limits, where hammering a failing endpoint is the thing that keeps you
+ * limited. Callers that poll through to GitHub pass `maxBackoffMs` to opt into
+ * exponential backoff on consecutive failures; everyone else is unchanged.
  */
 export interface PolledRpcStatus {
   /** First load still in flight with nothing rendered yet. Replaces the old `isLoading && !data` idiom. */
@@ -65,6 +69,13 @@ function describeRpcError(error: unknown): string {
  * key, a change is simply picked up by the next poll (queryFn is rebuilt
  * every render, so it always closes over the latest value).
  *
+ * `maxBackoffMs`, when given, caps an exponential slow-down applied while
+ * consecutive fetches fail: intervalMs, then 2x, 4x, ... up to the cap, reset
+ * to intervalMs by the first success. Omit it (the default) and the interval is
+ * fixed, which is what every sidecar-backed panel wants. Pass it for methods
+ * that reach a rate-limited third party - `github.prs` and `github.issues` are
+ * the reason it exists.
+ *
  * Returns the full UseQueryResult (unchanged for existing callers) plus the
  * PolledRpcStatus flags above - see that type for why panels should read
  * `failed`/`stale` rather than inferring health from `data` alone.
@@ -75,13 +86,22 @@ export function usePolledRpc<T>(
   intervalMs: number,
   enabled = true,
   unkeyedParams?: Record<string, unknown>,
+  maxBackoffMs?: number,
 ): PolledRpcResult<T> {
   const visible = useVisibility();
   const query = useQuery({
     queryKey: [method, params ?? null],
     queryFn: () => rpcCall<T>(method, params && unkeyedParams ? { ...params, ...unkeyedParams } : params),
     enabled,
-    refetchInterval: visible && enabled ? intervalMs : false,
+    refetchInterval: (query) => {
+      if (!visible || !enabled) return false;
+      if (maxBackoffMs === undefined) return intervalMs;
+      // fetchFailureCount is reset to 0 on any success, so the ramp collapses
+      // back to the base interval as soon as the endpoint answers again.
+      const failures = query.state.fetchFailureCount;
+      if (failures < 1) return intervalMs;
+      return Math.min(intervalMs * 2 ** failures, maxBackoffMs);
+    },
     refetchIntervalInBackground: false,
     staleTime: intervalMs / 2,
   });

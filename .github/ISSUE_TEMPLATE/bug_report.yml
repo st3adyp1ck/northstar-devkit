@@ -1,5 +1,5 @@
 name: Bug Report
-Description: File a bug report
+description: File a bug report
 title: "[Bug]: "
 labels: ["bug"]
 body:
@@ -31,7 +31,7 @@ body:
     attributes:
       label: DevKit Version
       description: What version of DevKit are you running?
-      placeholder: e.g., 2.0.0
+      placeholder: e.g., 4.4.0
     validations:
       required: true
   - type: dropdown

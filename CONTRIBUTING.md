@@ -5,15 +5,18 @@ First off, thanks for taking the time to contribute! 🎉
 ## How Can I Contribute?
 
 ### Reporting Bugs
+
 - Check if the bug has already been reported in [Issues](https://github.com/st3adyp1ck/northstar-devkit/issues).
 - If not, open a new issue and use the **Bug Report** template.
 - Include your PowerShell version, Windows version, and steps to reproduce.
 
 ### Suggesting Features
+
 - Open a new issue and use the **Feature Request** template.
 - Explain the use case and why it would help other developers.
 
 ### Pull Requests
+
 1. Fork the repository.
 2. Create a feature branch: `git checkout -b feature/my-feature`.
 3. Make your changes.
@@ -32,8 +35,12 @@ First off, thanks for taking the time to contribute! 🎉
 
 ## Code of Conduct
 
-This project adheres to a standard of respectful, constructive communication. Be kind, be patient, and help others learn.
+This project follows the [Contributor Covenant](CODE_OF_CONDUCT.md) v2.1. Be kind, be patient, and help others learn.
+
+## Security
+
+Please don't report vulnerabilities through public issues or pull requests - see [SECURITY.md](SECURITY.md) for the private reporting path.
 
 ## Questions?
 
-Visit [northstarcoding.com](https://www.northstarcoding.com) or open a GitHub Discussion.
+Open a [Discussion](https://github.com/st3adyp1ck/northstar-devkit/discussions), or email [thesage@northstarcoding.com](mailto:thesage@northstarcoding.com). More at [northstarcoding.com](https://www.northstarcoding.com).
