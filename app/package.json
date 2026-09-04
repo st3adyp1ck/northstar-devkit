@@ -33,7 +33,7 @@
     "typescript": "~5.8.3",
     "vite": "^7.0.4",
     "@tauri-apps/cli": "^2",
-    "vitest": "^3",
+    "vitest": "^4",
     "@testing-library/react": "^16",
     "tauri-plugin-mcp": "^0.3.1"
   }
