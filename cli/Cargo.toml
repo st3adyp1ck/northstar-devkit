@@ -21,6 +21,6 @@ tracing-subscriber.workspace = true
 devkit-host = { path = "../crates/devkit-host" }
 clap = { version = "4", features = ["derive"] }
 ratatui = "0.30"
-crossterm = "0.28"
+crossterm = "0.29"
 which = "7"
 dunce = "1"
