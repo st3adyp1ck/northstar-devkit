@@ -184,7 +184,15 @@ function Get-GithubLatestReleaseVersion {
     param([Parameter(Mandatory = $true)][string]$Repo)
     try {
         $uri = "https://api.github.com/repos/$Repo/releases/latest"
-        $response = Invoke-RestMethod -Uri $uri -Headers @{ 'User-Agent' = 'NorthstarDevKit' } -TimeoutSec 10 -ErrorAction Stop
+        # User-Agent is mandatory; Accept and X-GitHub-Api-Version are the
+        # documented "should" headers. Pinning the API version keeps a future
+        # breaking default from silently reshaping this response.
+        $headers = @{
+            'User-Agent'           = 'NorthstarDevKit (+https://github.com/st3adyp1ck/northstar-devkit)'
+            'Accept'               = 'application/vnd.github+json'
+            'X-GitHub-Api-Version' = '2022-11-28'
+        }
+        $response = Invoke-RestMethod -Uri $uri -Headers $headers -TimeoutSec 10 -ErrorAction Stop
         if ($response -and $response.tag_name) {
             return ($response.tag_name -replace '^v', '')
         }

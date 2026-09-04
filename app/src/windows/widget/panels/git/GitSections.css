@@ -131,6 +131,30 @@
   word-break: break-word;
 }
 
+/* Inline action inside a git-state message - a real control, not decoration,
+   so it carries the surrounding tone's colour and a visible focus ring. */
+.git-state__link {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.git-state__link:hover {
+  text-decoration-thickness: 2px;
+}
+
+.git-state__link:focus-visible {
+  outline: 1px solid currentColor;
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
 .git-state__skeleton {
   display: flex;
   flex-direction: column;
