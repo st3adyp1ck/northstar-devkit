@@ -30,11 +30,11 @@
           "prompts": [
             {
               "Type": "Int",
-              "Min": 1,
               "Name": "Port",
+              "Min": 1,
+              "Max": 65535,
               "InvalidMessage": "Invalid port number.",
-              "Prompt": "Enter port number",
-              "Max": 65535
+              "Prompt": "Enter port number"
             }
           ],
           "staticArgs": {
@@ -53,11 +53,11 @@
           "prompts": [
             {
               "Type": "Int",
-              "Min": 1,
               "Name": "ProcessId",
+              "Min": 1,
+              "Max": 2147483647,
               "InvalidMessage": "Invalid PID.",
-              "Prompt": "Enter PID to kill",
-              "Max": 2147483647
+              "Prompt": "Enter PID to kill"
             }
           ],
           "staticArgs": null
@@ -86,11 +86,11 @@
           "prompts": [
             {
               "Type": "Int",
-              "Min": 1,
               "Name": "Port",
+              "Min": 1,
+              "Max": 65535,
               "InvalidMessage": "Invalid port number.",
-              "Prompt": "Enter port number",
-              "Max": 65535
+              "Prompt": "Enter port number"
             }
           ],
           "staticArgs": {
@@ -109,11 +109,11 @@
           "prompts": [
             {
               "Type": "Int",
-              "Min": 1,
               "Name": "Port",
+              "Min": 1,
+              "Max": 65535,
               "InvalidMessage": "Invalid port number.",
-              "Prompt": "Enter port number",
-              "Max": 65535
+              "Prompt": "Enter port number"
             }
           ],
           "staticArgs": null
@@ -142,8 +142,8 @@
           "prompts": [
             {
               "Type": "String",
-              "Optional": true,
               "Name": "Url",
+              "Optional": true,
               "Prompt": "Enter URL to test (blank = scan listening dev ports)"
             }
           ],
@@ -285,17 +285,17 @@
           "prompts": [
             {
               "Type": "YesNo",
-              "Optional": true,
               "Name": "Turbo",
+              "Optional": true,
               "Prompt": "Clear Turbopack cache too?"
             },
             {
               "Type": "Int",
               "Min": 1,
               "Name": "Port",
-              "Prompt": "Port (press Enter for default)",
               "Optional": true,
-              "Max": 65535
+              "Max": 65535,
+              "Prompt": "Port (press Enter for default)"
             }
           ],
           "staticArgs": null
@@ -388,12 +388,12 @@
           "prompts": [
             {
               "Type": "Int",
-              "Min": 1,
-              "Name": "Hours",
-              "InvalidMessage": "Invalid hours.",
-              "Prompt": "How many hours back? (blank = 24)",
               "Optional": true,
-              "Max": 720
+              "Name": "Hours",
+              "Min": 1,
+              "Max": 720,
+              "InvalidMessage": "Invalid hours.",
+              "Prompt": "How many hours back? (blank = 24)"
             }
           ],
           "staticArgs": null
@@ -484,9 +484,9 @@
           "projectArgName": null,
           "requiresFile": {
             "ParamName": "BackupFile",
-            "Description": "Select an environment backup to restore",
+            "Filter": "DevKit backups (*.json)|*.json|All files (*.*)|*.*",
             "TypePrompt": "Enter backup file path to restore",
-            "Filter": "DevKit backups (*.json)|*.json|All files (*.*)|*.*"
+            "Description": "Select an environment backup to restore"
           },
           "prompts": null,
           "staticArgs": null
@@ -641,7 +641,7 @@
           "key": "8",
           "label": "Close Out Session - Deep (Recycle Bin + Package Cache)",
           "script": "Close-OutSession.ps1",
-          "help": "The same one-action end-of-day cleanup as item 6 with the two everyday opt-ins already on: stops every running node.exe, frees the common dev ports held by recognized dev runtimes, deletes the CONTENTS of your user TEMP folder (plus Windows\\Temp and the Windows Update cache when elevated), trims every accessible process's working set - and additionally EMPTIES THE RECYCLE BIN (permanent - a file you deleted but might still want back is gone for good) and cleans the detected package manager's global cache (npm cache clean --force / pnpm store prune / yarn cache clean --all / bun pm cache rm - safe, but the next install in any project is slower while the cache refills). It still will NOT clear a project's framework caches (that needs -ProjectPath from the command line; the widget's Deep button adds the active project itself), prune Docker, free the database ports 3306/5432/6379/27017, or stop a port owner that is not a recognized dev runtime. Safety note: this really does stop processes, permanently empties the Recycle Bin, and deletes files, so it is gated by the shared Confirm-DevKitDestructiveAction prompt - the Control Center's caution dialog passes -Force for you once you confirm, and a non-interactive run without -Force declines and changes nothing.",
+          "help": "The same one-action end-of-day cleanup as item 6 with the two everyday opt-ins already on: stops every running node.exe, frees the common dev ports held by recognized dev runtimes, deletes the CONTENTS of your user TEMP folder (plus Windows\\Temp and the Windows Update cache when elevated), trims every accessible process's working set - and additionally EMPTIES THE RECYCLE BIN (permanent - a file you deleted but might still want back is gone for good) and cleans the detected package manager's global cache (npm cache clean --force / pnpm store prune / yarn cache clean --all / bun pm cache rm - safe, but the next install in any project is slower while the cache refills). It still will NOT clear a project's framework caches (that needs -ProjectPath from the command line; the widget's Close-Out button adds the active project itself), prune Docker, free the database ports 3306/5432/6379/27017, or stop a port owner that is not a recognized dev runtime. Safety note: this really does stop processes, permanently empties the Recycle Bin, and deletes files, so it is gated by the shared Confirm-DevKitDestructiveAction prompt - the Control Center's caution dialog passes -Force for you once you confirm, and a non-interactive run without -Force declines and changes nothing.",
           "caution": true,
           "requiresProject": false,
           "projectArgName": null,

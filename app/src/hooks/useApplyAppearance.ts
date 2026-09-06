@@ -4,37 +4,19 @@ import { useReducedMotion } from "framer-motion";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { emit } from "@tauri-apps/api/event";
 import { useSettingsStore } from "../stores/useSettingsStore";
-import { deriveAccentRamp, getThemePreset } from "../lib/themes";
+import {
+  appearanceProperties,
+  appearanceStorage,
+  bootAppearanceHint,
+  pickAppearance,
+  rootAppearance,
+  SCALE_PROPS,
+  uiScaleProperties,
+  writeCachedAppearance,
+} from "../lib/appearance";
 
-/** Clamp uiScale to the supported zoom range; non-finite/legacy values fall back to 1. */
-export function clampUiScale(scale: number): number {
-  if (!Number.isFinite(scale)) return 1;
-  return Math.min(1.4, Math.max(0.8, scale));
-}
-
-/** The root properties that carry a UI scale. Written and cleared as a unit - never one without the other. */
-const SCALE_PROPS = ["zoom", "--ui-scale"] as const;
-
-/**
- * The custom properties a given UI scale needs - ALWAYS as a pair.
- *
- * CSS `zoom` scales rendered content but vh units still resolve against the
- * UNZOOMED viewport, so an element sized 100vh renders at only 100vh * scale
- * and leaves a transparent gap at the window bottom when scale < 1 (both
- * windows are transparent:true, so the gap is literally see-through -
- * 208px of it at 80%). The window roots compensate with
- * `height: calc(100vh / var(--ui-scale, 1))`, which only works if
- * --ui-scale is written at the same instant as `zoom`. Anything that
- * previews a scale must go through here rather than writing `zoom` alone.
- *
- * Empty at scale 1: the stylesheet default (--ui-scale fallback 1, no zoom)
- * is already correct, and writing nothing keeps the removal path simple.
- */
-export function uiScaleProperties(scale: number): Record<string, string> {
-  const clamped = clampUiScale(scale);
-  if (clamped === 1) return {};
-  return Object.fromEntries(SCALE_PROPS.map((prop) => [prop, String(clamped)]));
-}
+// The pure pieces (clampUiScale, uiScaleProperties, the property derivation)
+// live in lib/appearance.ts so main.tsx can run them before React mounts.
 
 /**
  * Writes a UI scale to the document root immediately - the live preview
@@ -53,6 +35,30 @@ export function previewUiScale(scale: number): void {
 }
 
 /**
+ * The Animations preference as it stood when this window booted - the same
+ * snapshot main.tsx paints `data-animations` from - so the JS-driven motion
+ * gates below start in agreement with the CSS tokens instead of waiting on
+ * settings.get. True when there is no snapshot, matching the preference's
+ * default. Settings replace it the moment they arrive.
+ */
+const bootAnimationsHint: boolean = bootAppearanceHint()?.enableAnimations ?? true;
+
+/**
+ * The in-app Animations setting alone (no OS axis): false only when the user
+ * turned it off. While settings are still loading (or failed to load) this
+ * is the boot snapshot rather than a guess, so a user who turned animations
+ * off never sees every panel's entrance play for the seconds the sidecar
+ * takes to answer, and everyone else never sees them flash off and back on.
+ * The <MotionConfig> at each window root and useAnimationsEnabled both read
+ * this; nothing should read preferences.enableAnimations off the store
+ * directly for a motion decision.
+ */
+export function useAnimationsPreference(): boolean {
+  const enabled = useSettingsStore((s) => s.settings?.preferences.enableAnimations);
+  return enabled === undefined ? bootAnimationsHint : enabled !== false;
+}
+
+/**
  * True when entrance/exit motion should actually play.
  *
  * Two independent axes, both of which must be clear: the OS
@@ -64,14 +70,11 @@ export function previewUiScale(scale: number): void {
  * the setting. Purely token-driven motion (CSS transitions, motion.ts's
  * motionDuration/motionReduced) already covers both via tokens.css's
  * `:root[data-animations="off"]` block and needs nothing here.
- *
- * While settings are still loading (or failed to load) motion is allowed,
- * matching useSyncAnimationsAttribute: never flash animations off and back on.
  */
 export function useAnimationsEnabled(): boolean {
   const osReducedMotion = useReducedMotion();
-  const enabled = useSettingsStore((s) => s.settings?.preferences.enableAnimations);
-  return !osReducedMotion && enabled !== false;
+  const enabled = useAnimationsPreference();
+  return !osReducedMotion && enabled;
 }
 
 /**
@@ -84,12 +87,20 @@ export function useAnimationsEnabled(): boolean {
  * window without either App root needing changes.
  *
  * Everything is written as inline style on document.documentElement, which
- * outranks tokens.css's :root block; we track exactly which properties we
- * set and remove the stale ones on every change, so switching back to
- * northstar (empty override set) genuinely returns to the stylesheet
- * defaults instead of leaving another theme's values behind. The
- * data-animations attribute is useSyncAnimationsAttribute's job - never
- * touched here.
+ * outranks tokens.css's :root block, through lib/appearance.ts's shared
+ * applier: it tracks exactly which properties were set and removes the
+ * stale ones on every change, so switching back to northstar (empty
+ * override set) genuinely returns to the stylesheet defaults instead of
+ * leaving another theme's values behind. The data-animations attribute is
+ * useSyncAnimationsAttribute's job - never touched here.
+ *
+ * FIRST PAINT. settings.get cannot answer until the PowerShell sidecar has
+ * finished importing DevKit.Core.psm1 - seconds on a cold start - while
+ * Rust shows the widget as soon as setup completes. So this hook also
+ * persists the appearance slice to localStorage after every apply, and
+ * main.tsx paints that snapshot before React mounts (applyCachedAppearance).
+ * Sharing the applier is what makes that safe: the first apply here sweeps
+ * whatever boot painted that settings.json turns out not to want.
  *
  * Also owns the one-shot "apply widgetDockMode on first settings load"
  * (widget window only) - the setting persisted for ages but nothing ever
@@ -104,7 +115,6 @@ export function useApplyAppearance(): void {
   // persisted. Re-asserting on the error edge makes that self-healing even
   // if the dialog that wrote the preview has already closed.
   const saveError = useSettingsStore((s) => s.error);
-  const appliedProps = useRef<Set<string>>(new Set());
   const dockApplied = useRef(false);
 
   // Same guard style as ConfirmDialogHost: fetch only if nothing has yet -
@@ -114,55 +124,23 @@ export function useApplyAppearance(): void {
   }, [settings, refresh]);
 
   useEffect(() => {
-    // While loading (or failed to load), leave the stylesheet defaults
-    // alone - never flash a theme guess.
+    // While loading (or failed to load), leave the root alone: it carries
+    // either the stylesheet defaults or the previous session's snapshot,
+    // both better than a guess.
     if (!settings) return;
-    const prefs = settings.preferences;
-
-    const desired: Record<string, string> = { ...getThemePreset(prefs.appTheme).overrides };
-
-    if (prefs.accentColor) {
-      const ramp = deriveAccentRamp(prefs.accentColor);
-      if (ramp) Object.assign(desired, ramp);
-    }
-
-    const family = prefs.fontFamily?.trim();
-    if (family) {
-      // A preset stack already carries its own fallbacks (has commas); a
-      // bare custom family name gets the default stack appended behind it.
-      desired["--font-sans"] = family.includes(",")
-        ? family
-        : `${family}, "Segoe UI Variable", "Segoe UI", system-ui, sans-serif`;
-    }
-
-    // zoom + --ui-scale, always together - see uiScaleProperties.
-    Object.assign(desired, uiScaleProperties(prefs.uiScale));
-
-    const style = document.documentElement.style;
-    // Clear stale properties before writing the new ones. SCALE_PROPS are in
-    // the sweep unconditionally, not just when this hook set them: the
-    // Settings slider writes the same pair directly for its live preview, so
-    // at uiScale 1 (where `desired` carries neither) an orphaned preview has
-    // to be cleared by a hook that never set it. Removal + set happen in one
-    // synchronous block, so there is no intermediate paint.
-    for (const prop of new Set([...appliedProps.current, ...SCALE_PROPS])) {
-      if (!(prop in desired)) style.removeProperty(prop);
-    }
-    for (const [prop, value] of Object.entries(desired)) {
-      style.setProperty(prop, value);
-    }
-    appliedProps.current = new Set(Object.keys(desired));
+    const appearance = pickAppearance(settings.preferences);
+    rootAppearance.apply(document.documentElement.style, appearanceProperties(appearance));
+    // What the next launch paints on its first frame. Written after the
+    // apply so the snapshot never gets ahead of what is actually on screen.
+    writeCachedAppearance(appearanceStorage(), appearance);
   }, [settings, saveError]);
 
-  // If the hook ever unmounts (it shouldn't - TitleBar lives as long as the
-  // window), put the stylesheet back the way we found it.
-  useEffect(() => {
-    return () => {
-      const style = document.documentElement.style;
-      for (const prop of appliedProps.current) style.removeProperty(prop);
-      appliedProps.current = new Set();
-    };
-  }, []);
+  // No unmount reset, deliberately. The hook never unmounts in practice
+  // (TitleBar lives as long as its window), and the last look applied is
+  // the persisted preference - snapping to the stylesheet defaults on the
+  // way out would read as a theme reset, and under StrictMode's dev-only
+  // mount/unmount/mount it would wipe the boot snapshot before settings
+  // have loaded, reintroducing the very flash this file exists to prevent.
 
   useEffect(() => {
     if (!settings || dockApplied.current) return;

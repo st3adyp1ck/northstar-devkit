@@ -4,8 +4,8 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { AnimatePresence, motion, MotionConfig, type Transition } from "framer-motion";
 import clsx from "clsx";
 import { rpcCall } from "../../lib/ipc";
-import { useSettingsStore } from "../../stores/useSettingsStore";
 import { useSyncAnimationsAttribute } from "../../hooks/useSyncAnimationsAttribute";
+import { useAnimationsPreference } from "../../hooks/useApplyAppearance";
 import { TitleBar } from "../../components/TitleBar";
 import { ProjectPicker } from "../../components/ProjectPicker";
 import { GlassPanel } from "../../components/primitives/GlassPanel";
@@ -80,7 +80,9 @@ function EmptyState({ icon, title, description, action, tone = "default" }: Empt
 
 export function ControlCenterApp({ embedded = false }: { embedded?: boolean }) {
   useSyncAnimationsAttribute();
-  const enableAnimations = useSettingsStore((s) => s.settings?.preferences.enableAnimations);
+  // Not read off the store: this must be right on the first frame, before
+  // settings.get has answered - see useAnimationsPreference.
+  const animationsOn = useAnimationsPreference();
   const {
     data: catalog,
     isLoading,
@@ -195,7 +197,7 @@ export function ControlCenterApp({ embedded = false }: { embedded?: boolean }) {
     // additionally reduces any *other* motion.* element under this root (e.g.
     // GlassPanel's mount fade, ConfirmDialogHost's own dialog transition) that
     // doesn't already branch on reducedMotion itself.
-    <MotionConfig reducedMotion={enableAnimations === false ? "always" : "never"}>
+    <MotionConfig reducedMotion={animationsOn ? "never" : "always"}>
       <ConfirmDialogHost>
         <div className={clsx("control-center", embedded && "control-center--embedded")}>
           {!embedded && (

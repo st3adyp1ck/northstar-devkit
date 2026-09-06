@@ -6,7 +6,18 @@ import { CommandPalette } from "./components/palette/CommandPalette";
 import { useVisibility } from "./hooks/useVisibility";
 import { initUiSounds } from "./lib/sounds";
 import { initErrorCapture } from "./lib/errorCapture";
+import { appearanceStorage, applyCachedAppearance } from "./lib/appearance";
 import "./styles/global.css";
+
+// Paint the previous session's theme/accent/font/scale/animations snapshot
+// onto <html> BEFORE anything renders. settings.get takes seconds on a cold
+// start (the sidecar has to import DevKit.Core.psm1 first) and Rust shows
+// the widget long before that, so without this every launch painted the
+// Northstar defaults and then snapped to the chosen theme. Synchronous and
+// ahead of mount() so the first React frame already has the right tokens;
+// useApplyAppearance corrects it the moment real settings load. See
+// lib/appearance.ts.
+applyCachedAppearance(document.documentElement, appearanceStorage());
 
 // Dev-only: the webview half of the MCP bridge (see attach_mcp_bridge in
 // src-tauri/src/lib.rs). Without these listeners every agent-facing tool that

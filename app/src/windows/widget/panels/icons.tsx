@@ -82,3 +82,36 @@ export function TerminalIcon(props: IconProps) {
     </svg>
   );
 }
+
+/* The three Quick Actions tiles. Same 16-unit grid and stroke as the panel
+   headers above; rendered larger there (18px) via width/height props. */
+
+/** Doctor - shield with a check: a health check that only reads. */
+export function ShieldCheckIcon(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M8 1.8 13 3.6V7.6C13 10.6 10.9 13.1 8 14.2 5.1 13.1 3 10.6 3 7.6V3.6L8 1.8Z" />
+      <path d="M5.8 8.1 7.3 9.6 10.3 6.4" />
+    </svg>
+  );
+}
+
+/** Close-Out - power symbol: ends the session. */
+export function PowerIcon(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M8 1.8V7.6" />
+      <path d="M4.6 4.4A4.9 4.9 0 1 0 11.4 4.4" />
+    </svg>
+  );
+}
+
+/** Preview - eye: looks, touches nothing. */
+export function EyeIcon(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M1.6 8C3 5.2 5.3 3.6 8 3.6S13 5.2 14.4 8C13 10.8 10.7 12.4 8 12.4S3 10.8 1.6 8Z" />
+      <circle cx="8" cy="8" r="2" />
+    </svg>
+  );
+}

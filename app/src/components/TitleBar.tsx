@@ -17,6 +17,19 @@ interface TitleBarProps extends PropsWithChildren {
   onHide?: () => void;
   showMaximize?: boolean;
   actions?: ReactNode;
+  /**
+   * The widget's dock side as WidgetApp is CURRENTLY DRAWING it, hint
+   * included - i.e. `docked` from WidgetApp.tsx. Only consulted while this
+   * window's own settings haven't loaded yet (`dockMode` below is
+   * undefined); a loaded `dockMode` always wins. Without this, a webview
+   * reload that lands while Rust is already docked would show the docked
+   * rail (drawn from the same hint) with the titlebar still draggable for
+   * the second or two before settings answer - a drag in that window
+   * would displace the sidebar off its pinned edge. Unused outside the
+   * widget window (win.label gates it out below), so ControlCenterApp
+   * passes nothing.
+   */
+  dockedHint?: boolean;
 }
 
 function GearIcon() {
@@ -235,7 +248,7 @@ function ElevationIndicator() {
  * inside -webkit-app-region: drag. The sidecar health dot rides along for
  * the same reason - one mount, every window.
  */
-export function TitleBar({ title, icon, onHide, showMaximize, actions, children }: TitleBarProps) {
+export function TitleBar({ title, icon, onHide, showMaximize, actions, children, dockedHint }: TitleBarProps) {
   const win = getCurrentWindow();
   const [settingsOpen, setSettingsOpen] = useState(false);
   useApplyAppearance();
@@ -256,7 +269,12 @@ export function TitleBar({ title, icon, onHide, showMaximize, actions, children 
   // that lands, this selector re-runs and the drag region comes back with
   // zero changes here.
   const dockMode = useSettingsStore((s) => s.settings?.preferences.widgetDockMode);
-  const isDockedWidget = win.label === "widget" && (dockMode === "Left" || dockMode === "Right");
+  // `dockMode === undefined` means settings haven't loaded in THIS window
+  // yet - the only window `dockedHint` is ever passed for is the one whose
+  // own live read is still pending, so this can never override a loaded
+  // "Floating" with a stale docked hint.
+  const isDockedWidget =
+    win.label === "widget" && (dockMode === "Left" || dockMode === "Right" || (dockMode === undefined && dockedHint === true));
 
   return (
     <>

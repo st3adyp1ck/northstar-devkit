@@ -4,7 +4,9 @@ import { listen } from "@tauri-apps/api/event";
 import { AnimatePresence, motion, MotionConfig } from "framer-motion";
 import clsx from "clsx";
 import { useSyncAnimationsAttribute } from "../../hooks/useSyncAnimationsAttribute";
+import { useAnimationsPreference } from "../../hooks/useApplyAppearance";
 import { useUpdateCheck } from "../../hooks/useUpdateCheck";
+import { bootAppearanceHint } from "../../lib/appearance";
 import { useSettingsStore } from "../../stores/useSettingsStore";
 import type { DevKitPreferences } from "../../lib/types";
 import { TitleBar } from "../../components/TitleBar";
@@ -153,8 +155,18 @@ interface WidgetGeometry {
  */
 export function WidgetApp() {
   useSyncAnimationsAttribute();
-  const enableAnimations = useSettingsStore((s) => s.settings?.preferences.enableAnimations);
-  const dockMode = useSettingsStore((s) => s.settings?.preferences.widgetDockMode);
+  // Not read off the store: this must be right on the first frame, before
+  // settings.get has answered - see useAnimationsPreference.
+  const animationsOn = useAnimationsPreference();
+  const settingsLoaded = useSettingsStore((s) => s.settings !== null);
+  // A rejected settings.get (sidecar failed to import, or timed out) sets
+  // this and leaves `settings` null FOREVER - nothing here retries; every
+  // refresh() call site is mount-time only. Without this the hint below
+  // would keep drawing a docked rail whose tabs are permanently dead (see
+  // its own comment), which is worse than the pre-hint fallback: the
+  // floating column, where every panel stayed reachable.
+  const settingsFailed = useSettingsStore((s) => s.error !== null);
+  const dockModePref = useSettingsStore((s) => s.settings?.preferences.widgetDockMode);
   const gitFlyoutWidth = useSettingsStore((s) => s.settings?.preferences.gitFlyoutWidth);
   const notesFlyoutWidth = useSettingsStore((s) => s.settings?.preferences.notesFlyoutWidth);
   const defaultFlyoutWidth = useSettingsStore((s) => s.settings?.preferences.flyoutWidth);
@@ -166,9 +178,31 @@ export function WidgetApp() {
   const widgetSavedWidth = useSettingsStore((s) => s.settings?.preferences.widgetSavedWidth);
   const updateSettings = useSettingsStore((s) => s.update);
 
-  const iconTheme = normalizeIconTheme(iconThemePref);
-  const railWidth = clampRail(railWidthPref, 44, 28, 96);
-  const railIconSize = clampRail(railIconSizePref, 18, 10, 40);
+  // THE FIRST FRAME. settings.get takes seconds on a cold start (the sidecar
+  // has to import DevKit.Core.psm1 first) and Rust shows this window long
+  // before that, so with `dockMode` undefined the shell painted its floating
+  // column - all nine panels inline, no rail - and then re-laid itself out
+  // into the docked rail the instant settings landed: the same snap as the
+  // theme, one component over. Until settings load, the previous session's
+  // snapshot (lib/appearance.ts, the same one main.tsx paints the theme
+  // from) decides the shell instead: which edge, how wide the rail, which
+  // glyphs, what order. A hint only - `?? ` means a loaded preference always
+  // wins, and a stale snapshot costs one launch of the old layout, nothing
+  // more. Null hint fields (a snapshot from before they existed) fall
+  // through to the same defaults as no settings at all.
+  //
+  // Released on `settingsFailed` too, not just `settingsLoaded`: a hint
+  // that outlives a failed load would leave the widget stuck as a docked
+  // shell with a permanently inert rail - the tabs no-op forever (see
+  // flyoutSide below), for a state that used to recover on its own as the
+  // floating column. A load that only hasn't ANSWERED yet still hints.
+  const hint = settingsLoaded || settingsFailed ? null : bootAppearanceHint();
+  const dockMode = dockModePref ?? hint?.widgetDockMode ?? undefined;
+  const flyoutTabOrder = flyoutTabOrderPref ?? hint?.flyoutTabOrder ?? undefined;
+
+  const iconTheme = normalizeIconTheme(iconThemePref ?? hint?.iconTheme);
+  const railWidth = clampRail(railWidthPref ?? hint?.railWidth ?? undefined, 44, 28, 96);
+  const railIconSize = clampRail(railIconSizePref ?? hint?.railIconSize ?? undefined, 18, 10, 40);
 
   // One derivation of "which edge are we pinned to", null when floating.
   // Everything downstream - the tray rail, the collapse chevron, the flyouts,
@@ -178,6 +212,17 @@ export function WidgetApp() {
   // render.
   const side = dockMode === "Left" || dockMode === "Right" ? dockMode : null;
   const docked = side !== null;
+
+  // What the flyout controller is told, as opposed to what is DRAWN. Rust's
+  // WidgetState starts Floating and only becomes docked when
+  // useApplyAppearance's startup set_widget_dock runs - off real settings,
+  // never the hint - and set_widget_flyout refuses while Floating. The
+  // controller's reconcile-on-first-dock would fire that refused call the
+  // moment it saw a hinted side, flagging the trays as in-window overlays
+  // for the first open. So the rail and its tabs draw from the hint, but
+  // the controller waits for the loaded side: a tab tapped in the second
+  // or two before settings land is a no-op, which beats a wrong-mode tray.
+  const flyoutSide = settingsLoaded ? side : null;
 
   // MIRRORED from Rust, not owned here - see the geometry effect below.
   // `WidgetState::collapsed` in commands.rs is the authority, because Rust is
@@ -221,11 +266,11 @@ export function WidgetApp() {
     [gitFlyoutWidth, notesFlyoutWidth, ccFlyoutWidth, defaultFlyoutWidth],
   );
 
-  const flyout = useWidgetFlyout({ side, widthFor, mainRef });
+  const flyout = useWidgetFlyout({ side: flyoutSide, widthFor, mainRef });
 
   // The rail's saved arrangement, applied to the trays this build ships.
   // asArray: a single-id order can come off the wire as a bare string.
-  const orderedTrays = useMemo(() => orderTrays(TRAYS, asArray<string>(flyoutTabOrderPref)), [flyoutTabOrderPref]);
+  const orderedTrays = useMemo(() => orderTrays(TRAYS, asArray<string>(flyoutTabOrder)), [flyoutTabOrder]);
 
   const flyoutPanes = useMemo<FlyoutPaneDef[]>(
     () => [
@@ -278,10 +323,16 @@ export function WidgetApp() {
   // Docked, the brand plate is the Control Center TRAY's tab: it slides out
   // in the same window like every other tray, instead of opening the
   // standalone window.
+  //
+  // Guarded on `flyoutSide` for the same reason as slideTo above:
+  // flyout.toggle already no-ops internally during the hint window (the
+  // controller was built with `side: flyoutSide`), but without this the
+  // click sound would still play for a plate that visibly did nothing.
   const toggleControlCenterTray = useCallback(() => {
+    if (!flyoutSide) return;
     playSound("click");
     flyout.toggle("control-center");
-  }, [flyout]);
+  }, [flyout, flyoutSide]);
 
   // ---------- persistence ----------
   // Both of these are patch-only writes (see useSettingsStore.update): only
@@ -416,8 +467,15 @@ export function WidgetApp() {
 
   // Slide the OS window itself (see commands::slide_widget) - the tray
   // behavior. Sound cues make the glass feel physical.
+  //
+  // Gated on `flyoutSide`, not the drawn `side`: during the hint window
+  // (settings not loaded yet) the rail already draws from the hint, but
+  // Rust's WidgetState is still genuinely Floating and would refuse
+  // slide_widget - a click there used to play "swoosh", stagger the column
+  // out, and then snap back once the refusal came back. Waiting for the
+  // settings-backed side makes the click a true no-op instead of a flicker.
   async function slideTo(nextCollapsed: boolean) {
-    if (!side) return;
+    if (!flyoutSide) return;
     // A collapsing sidebar has to take its tray with it. slide_widget parks
     // the window by reading its CURRENT outer width, so an open flyout would
     // park a double-width window (leaving the pane, not the rail, on screen)
@@ -450,7 +508,9 @@ export function WidgetApp() {
   // blank sidebar behind the rail (Left -> Right while collapsed), or a rail
   // floating over a normal window (docked -> Floating). Reset on every
   // change of the mode, not just on leaving docked. (useWidgetFlyout runs
-  // the matching reset for the tray itself.)
+  // the matching reset for the tray itself.) Keyed on the EFFECTIVE mode,
+  // hint included, so settings landing on the side the hint already drew
+  // is not a change and does not reset a collapse that Rust just reported.
   useEffect(() => {
     setCollapsed(false);
   }, [dockMode]);
@@ -488,10 +548,14 @@ export function WidgetApp() {
     // See ControlCenterApp.tsx's own <MotionConfig> for why "never" (not
     // "user"): it's a no-op when animations are enabled. "always" reduces
     // any motion.* element here that doesn't already derive its timing from
-    // a --duration-* token - chiefly GlassPanel's own mount fade, which each
-    // panel below renders as its root and which checks framer-motion's own
-    // (OS-only) useReducedMotion() rather than this setting.
-    <MotionConfig reducedMotion={enableAnimations === false ? "always" : "never"}>
+    // a --duration-* token AND doesn't already consult useAnimationsEnabled
+    // itself - GlassPanel's own mount fade is the one exception either way:
+    // it calls useAnimationsEnabled directly (see its own header comment
+    // for why neither this MotionConfig nor framer's OS-only
+    // useReducedMotion() can suppress an opacity fade), and that hook now
+    // reads the same boot snapshot `animationsOn` does, so the two agree
+    // from the first frame instead of GlassPanel lagging until settings load.
+    <MotionConfig reducedMotion={animationsOn ? "never" : "always"}>
       <ConfirmDialogHost>
         <div
           className={clsx(
@@ -547,6 +611,7 @@ export function WidgetApp() {
             >
               <TitleBar
                 title="DevKit"
+                dockedHint={docked}
                 onHide={() => toggleWindow("widget")}
                 actions={
                   <>

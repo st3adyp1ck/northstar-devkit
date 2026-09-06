@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import clsx from "clsx";
 import { useSettingsStore } from "../../../stores/useSettingsStore";
 import { useProjectStore } from "../../../stores/useProjectStore";
 import { useRunHistoryStore, type RunHistoryEntry } from "../../../stores/useRunHistoryStore";
@@ -10,61 +11,72 @@ import { Badge } from "../../../components/primitives/Badge";
 import { Expander } from "../../../components/primitives/Expander";
 import { RunHistoryList } from "../../../components/history/RunHistoryList";
 import { ToolConsole } from "../../../components/ToolConsole";
-import { BoltIcon } from "./icons";
+import { BoltIcon, EyeIcon, PowerIcon, ShieldCheckIcon } from "./icons";
 import { startWidgetToolRun, stopWatchingWidgetRun, useWidgetToolRun } from "./widgetToolRun";
 import type { EnvDrift } from "../../../lib/types";
 import "./QuickActionsPanel.css";
 
 /**
- * The panel is two actions now, so they are described rather than merely
- * labelled - with one button per row there is room to say what it does, and
- * a one-click end-of-day wipe is exactly the kind of thing that should not
- * rely on the owner remembering what the word on it means.
+ * The three tiles. Each carries a one-word NATURE line under its label
+ * (read-only / destructive / dry run) rather than a sentence: three across
+ * in a 380px sidebar leaves no room for prose, and the nature of the action
+ * is the one thing a one-click button must never leave to memory. The full
+ * description lives in each tile's tooltip and, for Close-Out, in the
+ * caution dialog it always opens first.
  */
 const DOCTOR = {
   label: "Doctor",
-  caption: "Full environment check - reads only, changes nothing.",
+  nature: "Read-only",
   folder: "diagnostics",
   script: "DevKit-Doctor.ps1",
   args: [] as string[],
 };
 
 /**
- * ASSUMPTION, to be confirmed against the close-out tool's own manifest:
- * tools/workflow/Close-OutSession.ps1, no required parameters, `-DryRun`
- * for the preview (the repo-wide convention - Docker-Cleanup, Git-Cleanup,
- * Copy-EnvTemplate and the rest all spell it that way) and a `-Force` that
- * the sidecar appends itself when `confirmed` is passed.
+ * Close-Out IS the deep clean. There used to be two: a default run and a
+ * tucked-away "Deep" option carrying the two everyday opt-ins. The lighter
+ * one is gone - the deep run was what the owner actually wanted at the end
+ * of every day, and a second, weaker button beside it only ever begged the
+ * question of which to press. So the opt-ins (-IncludeRecycleBin,
+ * -IncludePackageCache) ride along as plain args on the ONE button, and the
+ * active project (when one is linked) is appended at click time as
+ * -ProjectPath so its regenerable framework caches go too. The manifest's
+ * own Deep entry (tools/workflow/_module.psd1, item 8) passes the same two
+ * switches but deliberately leaves the project out - a catalog item cannot
+ * know which project is active; this panel can.
  *
- * Nothing here hardcodes `-Force` into `args`, and that is deliberate: a
- * `-Force` passed to a script that does not declare one is a hard
- * parameter-binding error under `pwsh -File`, which is precisely how the
- * old Clear NPM Cache button managed to fail every single time it was
- * pressed. Sending `confirmed: true` instead lets the sidecar decide from
- * the script's own AST, so this button works whether or not the tool ends
- * up declaring the switch.
+ * Nothing here hardcodes `-Force`, and that is deliberate: a `-Force`
+ * passed to a script that does not declare one is a hard parameter-binding
+ * error under `pwsh -File`, which is precisely how the old Clear NPM Cache
+ * button managed to fail every single time it was pressed. Sending
+ * `confirmed: true` instead lets the sidecar decide from the script's own
+ * AST, so this button works whether or not the tool declares the switch.
  */
 const CLOSE_OUT = {
   label: "Close-Out",
-  caption: "End the day's session - stops the dev processes and frees the ports they held.",
+  // "Destruc­tive": a soft hyphen at the syllable break. The tile's
+  // nature line wraps rather than truncates at the docked sidebar's
+  // default width (a quarter of a common 1366px laptop's screen is 62px
+  // of tile - see QuickActionsPanel.css), and without this the only word
+  // here long enough to need it broke mid-letter ("Destructiv" / "e").
+  // Invisible whenever the line fits on its own.
+  nature: "Destruc­tive",
   folder: "workflow",
   script: "Close-OutSession.ps1",
-  args: [] as string[],
-  previewArgs: ["-DryRun"],
+  args: ["-IncludeRecycleBin", "-IncludePackageCache"] as string[],
 };
 
 /**
- * Deep Close-Out is the SAME script, not a second tool: the two everyday
- * opt-ins (-IncludeRecycleBin, -IncludePackageCache) ride along as plain
- * args, and the active project (when one is linked) is appended at click
- * time as -ProjectPath so its regenerable framework caches go too. The
- * manifest's own Deep entry (tools/workflow/_module.psd1, item 8) passes
- * the same two switches but deliberately leaves the project out - a
- * catalog item cannot know which project is active; this panel can.
+ * The same run as Close-Out - extras and active project included - with
+ * -DryRun in front, so what it lists is exactly what Close-Out will do.
+ * The script's dry-run flag overrides every other switch, -Force included,
+ * so the extras can stay on and the preview still touches nothing.
  */
-const CLOSE_OUT_DEEP = {
-  label: "Close-Out (deep)",
-  args: ["-IncludeRecycleBin", "-IncludePackageCache"] as string[],
+const PREVIEW = {
+  label: "Preview",
+  nature: "Dry run",
+  /** Run-history label: it is a Close-Out run, previewed. */
+  runLabel: `${CLOSE_OUT.label} (preview)`,
 };
 
 /* ------------------------------------------------------------------ */
@@ -101,14 +113,56 @@ function writeOpenPreference(open: boolean): void {
   }
 }
 
+/* ------------------------------------------------------------------ */
+/* the tile                                                            */
+/* ------------------------------------------------------------------ */
+
+interface ActionTileProps {
+  /** Picks the tile's tone (its --tile-tone custom property in the CSS). */
+  tone: "doctor" | "close-out" | "preview";
+  icon: ReactNode;
+  label: string;
+  nature: string;
+  /** THIS tile's run is in flight - lights the indicator and swaps the icon for the spinner. */
+  running: boolean;
+  disabled: boolean;
+  title: string;
+  onClick: () => void;
+}
+
 /**
- * Quick Actions panel: two deliberate, full-width primary actions - Doctor
- * and Close-Out - plus the streamed inline console, the env-drift banner,
- * and the widget's window onto tool run history. Everything that acts on a
- * node process or a port now lives in the Node & Ports panel, next to the
- * data it acts on.
+ * One digital tile, built on the Button primitive so a run in flight gets
+ * the same loading/disabled semantics (and spinner) every other button in
+ * the app has - the CSS only re-lays the primitive's row out as a column
+ * and moves the spinner into the icon's slot.
+ */
+function ActionTile({ tone, icon, label, nature, running, disabled, title, onClick }: ActionTileProps) {
+  return (
+    <Button
+      variant="ghost"
+      className={clsx("quick-actions-panel__tile", `quick-actions-panel__tile--${tone}`)}
+      disabled={disabled}
+      loading={running}
+      onClick={onClick}
+      title={title}
+    >
+      <span className="quick-actions-panel__tile-led" aria-hidden="true" />
+      <span className="quick-actions-panel__tile-icon" aria-hidden="true">
+        {icon}
+      </span>
+      <span className="quick-actions-panel__tile-label">{label}</span>
+      <span className="quick-actions-panel__tile-nature">{nature}</span>
+    </Button>
+  );
+}
+
+/**
+ * Quick Actions panel: three even tiles - Doctor, Close-Out, Preview - plus
+ * the streamed inline console, the env-drift banner, and the widget's
+ * window onto tool run history. Everything that acts on a node process or
+ * a port lives in the Node & Ports panel, next to the data it acts on.
  *
- * Both actions stream their output into an inline console (ToolConsole,
+ * All three stream their output into an inline console (ToolConsole,
  * shared with the Control Center's ToolRunDialog) instead of firing and
  * forgetting. The in-flight guard is shared with Node & Ports via
  * widgetToolRun - see that module for why one guard covers both panels.
@@ -116,7 +170,7 @@ function writeOpenPreference(open: boolean): void {
  * dock) lives in the Settings dialog opened from the title bar - the
  * settings store is only read here for the env-drift silence list.
  *
- * The buttons and the console live in a collapsible section so the panel can
+ * The tiles and the console live in a collapsible section so the panel can
  * be folded down to two header rows in a narrow dock. What stays OUTSIDE the
  * collapse is deliberate: the env-drift warning (an alert nobody should be
  * able to hide by accident) and the run status in the section header, so a
@@ -186,6 +240,27 @@ export function QuickActionsPanel() {
   }
 
   /**
+   * The active project, but only when it is actually reachable - a Missing
+   * project's folder no longer exists (same guard TerminalPanel uses before
+   * handing a cwd to ConPTY). Close-OutSession.ps1 resolves -ProjectPath
+   * with Resolve-DevKitDirectory BEFORE it plans anything and exits 1 on a
+   * bad path, so sending a missing project's path used to kill the ENTIRE
+   * run - stop-node, free-ports, temp, memory, all of it - not just the
+   * per-project cache step. Treating a missing project as "none" instead
+   * degrades gracefully: the run still does everything else.
+   */
+  const closeOutProject = active && !active.Missing ? active : null;
+
+  /**
+   * Close-Out's args for THIS click: the everyday opt-ins plus the active
+   * project. Resolved once per click so a dialog's copy and its run agree
+   * on whether a project is going along.
+   */
+  function closeOutArgs(): string[] {
+    return closeOutProject ? [...CLOSE_OUT.args, "-ProjectPath", closeOutProject.path] : CLOSE_OUT.args;
+  }
+
+  /**
    * The preview is the whole reason a one-click wipe is clickable at all, so
    * it takes no confirm gate and - crucially - never sends `confirmed`, which
    * is what keeps the sidecar from appending -Force to a run that is supposed
@@ -197,23 +272,36 @@ export function QuickActionsPanel() {
       surface: "quick-actions",
       folder: CLOSE_OUT.folder,
       script: CLOSE_OUT.script,
-      label: `${CLOSE_OUT.label} (preview)`,
-      args: CLOSE_OUT.previewArgs,
+      label: PREVIEW.runLabel,
+      args: ["-DryRun", ...closeOutArgs()],
     });
   }
 
+  /**
+   * The gate says everything the run will do out loud - a PERMANENT Recycle
+   * Bin empty, a slower next install while the package cache refills, the
+   * active project's framework caches - because a one-click button must.
+   */
   function runCloseOut() {
     if (runId) return;
+    const args = closeOutArgs();
     confirmDestructive(
       {
         title: "Close out the day's session?",
         description: (
           <>
-            Runs <code>{`${CLOSE_OUT.folder}/${CLOSE_OUT.script}`}</code> with every prompt pre-answered: it ends the
-            dev processes this session started and frees the ports they were holding. Anything unsaved in those
-            processes is lost, DevKit cannot cancel a tool once it starts, and none of it can be undone.
+            Runs <code>{`${CLOSE_OUT.folder}/${CLOSE_OUT.script}`}</code> with every prompt pre-answered: stops every{" "}
+            <code>node.exe</code> on this machine (DevKit&apos;s own excepted) and any recognized dev runtime -
+            node, python, dotnet, java, and the rest - still listening on the common dev ports, deletes the contents
+            of your TEMP folder, trims memory, empties the <strong>Recycle Bin (permanent)</strong> and cleans the
+            package manager&apos;s global cache (the next install in any project will be slower)
+            {closeOutProject
+              ? ", and clears the active project's framework caches (.next, .turbo, node_modules/.cache, node_modules/.vite - never node_modules itself, never dist)"
+              : ""}
+            . Anything unsaved in the stopped processes is lost, DevKit cannot cancel a tool once it starts, and none of
+            it can be undone.
             <br />
-            Not sure? Cancel and hit <strong>Preview</strong> first - same tool, dry run, nothing touched.
+            Not sure? Cancel and hit <strong>Preview</strong> first - the same run, dry, nothing touched.
           </>
         ),
         confirmLabel: "Close out",
@@ -225,51 +313,10 @@ export function QuickActionsPanel() {
           folder: CLOSE_OUT.folder,
           script: CLOSE_OUT.script,
           label: CLOSE_OUT.label,
-          args: CLOSE_OUT.args,
+          args,
           caution: true,
           // The user just came through the caution dialog, which is the only
           // thing that earns -Force. See widgetToolRun's WidgetRunSpec.
-          confirmed: true,
-        }),
-    );
-  }
-
-  /**
-   * Same gate as runCloseOut - the extras (a PERMANENT Recycle Bin empty, a
-   * slower next install while the package cache refills, the active
-   * project's framework caches) are exactly the kind of thing a one-click
-   * button must say out loud before it does them.
-   */
-  function runDeepCloseOut() {
-    if (runId) return;
-    // Resolved BEFORE the dialog opens so the copy and the run agree on
-    // whether a project is going along.
-    const args = active ? [...CLOSE_OUT_DEEP.args, "-ProjectPath", active.path] : CLOSE_OUT_DEEP.args;
-    confirmDestructive(
-      {
-        title: "Deep close out the day's session?",
-        description: (
-          <>
-            Runs <code>{`${CLOSE_OUT.folder}/${CLOSE_OUT.script}`}</code> like the button above, plus: empties the{" "}
-            <strong>Recycle Bin (permanent)</strong> and cleans the package manager&apos;s global cache (the next
-            install in any project will be slower)
-            {active
-              ? ", and clears the active project's framework caches (.next, .turbo, node_modules/.cache, node_modules/.vite - never node_modules itself, never dist)"
-              : ""}
-            . Anything unsaved in the stopped processes is lost, and none of it can be undone.
-          </>
-        ),
-        confirmLabel: "Deep close out",
-        danger: true,
-      },
-      () =>
-        startWidgetToolRun({
-          surface: "quick-actions",
-          folder: CLOSE_OUT.folder,
-          script: CLOSE_OUT.script,
-          label: CLOSE_OUT_DEEP.label,
-          args,
-          caution: true,
           confirmed: true,
         }),
     );
@@ -302,8 +349,8 @@ export function QuickActionsPanel() {
    * The one thing that has to survive collapsing: whether a tool is running.
    * Expander renders actionSlot in its header, which is on screen in both
    * states, so this doubles as the collapsed-state summary. Idle with no
-   * history renders nothing - with two buttons on screen, a badge counting
-   * them to "2" was pure noise.
+   * history renders nothing - with three tiles on screen, a badge counting
+   * them would be pure noise.
    */
   const statusSlot = runningLabel ? (
     <Badge tone={mine ? "accent" : "neutral"} className="quick-actions-panel__running">
@@ -343,63 +390,42 @@ export function QuickActionsPanel() {
       <div className="quick-actions-panel__section" ref={sectionRef}>
         <Expander title="Actions" actionSlot={<span role="status">{statusSlot}</span>} defaultOpen={sectionOpen}>
           <div className="quick-actions-panel__section-body">
-            <div className="quick-actions-panel__actions">
-              <Button
-                variant="primary"
-                className="quick-actions-panel__big"
+            <div className="quick-actions-panel__grid">
+              <ActionTile
+                tone="doctor"
+                icon={<ShieldCheckIcon width={18} height={18} />}
+                label={DOCTOR.label}
+                nature={DOCTOR.nature}
+                running={mine && runningLabel === DOCTOR.label}
                 disabled={!!runId}
-                loading={mine && runningLabel === DOCTOR.label}
                 onClick={runDoctor}
                 title="Runs DevKit-Doctor.ps1 - checks every tool, runtime, and config it can see. Reads only, changes nothing."
-              >
-                <span className="quick-actions-panel__big-text">
-                  <span className="quick-actions-panel__big-label">{DOCTOR.label}</span>
-                  <span className="quick-actions-panel__big-caption">{DOCTOR.caption}</span>
-                </span>
-              </Button>
-
-              <div className="quick-actions-panel__close-out">
-                <Button
-                  variant="danger"
-                  className="quick-actions-panel__big"
-                  disabled={!!runId}
-                  loading={mine && runningLabel === CLOSE_OUT.label}
-                  onClick={runCloseOut}
-                  title="Runs Close-OutSession.ps1 - stops dev processes, frees their ports, clears temp/junk, and trims memory. Always asks for confirmation first."
-                >
-                  <span className="quick-actions-panel__big-text">
-                    <span className="quick-actions-panel__big-label">{CLOSE_OUT.label}</span>
-                    <span className="quick-actions-panel__big-caption">{CLOSE_OUT.caption}</span>
-                  </span>
-                </Button>
-                <div className="quick-actions-panel__close-out-options">
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    disabled={!!runId}
-                    loading={mine && runningLabel === CLOSE_OUT_DEEP.label}
-                    onClick={runDeepCloseOut}
-                    title="Same clean, plus the Recycle Bin, the package manager cache, and the active project's framework caches"
-                  >
-                    Deep
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    disabled={!!runId}
-                    loading={mine && runningLabel === `${CLOSE_OUT.label} (preview)`}
-                    onClick={previewCloseOut}
-                    title="Dry run - lists what Close-Out would do without doing any of it"
-                  >
-                    Preview first
-                  </Button>
-                </div>
-              </div>
+              />
+              <ActionTile
+                tone="close-out"
+                icon={<PowerIcon width={18} height={18} />}
+                label={CLOSE_OUT.label}
+                nature={CLOSE_OUT.nature}
+                running={mine && runningLabel === CLOSE_OUT.label}
+                disabled={!!runId}
+                onClick={runCloseOut}
+                title={`Runs Close-OutSession.ps1 - stops every node.exe and dev runtime on the common dev ports, clears temp, trims memory, empties the Recycle Bin, cleans the package manager cache${closeOutProject ? ", and clears the active project's framework caches" : ""}. Opens a confirmation dialog first, unless Confirm destructive actions is off in Settings.`}
+              />
+              <ActionTile
+                tone="preview"
+                icon={<EyeIcon width={18} height={18} />}
+                label={PREVIEW.label}
+                nature={PREVIEW.nature}
+                running={mine && runningLabel === PREVIEW.runLabel}
+                disabled={!!runId}
+                onClick={previewCloseOut}
+                title="Dry run of Close-Out - lists exactly what it would stop, free, and delete, and touches nothing."
+              />
             </div>
 
-            {/* Both buttons are grey because the single sidecar tool lane is
-                busy with someone else's run - which is not the same thing as
-                "this panel is broken". */}
+            {/* All three tiles are grey because the single sidecar tool lane
+                is busy with someone else's run - which is not the same thing
+                as "this panel is broken". */}
             {blockedBy && <div className="quick-actions-panel__blocked">Waiting for {blockedBy} to finish.</div>}
 
             {mine && launchError && (
@@ -449,9 +475,10 @@ export function QuickActionsPanel() {
       </div>
 
       {/* None is now a thing the owner can deliberately pick, so an absent
-          project is no longer automatically a nag. Both actions here are
-          machine-wide - it's the OTHER panels that need a scope - so this
-          states the situation rather than implying something is wrong. */}
+          project is no longer automatically a nag. These actions are
+          machine-wide - Close-Out only reaches into a project's caches when
+          one is active - so this states the situation rather than implying
+          something is wrong. */}
       {!active && (
         <div className="panel-empty" style={{ marginTop: "var(--space-1)" }}>
           {linked.length > 0

@@ -379,8 +379,11 @@ try {
   clears temp/junk, trims every accessible working set). The manifest
   registers it three ways - default (item 6), dry-run preview (item 7,
   `StaticArgs DryRun`), and Deep (item 8, `StaticArgs IncludeRecycleBin` +
-  `IncludePackageCache`) - and the widget's Quick Actions panel mirrors all
-  three, adding `-ProjectPath <active project>` to its own Deep run.
+  `IncludePackageCache`). The widget's Quick Actions panel does not mirror
+  the default (item 6) run - its single Close-Out tile IS item 8's
+  argument set, adding `-ProjectPath <active project>` when a project is
+  linked, and its Preview tile is that same argument set with `-DryRun` in
+  front.
 
 ### Diagnostics (`tools/diagnostics/`)
 - Checks tool installations and versions

@@ -9,7 +9,8 @@ import { RailIcon, normalizeIconTheme, type IconTheme, type RailIconName } from 
 import { useSettingsStore } from "../../stores/useSettingsStore";
 import { useUpdaterStore } from "../../stores/useUpdaterStore";
 import { THEMES, getThemePreset, type ThemePreset } from "../../lib/themes";
-import { clampUiScale, previewUiScale, useAnimationsEnabled } from "../../hooks/useApplyAppearance";
+import { previewUiScale, useAnimationsEnabled } from "../../hooks/useApplyAppearance";
+import { clampUiScale } from "../../lib/appearance";
 import { playSound } from "../../lib/sounds";
 import type { DevKitPreferences } from "../../lib/types";
 import { Button } from "../primitives/Button";

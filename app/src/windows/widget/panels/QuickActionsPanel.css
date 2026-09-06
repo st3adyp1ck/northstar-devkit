@@ -41,87 +41,286 @@
 }
 
 /* Expander's panel-inner carries no padding of its own (same reason
-   .quick-actions-panel__history-body exists). */
+   .quick-actions-panel__history-body exists). Top padding is NOT 0, unlike
+   before: the tile grid's hover lift (translateY(-1px)) and its glow/focus
+   ring both extend a few px above the tile's own box, and the Expander's
+   panel clips overflow - without room here that lift and ring were cut off
+   flat across the top on the grid's first (only) row. */
 .quick-actions-panel__section-body {
-  padding: 0 var(--space-3) var(--space-3) var(--space-3);
+  padding: var(--space-1) var(--space-3) var(--space-3) var(--space-3);
 }
 
-/* Two actions, one per row. The old wrap-a-button-bar layout is gone with
-   the four buttons it existed to pack: these are the day's two deliberate
-   decisions, so they get the width to say what they do. */
-.quick-actions-panel__actions {
-  display: flex;
-  flex-direction: column;
+/* ------------------------------------------------------------------ */
+/* the tile grid                                                       */
+/* ------------------------------------------------------------------ */
+
+/* Three equal columns, always - minmax(0, 1fr) so a long label can never
+   push one tile wider than its neighbours in a narrow dock. */
+.quick-actions-panel__grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--space-2);
 }
 
 /*
- * Button is a fixed-height inline-flex row, which is exactly right for a
- * button bar and exactly wrong for a labelled action. Overriding it here
- * rather than widening the primitive: two big captioned buttons are this
- * panel's own idea, and every other surface in the app still wants the
- * primitive's compact default.
+ * A tile is the Button primitive re-laid out as a column: icon over an
+ * uppercase mono label over a one-word nature line, with a hairline of the
+ * tile's tone lit along its top edge and an LED in the corner that comes
+ * on while that tile's run is in flight.
  *
- * The spinner Button injects stays a direct flex child, so it lands to the
- * LEFT of the text block rather than displacing it - which is why the label
- * and caption are wrapped in __big-text instead of being siblings of it.
+ * Everything colored derives from --tile-tone through color-mix, so the
+ * three modifiers below are the only per-tile rules, and every theme
+ * preset's ramps flow through untouched (the tones are tokens, never hex).
  *
  * Compounded with .devkit-btn rather than left bare: every property here
- * fights one the primitive sets at equal specificity, and which of the two
- * wins would otherwise come down to the order Vite happens to concatenate
- * two CSS files in.
+ * fights one the primitive (or its ghost variant) sets, and which of the
+ * two wins would otherwise come down to the order Vite happens to
+ * concatenate two CSS files in.
  */
-.devkit-btn.quick-actions-panel__big {
+.devkit-btn.quick-actions-panel__tile {
+  --tile-tone: var(--accent);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
   width: 100%;
   height: auto;
-  min-height: 48px;
-  justify-content: flex-start;
-  padding: var(--space-2) var(--space-3);
+  min-height: 88px;
+  /* 2px sides, not a spacing token: at the narrowest docked sidebar the
+     three tiles are ~73px wide and every pixel of that goes to the label. */
+  padding: var(--space-3) 2px var(--space-2);
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  border: 1px solid color-mix(in srgb, var(--tile-tone) 26%, var(--surface-border));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--tile-tone) 11%, var(--surface-raised)),
+    color-mix(in srgb, var(--tile-tone) 3%, var(--surface-sunken))
+  );
+  box-shadow:
+    var(--shadow-glass-highlight),
+    var(--shadow-sm);
+  color: var(--text-primary);
 }
 
-.quick-actions-panel__big-text {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 1px;
-  min-width: 0;
-  text-align: left;
+/* The lit top edge - the "digital" cue that reads even at a glance. */
+.devkit-btn.quick-actions-panel__tile::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 12%;
+  right: 12%;
+  height: 2px;
+  border-radius: 0 0 2px 2px;
+  background: linear-gradient(90deg, transparent, var(--tile-tone), transparent);
+  opacity: 0.75;
+  transition: opacity var(--duration-fast) var(--ease-standard);
 }
 
-.quick-actions-panel__big-label {
-  font-size: var(--text-sm);
-  font-weight: 700;
-  line-height: 1.3;
+.devkit-btn.quick-actions-panel__tile:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--tile-tone) 60%, transparent);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--tile-tone) 18%, var(--surface-raised)),
+    color-mix(in srgb, var(--tile-tone) 6%, var(--surface-sunken))
+  );
+  box-shadow:
+    var(--shadow-glass-highlight),
+    0 0 22px color-mix(in srgb, var(--tile-tone) 28%, transparent);
+  transform: translateY(-1px);
 }
 
-/* currentColor at reduced opacity rather than a token: this text sits on
-   the primary gradient in one button and the danger gradient in the other,
-   and each variant already picks its own readable foreground. */
-.quick-actions-panel__big-caption {
+.devkit-btn.quick-actions-panel__tile:hover:not(:disabled)::before {
+  opacity: 1;
+}
+
+/* The primitive's press cue (scale + inset) is right for a row button and
+   wrong for a tile that just lifted: press straight back down instead. */
+.devkit-btn.quick-actions-panel__tile:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow:
+    var(--shadow-inset),
+    0 0 12px color-mix(in srgb, var(--tile-tone) 22%, transparent);
+}
+
+/* Focus ring in the tile's own tone, not the global sapphire - keyboard
+   users get the same signal the hover glow gives pointer users. */
+.devkit-btn.quick-actions-panel__tile:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--tile-tone) 70%, transparent);
+  box-shadow:
+    var(--shadow-glass-highlight),
+    0 0 0 3px color-mix(in srgb, var(--tile-tone) 26%, transparent);
+}
+
+/* Disabled-because-busy still reads as a tile, just an unlit one. The
+   primitive's opacity dim carries; the lit edge and the glow go out. */
+.devkit-btn.quick-actions-panel__tile:disabled::before {
+  opacity: 0.25;
+}
+
+/* A run in flight is not an inert tile: hold it at full strength (the
+   primitive dims to 0.85) and let the LED and the spinner say "working". */
+.devkit-btn.quick-actions-panel__tile.devkit-btn--loading {
+  opacity: 1;
+  border-color: color-mix(in srgb, var(--tile-tone) 55%, transparent);
+}
+
+.devkit-btn.quick-actions-panel__tile.devkit-btn--loading::before {
+  opacity: 1;
+}
+
+/* The corner LED: dark at rest, the tile's tone (with a halo) while its run
+   is in flight or under the pointer. Absolutely placed, so the column's
+   `order`s below never have to account for it. */
+.quick-actions-panel__tile-led {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--tile-tone) 30%, var(--gm-700));
+  transition:
+    background var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard);
+}
+
+.devkit-btn.quick-actions-panel__tile:hover:not(:disabled) .quick-actions-panel__tile-led,
+.devkit-btn.quick-actions-panel__tile.devkit-btn--loading .quick-actions-panel__tile-led {
+  background: var(--tile-tone);
+  box-shadow: 0 0 8px var(--tile-tone);
+}
+
+.devkit-btn.quick-actions-panel__tile.devkit-btn--loading .quick-actions-panel__tile-led {
+  animation: quick-actions-panel-pulse 1.4s ease-in-out infinite;
+}
+
+/* Icon well: a small tinted plate so the glyph reads as a control, not a
+   decoration. `order` places it (or the spinner, below) first in the column. */
+.quick-actions-panel__tile-icon {
+  order: 1;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-sm);
+  color: var(--tile-tone);
+  background: color-mix(in srgb, var(--tile-tone) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tile-tone) 30%, transparent);
+  transition:
+    background var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard);
+}
+
+.devkit-btn.quick-actions-panel__tile:hover:not(:disabled) .quick-actions-panel__tile-icon {
+  background: color-mix(in srgb, var(--tile-tone) 20%, transparent);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--tile-tone) 30%, transparent);
+}
+
+/*
+ * The spinner Button injects while `loading` is the button's first child;
+ * giving it the icon's `order` and hiding the icon puts it in the icon's
+ * slot instead of above the whole column. Sized to the well so nothing
+ * shifts when a run starts.
+ */
+.devkit-btn.quick-actions-panel__tile .devkit-btn__spinner {
+  order: 1;
+  width: 18px;
+  height: 18px;
+  margin: 8px 0;
+  color: var(--tile-tone);
+}
+
+.devkit-btn.quick-actions-panel__tile.devkit-btn--loading .quick-actions-panel__tile-icon {
+  display: none;
+}
+
+/*
+ * Uppercase mono label - the readout under a control on a panel.
+ *
+ * WRAPS rather than truncates, deliberately: the docked sidebar's default
+ * width is a QUARTER of the work area (commands.rs), not the app's 480px
+ * floating floor, and a common 1366px laptop quarters to 341 - a 62px
+ * tile at the default 44px rail, where CLOSE-OUT (9 glyphs, the longest
+ * label) does not fit on one line at any reasonable size. A single-line
+ * ellipsis would cut the one word this panel's own header comment calls
+ * "the one thing that must never be left to memory" down to "CLOSE-O…" -
+ * strictly worse than reading it whole across two lines. `min-height`
+ * below gives two lines of room without every tile growing when only one
+ * of the three actually needs it (the grid stretches all three tiles to
+ * match the tallest row anyway).
+ */
+.quick-actions-panel__tile-label {
+  order: 2;
+  margin-top: 2px;
+  font-family: var(--font-mono);
   font-size: var(--text-2xs);
-  font-weight: 500;
-  line-height: 1.35;
-  opacity: 0.78;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  line-height: 1.25;
+  color: var(--text-primary);
+  max-width: 100%;
+  min-height: calc(1.25 * var(--text-2xs) * 2);
+  display: flex;
+  align-items: center;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   white-space: normal;
+  text-align: center;
 }
 
-.quick-actions-panel__close-out {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
+/* The nature line, in the tile's tone: the one word that must never be
+   left to memory. Sans, not the label's tracked mono - DESTRUCTIVE in
+   that treatment is wider than the tile it sits in.
+   Mixed toward --text-primary, not --text-secondary: --text-secondary is
+   tuned as a SEPARATE token per theme and several presets pair a light
+   accent/danger ramp with a darker secondary, which dropped this below
+   the WCAG AA 4.5:1 floor on Nord, Solarized Dark and Monokai (as low as
+   3.7:1 on solarized-dark's ember) - the same contrast-floor pass
+   lib/themes.ts already ran for --text-tertiary. --text-primary is tuned
+   bright everywhere by the same rule that keeps IT legible, so mixing
+   toward it instead keeps every preset clear of the floor. */
+.quick-actions-panel__tile-nature {
+  order: 3;
+  font-family: var(--font-sans);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+  color: color-mix(in srgb, var(--tile-tone) 55%, var(--text-primary));
+  max-width: 100%;
+  /* Wraps rather than truncates, same reasoning and the same narrow-dock
+     floor as the label above - "Destructive" is the longest of the three. */
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
+  text-align: center;
 }
 
-/* Deliberately quiet and tucked under the button they belong to - Preview
-   is the safe way out of a one-click wipe and Deep is the same wipe with
-   its everyday opt-ins on, so neither is a third headline action. */
-.quick-actions-panel__close-out-options {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--space-1);
+/* The three tones. Sapphire is the app accent; ember is the danger ramp;
+   cyan is a signal color no other control in this panel uses, so the dry
+   run reads as its own kind of thing rather than a paler Close-Out.
+   Compounded with .devkit-btn like the base rule above: a bare modifier
+   class (0,1,0) loses to that (0,2,0) base and every tile would sit at
+   the default tone - the exact bug a first render of this file had. */
+.devkit-btn.quick-actions-panel__tile--doctor {
+  --tile-tone: var(--sapphire-500);
+}
+
+.devkit-btn.quick-actions-panel__tile--close-out {
+  --tile-tone: var(--ember-500);
+}
+
+.devkit-btn.quick-actions-panel__tile--preview {
+  --tile-tone: var(--signal-cyan);
 }
 
 /* The sidecar has one tool lane, so the other panel's run really does hold
-   these buttons shut. Say which one rather than leaving them silently grey. */
+   these tiles shut. Say which one rather than leaving them silently grey. */
 .quick-actions-panel__blocked {
   margin-top: var(--space-2);
   font-size: var(--text-2xs);
@@ -185,15 +384,17 @@
 /* A continuous pulse at 0ms is just an invisible dot, so this loop uses a
    literal duration and is therefore NOT covered by tokens.css zeroing the
    --duration-* tokens. Both reduced-motion paths have to switch it off by
-   hand; the dot stays lit, only the breathing stops. */
+   hand; the dot (and the tile LED) stay lit, only the breathing stops. */
 @media (prefers-reduced-motion: reduce) {
-  .quick-actions-panel__running-dot {
+  .quick-actions-panel__running-dot,
+  .devkit-btn.quick-actions-panel__tile.devkit-btn--loading .quick-actions-panel__tile-led {
     animation: none;
   }
 }
 
 /* App-level twin of the media query above - see tokens.css's data-animations block. */
-:root[data-animations="off"] .quick-actions-panel__running-dot {
+:root[data-animations="off"] .quick-actions-panel__running-dot,
+:root[data-animations="off"] .devkit-btn.quick-actions-panel__tile.devkit-btn--loading .quick-actions-panel__tile-led {
   animation: none;
 }
 

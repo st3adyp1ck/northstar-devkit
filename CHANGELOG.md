@@ -2,6 +2,52 @@
 
 All notable changes to Northstar DevKit are documented here.
 
+## [4.5.0] - 2026-09-06
+
+### Changed
+
+- **Quick Actions is three even tiles: Doctor, Close-Out, Preview.** The
+  old Close-Out button and its tucked-away "Deep" option are gone; the deep
+  run IS Close-Out now - the everyday opt-ins (empty the Recycle Bin,
+  clean the package manager cache) are always on, and the active project's
+  regenerable framework caches go too when one is linked, exactly as the
+  Deep button did. Preview is the same run as a dry run, extras included,
+  so what it lists is what Close-Out will do. All three are the same
+  digital tile - icon, uppercase label, a one-word nature line (read-only /
+  destructive / dry run), an indicator that lights while that tile's run is
+  in flight - laid out in one even row instead of a stack of two.
+- **The npm updater plugin matches the Rust crate again.**
+  `@tauri-apps/plugin-updater` was still 2.10.1 after the crate went to
+  2.11.0, which the Tauri CLI flags on every dev start; both sides are 2.11
+  now.
+
+### Fixed
+
+- **The widget no longer re-lays itself out from floating column to
+  docked rail a moment after launch.** The dock side, rail width, rail icon
+  size, icon theme and tray order ride along in the same first-frame
+  snapshot as the theme (below), so a docked widget paints its rail on the
+  first frame instead of painting the floating column and rearranging the
+  instant settings land. As with the theme, settings still win when they
+  arrive.
+- **No more Northstar flash on launch.** Every start painted the default
+  theme for a few seconds and then snapped to the chosen one: the theme,
+  accent, font, UI scale and animations toggle all wait on `settings.get`,
+  which the PowerShell sidecar cannot answer until it has imported
+  DevKit.Core.psm1, while Rust shows the widget as soon as setup completes.
+  Both windows now persist the appearance slice of preferences to
+  localStorage after every apply and paint that snapshot onto the root
+  before React mounts, so the first frame already matches the preference.
+  The snapshot is a hint, not the authority: settings.json still wins the
+  moment it loads (the same applier sweeps whatever boot painted that
+  settings turn out not to want), so a hand-edited settings.json costs one
+  launch of the old look and nothing more. The animations toggle follows
+  the same snapshot on both of its axes: the `data-animations` attribute
+  is left alone rather than cleared while settings load, and the
+  framer-driven entrances (every panel's mount fade, the window roots'
+  MotionConfig) start from the snapshot too, so "Animations: off" no
+  longer plays every panel's entrance once per launch.
+
 ## [4.4.0] - 2026-09-03
 
 ### Changed

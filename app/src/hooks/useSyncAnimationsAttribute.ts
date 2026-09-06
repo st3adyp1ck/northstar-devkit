@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useSettingsStore } from "../stores/useSettingsStore";
+import { applyAnimationsAttribute } from "../lib/appearance";
 
 /**
  * Keeps `<html data-animations="off">` (attribute absent otherwise) in sync
@@ -19,10 +20,16 @@ import { useSettingsStore } from "../stores/useSettingsStore";
  * just a redundant settings.get. The Control Center has no other reason to
  * load settings today, so its root needs this to populate the store at all.
  *
- * Deliberately leaves the attribute unset - never defaults to "off" - while
- * settings are still loading or failed to load, so a cold start (or a
- * settings.get error) never flashes animations off for a beat before
- * snapping back on.
+ * Deliberately leaves the attribute ALONE - neither set nor cleared - while
+ * settings are still loading or failed to load. Before settings arrive the
+ * root carries whatever main.tsx painted from the previous session's
+ * snapshot (lib/appearance.ts's applyCachedAppearance): "off" for a user
+ * who turned animations off, absent otherwise. Clearing it here on the
+ * loading pass would flash animations back on for the seconds the sidecar
+ * takes to answer settings.get; defaulting to "off" would flash them off
+ * for everyone else. Only a loaded settings object gets a say. The JS-side
+ * twin - framer entrances gated by useAnimationsPreference - reads the same
+ * snapshot for the same window of time, so the two axes agree from boot.
  */
 export function useSyncAnimationsAttribute(): void {
   const settings = useSettingsStore((s) => s.settings);
@@ -33,11 +40,7 @@ export function useSyncAnimationsAttribute(): void {
   }, [refresh]);
 
   useEffect(() => {
-    const root = document.documentElement;
-    if (settings?.preferences.enableAnimations === false) {
-      root.dataset.animations = "off";
-    } else {
-      delete root.dataset.animations;
-    }
+    if (!settings) return;
+    applyAnimationsAttribute(document.documentElement, settings.preferences.enableAnimations !== false);
   }, [settings]);
 }
