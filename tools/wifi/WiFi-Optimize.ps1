@@ -132,7 +132,11 @@ if ($RestoreDns) {
         Write-DevKitError "No DNS backup found at: $DnsBackupPath"
         Write-DevKitInfo "Nothing to restore automatically. To reset DNS to automatic (DHCP) manually, run:"
         Write-DevKitInfo "  Set-DnsClientServerAddress -InterfaceIndex <n> -ResetServerAddresses"
-        Read-Host "`nPress Enter to exit"
+        # Every "Press Enter to exit" in this script is guarded like this:
+        # under the Control Center's headless runner (-NonInteractive, stdin
+        # closed) Read-Host throws, so the prompt only happens when a real
+        # console is attached.
+        if (-not [Console]::IsInputRedirected) { Read-Host "`nPress Enter to exit" }
         exit 1
     }
 
@@ -140,7 +144,7 @@ if ($RestoreDns) {
         $dnsBackup = Get-Content -Path $DnsBackupPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
     } catch {
         Write-DevKitError "Could not read DNS backup file: $($_.Exception.Message)"
-        Read-Host "`nPress Enter to exit"
+        if (-not [Console]::IsInputRedirected) { Read-Host "`nPress Enter to exit" }
         exit 1
     }
 
@@ -162,11 +166,11 @@ if ($RestoreDns) {
     } catch {
         Write-Host " FAIL" -ForegroundColor Red
         Write-DevKitError "Could not restore DNS: $($_.Exception.Message)"
-        Read-Host "`nPress Enter to exit"
+        if (-not [Console]::IsInputRedirected) { Read-Host "`nPress Enter to exit" }
         exit 1
     }
 
-    Read-Host "`nPress Enter to exit"
+    if (-not [Console]::IsInputRedirected) { Read-Host "`nPress Enter to exit" }
     exit 0
 }
 
@@ -191,6 +195,13 @@ if (-not $KeepDNS) {
 }
 Write-Host ""
 if (-not $Force) {
+    if ([Console]::IsInputRedirected) {
+        # Headless runner (Control Center's tool.run): stdin is closed, so a
+        # y/n read would throw. The caution confirm dialog already injects
+        # -Force for approved runs, so reaching here means no approval.
+        Write-DevKitInfo "Confirmation required but this session is non-interactive - re-run with -Force to proceed."
+        exit 0
+    }
     $confirm = Read-Host "  Continue? (y/n)"
     if ($confirm -ne 'y') {
         Write-Host "  Cancelled.`n" -ForegroundColor Gray
@@ -207,7 +218,7 @@ if (-not $connection) {
     Write-Host "  ERROR: No active network connection!" -ForegroundColor Red
     Write-Host "  Connect to WiFi first, then run this tool." -ForegroundColor Gray
     Write-Host ""
-    Read-Host "Press Enter to exit"
+    if (-not [Console]::IsInputRedirected) { Read-Host "Press Enter to exit" }
     exit 1
 }
 Write-DevKitDone
@@ -479,4 +490,7 @@ Write-Host ""
 Write-Host "  https://www.northstarcoding.com" -ForegroundColor DarkGray
 Write-Host ""
 
-Read-Host "Press Enter to exit"
+if (-not [Console]::IsInputRedirected) { Read-Host "Press Enter to exit" }
+# Explicit success code: WiFi-FastMode.ps1 forwards $LASTEXITCODE, which would
+# otherwise be whatever the last native netsh/ipconfig call happened to return.
+exit 0

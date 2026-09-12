@@ -63,8 +63,15 @@ function Get-DevKitRecycleBinSize {
         $shell = New-Object -ComObject Shell.Application
         $recycleBin = $shell.Namespace(10)
         if (-not $recycleBin) { return 0 }
-        $total = 0
-        foreach ($item in $recycleBin.Items()) { $total += $item.Size }
+        [long]$total = 0
+        foreach ($item in $recycleBin.Items()) {
+            # $item.Size is an Int32 and overflows (goes negative) once the
+            # bin holds more than ~2 GB; ExtendedProperty('System.Size') is
+            # the same size as a UInt64. .Size only remains as a fallback.
+            $size = $item.ExtendedProperty('System.Size')
+            if ($null -eq $size) { $size = $item.Size }
+            if ($null -ne $size) { $total += [long]$size }
+        }
         return $total
     } catch {
         Write-DevKitInfo "Could not read Recycle Bin size (COM error): $_"

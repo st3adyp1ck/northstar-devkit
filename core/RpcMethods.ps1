@@ -997,6 +997,14 @@ function Invoke-DevKitRpcMethod {
             $psi.RedirectStandardInput = $true
             $psi.UseShellExecute = $false
             $psi.CreateNoWindow = $true
+            # The Run dialog renders output as plain text, so pwsh's styled
+            # error formatting must not reach it: in the app's clean child
+            # environment (no TERM/NO_COLOR hint) pwsh defaults $PSStyle to
+            # ANSI rendering and every error arrives wrapped in raw
+            # "^[[31;1m" escape codes. NO_COLOR is honored by pwsh 7.2+;
+            # PS 5.1 and the DevKit-UI gradient engine never emit ANSI into
+            # a redirected stream in the first place.
+            $psi.EnvironmentVariables['NO_COLOR'] = '1'
 
             $proc = [System.Diagnostics.Process]::new()
             $proc.StartInfo = $psi

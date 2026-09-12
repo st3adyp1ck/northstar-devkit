@@ -398,6 +398,14 @@ try {
 - Cloudflare DNS (1.1.1.1 / 2606:4700:4700::1111) and Google DNS (8.8.8.8 / 2001:4860:4860::8888) testing
 - Speed test via Cloudflare's speed endpoint
 - Requires administrator privileges; warns about required reboot after TCP/IP reset
+- Every interactive prompt (the y/n confirmation and each trailing "Press
+  Enter to exit") is guarded by `[Console]::IsInputRedirected` - the same
+  pattern the maintenance tools use - so a headless Control Center run ends
+  cleanly instead of throwing on `Read-Host` with stdin closed. The y/n
+  confirmation is additionally skipped by `-Force`, which the caution confirm
+  flow injects automatically. WiFi-Optimize ends with an explicit `exit 0`
+  because WiFi-FastMode forwards `$LASTEXITCODE` (which would otherwise be
+  whatever the last native netsh/ipconfig call returned)
 
 ### Maintenance (`tools/maintenance/`)
 - Real Windows maintenance/tuning, distinct from `diagnostics/`'s dev-tool health check

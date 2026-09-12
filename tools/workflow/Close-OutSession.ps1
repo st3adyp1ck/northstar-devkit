@@ -563,6 +563,27 @@ function Get-DevKitCloseOutPathSize {
     return $total
 }
 
+function Get-DevKitCloseOutRecycleItemSize {
+    <#
+    .SYNOPSIS
+        One Recycle Bin item's size in bytes, as Int64.
+    .DESCRIPTION
+        $Item.Size is an Int32 and OVERFLOWS once the bin holds more than
+        ~2 GB (a 3 GB file reads back as a negative number), silently
+        corrupting both the before/after math and the reclaimed-bytes
+        report. ExtendedProperty('System.Size') is the same size as a
+        UInt64, so it is preferred; .Size only remains as a fallback, and
+        an item with neither counts as 0 rather than failing the scan.
+    #>
+    param([Parameter(Mandatory = $true)]$Item)
+
+    $size = $null
+    try { $size = $Item.ExtendedProperty('System.Size') } catch { $size = $null }
+    if ($null -eq $size) { try { $size = $Item.Size } catch { $size = $null } }
+    if ($null -eq $size) { return [long]0 }
+    return [long]$size
+}
+
 function Get-DevKitCloseOutRecycleBinSize {
     <#
     .SYNOPSIS
@@ -573,8 +594,10 @@ function Get-DevKitCloseOutRecycleBinSize {
         $shell = New-Object -ComObject Shell.Application
         $bin = $shell.Namespace(10)
         if (-not $bin) { return 0 }
-        $total = 0
-        foreach ($item in $bin.Items()) { $total += $item.Size }
+        [long]$total = 0
+        foreach ($item in $bin.Items()) {
+            $total += Get-DevKitCloseOutRecycleItemSize -Item $item
+        }
         return $total
     } catch {
         return 0
@@ -833,7 +856,10 @@ foreach ($step in $plan) {
                         Write-DevKitDone
                         $remaining = 0
                         foreach ($path in $existing) { $remaining += Get-DevKitCloseOutPathSize -Path $path }
-                        $reclaimed = [math]::Max(0, $cacheBytes - $remaining)
+                        # [long]0 for the same overload-binder reason as the
+                        # junk step below: keeps Math.Max on the (long, long)
+                        # overload when caches exceed ~2 GB.
+                        $reclaimed = [math]::Max([long]0, $cacheBytes - $remaining)
                         $results += New-DevKitCloseOutResult -Key 'projectcache' -Title $step.Title -Status 'done' `
                             -Detail "cleared $($existing.Count) cache folder(s), $(Format-DevKitCloseOutSize $reclaimed)" -FreedBytes $reclaimed
                     } catch {
@@ -994,7 +1020,12 @@ foreach ($step in $plan) {
                 $afterBytes = 0
                 foreach ($path in $junkPaths) { $afterBytes += Get-DevKitCloseOutPathSize -Path $path }
                 if ($IncludeRecycleBin) { $afterBytes += Get-DevKitCloseOutRecycleBinSize }
-                $reclaimed = [math]::Max(0, $totalBefore - $afterBytes)
+                # [long]0, not 0: with an Int32 literal first argument the
+                # overload binder can pick Math.Max(int, int) and then fail
+                # to convert a reclaimed-bytes total above ~2 GB ("too large
+                # for an Int32" MethodException). Pinning the first argument
+                # to Int64 selects the (long, long) overload every time.
+                $reclaimed = [math]::Max([long]0, $totalBefore - $afterBytes)
 
                 # A run that freed nothing because every remaining file is
                 # locked is "nothing to do", not "done" - otherwise a second

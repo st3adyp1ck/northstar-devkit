@@ -108,7 +108,9 @@ $networks = netsh wlan show networks mode=Bssid | Out-String
 
 if ($networks -match "There is no wireless interface on the system") {
     Write-DevKitError "No WiFi adapter found!"
-    Read-Host "Press Enter to exit"
+    # Guarded like WiFi-Optimize.ps1: under the Control Center's headless
+    # runner (-NonInteractive, stdin closed) Read-Host throws.
+    if (-not [Console]::IsInputRedirected) { Read-Host "Press Enter to exit" }
     exit 1
 }
 
@@ -122,7 +124,7 @@ if ($results.Count -eq 0) {
     Write-Host "  This may be due to a non-English Windows locale or empty scan results." -ForegroundColor Gray
     Write-Host "`n  Raw output:" -ForegroundColor Cyan
     Write-Host $networks -ForegroundColor Gray
-    Read-Host "`nPress Enter to exit"
+    if (-not [Console]::IsInputRedirected) { Read-Host "`nPress Enter to exit" }
     exit 0
 }
 
@@ -195,4 +197,4 @@ if ($busyChannel.Value -gt 3) {
 Write-Host ""
 Write-Host "  https://www.northstarcoding.com" -ForegroundColor DarkGray
 Write-Host ""
-Read-Host "Press Enter to exit"
+if (-not [Console]::IsInputRedirected) { Read-Host "Press Enter to exit" }

@@ -223,6 +223,11 @@ $script:DevKitKnownTransientEvents = @{
     # The firmware's ACPI Time and Alarm Device method failed while setting
     # the hardware clock. Not OS-fixable.
     'HAL|21'                 = 'The firmware failed to program the ACPI Time and Alarm Device (the hardware real-time clock). Not OS-fixable - check the hardware vendor for a BIOS/UEFI update. Harmless unless something relies on RTC wake alarms.'
+    # BitLocker failed to retrieve the volume master key while the machine
+    # was restarting. Seen on devices with automatic device encryption when
+    # the key protector is briefly unavailable during shutdown/modern
+    # standby; the key is retrieved normally on the next boot.
+    'BitLocker-Driver|24641' = 'BitLocker could not retrieve the volume master key during a restart - a transient shutdown-time condition seen on devices with automatic device encryption, self-resolving on the next boot. Only act if it recurs alongside boot or encryption problems: run "Get-BitLockerVolume" (or "manage-bde -status") and confirm every drive shows Protection On.'
     # A program stopped responding and Windows closed it - self-resolved by
     # design.
     'Application Hang|1002'  = 'An application hung and Windows closed it (self-resolved). Noise unless the same program starts recurring with a pattern.'

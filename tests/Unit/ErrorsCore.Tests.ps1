@@ -430,6 +430,7 @@ Describe "Get-DevKitKnownTransientEventNote" {
         Get-DevKitKnownTransientEventNote -Provider 'Microsoft-Windows-WindowsUpdateClient' -EventId 20 | Should -Match 'retries on its own'
         Get-DevKitKnownTransientEventNote -Provider 'Microsoft-Windows-Perflib' -EventId 1023 | Should -Match 'lodctr /R'
         Get-DevKitKnownTransientEventNote -Provider 'Microsoft-Windows-HAL' -EventId 21 | Should -Match 'BIOS/UEFI'
+        Get-DevKitKnownTransientEventNote -Provider 'Microsoft-Windows-BitLocker-Driver' -EventId 24641 | Should -Match 'Get-BitLockerVolume'
         Get-DevKitKnownTransientEventNote -Provider 'Application Hang' -EventId 1002 | Should -Match 'self-resolved'
     }
 

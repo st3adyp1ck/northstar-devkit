@@ -474,6 +474,40 @@ Describe "Get-DevKitCloseOutPathSize" {
     }
 }
 
+Describe "Get-DevKitCloseOutRecycleItemSize" {
+
+    BeforeAll {
+        # A Shell folder item stand-in: .Size is the Int32 that overflows
+        # past ~2 GB (a 3 GB file reads back as -1073741824), while
+        # ExtendedProperty('System.Size') carries the true UInt64.
+        $script:BigItem = [PSCustomObject]@{ Size = [int](-1073741824) }
+        $script:BigItem | Add-Member -MemberType ScriptMethod -Name ExtendedProperty -Value {
+            param([string]$Name)
+            if ($Name -eq 'System.Size') { return [uint64]3221225472 }
+            return $null
+        }
+    }
+
+    It "reads sizes above 2 GB without overflowing (ExtendedProperty UInt64, not the Int32 .Size)" {
+        Get-DevKitCloseOutRecycleItemSize -Item $script:BigItem | Should -Be 3221225472
+    }
+
+    It "returns an Int64 so the reclaimed-bytes math stays on the (long, long) overloads" {
+        (Get-DevKitCloseOutRecycleItemSize -Item $script:BigItem) | Should -BeOfType [long]
+    }
+
+    It "falls back to .Size when the extended property is unavailable" {
+        $smallItem = [PSCustomObject]@{ Size = 1234 }
+        Get-DevKitCloseOutRecycleItemSize -Item $smallItem | Should -Be 1234
+    }
+
+    It "counts 0 when neither source yields a number" {
+        $emptyItem = [PSCustomObject]@{ Size = $null }
+        $emptyItem | Add-Member -MemberType ScriptMethod -Name ExtendedProperty -Value { param([string]$Name) return $null }
+        Get-DevKitCloseOutRecycleItemSize -Item $emptyItem | Should -Be 0
+    }
+}
+
 Describe "workflow/_module.psd1 registration" {
 
     BeforeAll {
