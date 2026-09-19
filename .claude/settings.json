@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "& \"./.claude/hooks/session-start-check.ps1\"",
+            "shell": "powershell",
+            "timeout": 15,
+            "statusMessage": "Checking git sync status..."
+          }
+        ]
+      }
+    ]
+  }
+}
