@@ -809,6 +809,33 @@ cargo build --release -p devkit-cli
   its own work; the safety system blocked it before any actual change
   landed, but it should never have been attempted in the first place.
 
+## Multi-Machine Development
+
+This repo is actively developed from more than one machine. On
+2026-09-19 one machine went 35 commits stale (a full Tauri rewrite was
+pushed from the other) while an uncommitted, less-evolved copy of the
+same restructuring work sat locally, uncaught until the user noticed by
+hand. The fix was a `SessionStart` hook:
+
+- `.claude/settings.json` registers a `SessionStart` hook (no matcher,
+  so it fires on startup/resume/clear/compact alike) that runs
+  `.claude/hooks/session-start-check.ps1`.
+- That script is read-only: `git fetch --quiet` then `git status -sb` -
+  never a pull or merge. It degrades to silence (no error, no
+  systemMessage) when there's no git repo, no `git` binary, or the
+  fetch fails (offline). It emits a loud `systemMessage` (shown to the
+  user) only when the branch is actually ahead/behind its upstream, and
+  always feeds the full `git status -sb` output into the hook's
+  `additionalContext` so the agent sees it too.
+
+**If a session starts in this repo and either file is missing** (a
+fresh clone predating this hook, a checkout where `.claude/` got
+gitignored or manually deleted, a third machine, etc.), recreate both
+files with that same behavior before doing substantive work, rather
+than silently proceeding on a checkout whose sync state is unknown.
+Don't skip this because "AGENTS.md was pulled, so the hook must already
+be here too" - verify the actual files exist.
+
 ## Testing
 
 `tests/Unit` (Pester 5, wired into CI) covers pure-logic parsers and
