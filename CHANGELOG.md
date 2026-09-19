@@ -2,6 +2,30 @@
 
 All notable changes to Northstar DevKit are documented here.
 
+## [4.5.1] - 2026-09-19
+
+### Fixed
+
+- **Close-Out and Clear Disk Junk no longer crash on a full Recycle Bin.**
+  Recycle Bin item sizes were read via the Shell's Int32 `.Size` property,
+  which overflows past ~2 GB; reading `ExtendedProperty('System.Size')`
+  (UInt64) instead - and widening the reclaimed-bytes `[math]::Max` call to
+  its (long, long) overload - fixes the `MethodException` that hit the junk
+  step's reclaimed-bytes line whenever the bin held more than ~2 GB.
+- **Errors from a headless tool run no longer arrive in the Control
+  Center's Run dialog as raw ANSI escape codes.** `tool.run` now sets
+  `NO_COLOR=1` on the child process, so pwsh's styled error formatting
+  doesn't reach a dialog that renders plain text.
+- **WiFi tools no longer crash under a headless Control Center run.**
+  Every `Read-Host` prompt in WiFi Optimizer and WiFi Scanner is now
+  guarded behind `[Console]::IsInputRedirected`, and WiFi Optimizer gives
+  an explicit success exit code (WiFi Fast Mode forwards it) instead of
+  whatever the last native `netsh`/`ipconfig` call happened to return.
+- **Error Center no longer flags a routine BitLocker shutdown event as a
+  real error.** BitLocker-Driver event 24641 (key retrieval during
+  shutdown, which self-resolves on next boot) is now classified as
+  known-transient.
+
 ## [4.5.0] - 2026-09-06
 
 ### Changed
