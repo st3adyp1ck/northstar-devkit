@@ -54,6 +54,18 @@ tracing-appender.workspace = true
 portable-pty = "0.9"
 which = "8"
 dunce = "1"
+# Startup elevation gate (elevation.rs): GetTokenInformation(TokenElevation)
+# for the admin check and MessageBoxW for the one-time-setup consent prompt.
+# 0.59 is already in the tree as a transitive dep of tauri, so this adds no
+# new code to the lockfile beyond the direct edge.
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Registry",
+    "Win32_System_Threading",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
 uuid = { version = "1", features = ["v4"] }
 devkit-host = { path = "../../crates/devkit-host" }
 

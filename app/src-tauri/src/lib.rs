@@ -1,4 +1,5 @@
 mod commands;
+mod elevation;
 mod paths;
 mod terminal;
 mod tray;
@@ -19,6 +20,12 @@ pub fn run() {
     // the background flush thread and can silently lose buffered lines),
     // so it's bound here, not thrown away.
     let _log_guard = init_logging();
+
+    // Admin-only gate (release builds only - debug builds and the
+    // DEVKIT_ALLOW_UNELEVATED env var skip it). Must run BEFORE the Tauri
+    // builder below so a non-elevated launch exits before
+    // tauri-plugin-single-instance can register it - see elevation.rs.
+    elevation::enforce_or_redirect();
 
     run_app();
 }

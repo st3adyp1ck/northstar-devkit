@@ -29,11 +29,11 @@
           "requiresFile": null,
           "prompts": [
             {
-              "Name": "Port",
-              "InvalidMessage": "Invalid port number.",
-              "Type": "Int",
               "Max": 65535,
+              "Type": "Int",
+              "Name": "Port",
               "Prompt": "Enter port number",
+              "InvalidMessage": "Invalid port number.",
               "Min": 1
             }
           ],
@@ -52,11 +52,11 @@
           "requiresFile": null,
           "prompts": [
             {
-              "Name": "ProcessId",
-              "InvalidMessage": "Invalid PID.",
-              "Type": "Int",
               "Max": 2147483647,
+              "Type": "Int",
+              "Name": "ProcessId",
               "Prompt": "Enter PID to kill",
+              "InvalidMessage": "Invalid PID.",
               "Min": 1
             }
           ],
@@ -85,11 +85,11 @@
           "requiresFile": null,
           "prompts": [
             {
-              "Name": "Port",
-              "InvalidMessage": "Invalid port number.",
-              "Type": "Int",
               "Max": 65535,
+              "Type": "Int",
+              "Name": "Port",
               "Prompt": "Enter port number",
+              "InvalidMessage": "Invalid port number.",
               "Min": 1
             }
           ],
@@ -108,11 +108,11 @@
           "requiresFile": null,
           "prompts": [
             {
-              "Name": "Port",
-              "InvalidMessage": "Invalid port number.",
-              "Type": "Int",
               "Max": 65535,
+              "Type": "Int",
+              "Name": "Port",
               "Prompt": "Enter port number",
+              "InvalidMessage": "Invalid port number.",
               "Min": 1
             }
           ],
@@ -141,8 +141,8 @@
           "requiresFile": null,
           "prompts": [
             {
-              "Optional": true,
               "Prompt": "Enter URL to test (blank = scan listening dev ports)",
+              "Optional": true,
               "Name": "Url",
               "Type": "String"
             }
@@ -216,8 +216,8 @@
           "requiresFile": null,
           "prompts": [
             {
-              "InvalidMessage": "Enter a script name.",
               "Prompt": "Enter the package.json script name to run (e.g. dev, build, test)",
+              "InvalidMessage": "Enter a script name.",
               "Name": "Name",
               "Type": "String"
             }
@@ -291,18 +291,18 @@
           "requiresFile": null,
           "prompts": [
             {
-              "Optional": true,
               "Prompt": "Clear Turbopack cache too?",
+              "Optional": true,
               "Name": "Turbo",
               "Type": "YesNo"
             },
             {
-              "Name": "Port",
-              "Type": "Int",
               "Max": 65535,
+              "Type": "Int",
+              "Name": "Port",
               "Prompt": "Port (0 = package default; press Enter for default)",
-              "Min": 0,
-              "Optional": true
+              "Optional": true,
+              "Min": 0
             }
           ],
           "staticArgs": null
@@ -394,13 +394,13 @@
           "requiresFile": null,
           "prompts": [
             {
-              "Name": "Hours",
-              "InvalidMessage": "Invalid hours.",
-              "Type": "Int",
               "Max": 720,
+              "Type": "Int",
+              "Name": "Hours",
               "Prompt": "How many hours back? (blank = 24)",
-              "Min": 1,
-              "Optional": true
+              "Optional": true,
+              "InvalidMessage": "Invalid hours.",
+              "Min": 1
             }
           ],
           "staticArgs": null
@@ -455,13 +455,13 @@
       "group": "System & Workflow",
       "folder": "system",
       "name": "System Tools",
-      "description": "Edit the PATH environment variable, back up and restore User/Machine environment variables to/from a JSON file, reload the current shell's environment without restarting the terminal, edit the hosts file, and turn DevKit's own Admin Mode (always-elevated launching via a scheduled task, no per-launch UAC) on and off. Most operations here read or write real environment state directly via [Environment]::GetEnvironmentVariable/SetEnvironmentVariable.",
+      "description": "Edit the PATH environment variable, back up and restore User/Machine environment variables to/from a JSON file, reload the current shell's environment without restarting the terminal, and edit the hosts file. DevKit itself always runs as Administrator (a startup gate redirects every launch through the built-in 'NorthstarDevKit-Admin' elevation task - one UAC prompt at first-run setup, none after), so admin-gated operations here just work. Most operations here read or write real environment state directly via [Environment]::GetEnvironmentVariable/SetEnvironmentVariable.",
       "items": [
         {
           "key": "1",
           "label": "Edit PATH Variable",
           "script": "Edit-Path.ps1",
-          "help": "Interactive and flag-driven editor for the User or Machine PATH environment variable, with duplicate- and missing-path detection. Use -Show for a read-only report of the current PATH; -Add/-Remove/-Clean (or the [A]/[R]/[C] options in the interactive menu you get by running it with no flags) write PATH for real via [Environment]::SetEnvironmentVariable. Editing Machine PATH requires Administrator privileges - the script offers to relaunch itself elevated if it isn't. Safety note: -Remove and -Clean (and their interactive equivalents) each prompt with a y/n confirmation showing exactly what will change before writing, unless -Force is passed; -Add writes immediately (additive, low-risk); -Show never mutates anything.",
+          "help": "Interactive and flag-driven editor for the User or Machine PATH environment variable, with duplicate- and missing-path detection. Use -Show for a read-only report of the current PATH; -Add/-Remove/-Clean (or the [A]/[R]/[C] options in the interactive menu you get by running it with no flags) write PATH for real via [Environment]::SetEnvironmentVariable. Editing Machine PATH requires Administrator privileges - since DevKit always runs elevated, that just works (the script still offers to relaunch itself elevated if invoked outside DevKit, un-elevated). Safety note: -Remove and -Clean (and their interactive equivalents) each prompt with a y/n confirmation showing exactly what will change before writing, unless -Force is passed; -Add writes immediately (additive, low-risk); -Show never mutates anything.",
           "caution": true,
           "requiresProject": false,
           "projectArgName": null,
@@ -473,7 +473,7 @@
           "key": "2",
           "label": "Backup Environment Variables",
           "script": "Env-Backup.ps1",
-          "help": "Writes a timestamped JSON snapshot of current User environment variables (and Machine variables too, if run elevated) to disk - additive only, it never changes the live environment. By default it saves under %LOCALAPPDATA%\\NorthstarDevKit\\backups - outside any project or git repo - so a secrets-adjacent file is never dropped into a repository; pass -OutputPath to choose a different folder. Variable names that look like secrets (TOKEN/KEY/SECRET/PASSWORD/CREDENTIAL/CONNECTIONSTRING/API_KEY) are redacted by default; pass -IncludeSecrets or -Redact:$false to store raw values instead. Safety note: shows a warning that the file may contain secrets and asks to continue before writing, unless -Force is passed - low risk overall since it only ever creates a new file, never overwrites or deletes anything.",
+          "help": "Writes a timestamped JSON snapshot of current User environment variables (and Machine variables too, if run elevated - which DevKit always is) to disk - additive only, it never changes the live environment. By default it saves under %LOCALAPPDATA%\\NorthstarDevKit\\backups - outside any project or git repo - so a secrets-adjacent file is never dropped into a repository; pass -OutputPath to choose a different folder. Variable names that look like secrets (TOKEN/KEY/SECRET/PASSWORD/CREDENTIAL/CONNECTIONSTRING/API_KEY) are redacted by default; pass -IncludeSecrets or -Redact:$false to store raw values instead. Safety note: shows a warning that the file may contain secrets and asks to continue before writing, unless -Force is passed - low risk overall since it only ever creates a new file, never overwrites or deletes anything.",
           "caution": true,
           "requiresProject": false,
           "projectArgName": null,
@@ -490,9 +490,9 @@
           "requiresProject": false,
           "projectArgName": null,
           "requiresFile": {
-            "ParamName": "BackupFile",
             "TypePrompt": "Enter backup file path to restore",
             "Filter": "DevKit backups (*.json)|*.json|All files (*.*)|*.*",
+            "ParamName": "BackupFile",
             "Description": "Select an environment backup to restore"
           },
           "prompts": null,
@@ -514,7 +514,7 @@
           "key": "5",
           "label": "Edit Hosts File",
           "script": "Edit-HostsFile.ps1",
-          "help": "View, add, remove, and comment-toggle entries in the Windows hosts file (%windir%\\System32\\drivers\\etc\\hosts). Use -Show (or the menu's default listing) for a read-only numbered report showing each entry's IP, hostnames, and commented state; run with no flags for an interactive [A]dd/[R]emove/[T]oggle/[Q]uit menu, or -Add \"ip hostname...\" / -Remove / -Toggle (by listing index or hostname pattern) for scripted changes. Use this to map local dev domains (e.g. 127.0.0.1 mysite.local) without opening Notepad as admin. Safety note: every mutation requires Administrator privileges (the script offers to relaunch itself elevated), is gated by the shared confirmation prompt unless -Force is passed, creates a timestamped backup under %LOCALAPPDATA%\\NorthstarDevKit\\hosts-backups\\ before the first write of a session, writes the file back as plain ASCII preserving all comments and ordering, and clears the DNS client cache afterward. -Show never mutates anything. This menu item runs with -Show, so opening it from the DevKit menu gives the read-only listing without requiring admin elevation.",
+          "help": "View, add, remove, and comment-toggle entries in the Windows hosts file (%windir%\\System32\\drivers\\etc\\hosts). Use -Show (or the menu's default listing) for a read-only numbered report showing each entry's IP, hostnames, and commented state; run with no flags for an interactive [A]dd/[R]emove/[T]oggle/[Q]uit menu, or -Add \"ip hostname...\" / -Remove / -Toggle (by listing index or hostname pattern) for scripted changes. Use this to map local dev domains (e.g. 127.0.0.1 mysite.local) without opening Notepad as admin. Safety note: every mutation requires Administrator privileges (already satisfied inside always-elevated DevKit; the script still offers to relaunch itself elevated if invoked outside DevKit), is gated by the shared confirmation prompt unless -Force is passed, creates a timestamped backup under %LOCALAPPDATA%\\NorthstarDevKit\\hosts-backups\\ before the first write of a session, writes the file back as plain ASCII preserving all comments and ordering, and clears the DNS client cache afterward. -Show never mutates anything. This menu item runs with -Show, so opening it from the DevKit menu gives the read-only listing without requiring admin elevation.",
           "caution": true,
           "requiresProject": false,
           "projectArgName": null,
@@ -522,32 +522,6 @@
           "prompts": null,
           "staticArgs": {
             "Show": true
-          }
-        },
-        {
-          "key": "6",
-          "label": "Enable DevKit Admin Mode",
-          "script": "Set-DevKitAdminMode.ps1",
-          "help": "Makes DevKit launchable with full Administrator rights and NO per-launch UAC prompt, using a scheduled task that runs the app 'with highest privileges' - the same mechanism tools like MSI Afterburner use. One UAC consent when you run this is the only prompt the setup ever needs (Windows allows no way around that one, by design); when not already elevated, the script re-launches itself elevated once and waits for it to finish. It registers the 'NorthstarDevKit-Admin' task, writes a tiny hidden launcher, puts a 'DevKit (Admin)' shortcut on your Desktop and in Start Menu > Programs, and - if Start-with-Windows is on - moves it from the registry Run key onto the task as a logon trigger (Windows refuses to auto-start elevated apps from the Run key). Afterwards: exit DevKit from the tray, then relaunch via 'DevKit (Admin)' - the widget title bar shows an ADMIN badge when the app really is elevated, and admin-gated work (Close Out's Windows\\Temp + Windows Update cache, working-set trims of elevated processes) then runs with full rights. Everything is recorded in a state marker so item 7 reverses it exactly. Safety note: registers a persistent prompt-free elevation path for the app exe, and while elevated ALL DevKit surfaces run as Administrator (every tool and the embedded terminal) - gated by the shared Confirm-DevKitDestructiveAction prompt; the Control Center's caution dialog passes -Force for you once you confirm. Pass -DryRun from the command line to preview the plan without changing anything.",
-          "caution": true,
-          "requiresProject": false,
-          "projectArgName": null,
-          "requiresFile": null,
-          "prompts": null,
-          "staticArgs": null
-        },
-        {
-          "key": "7",
-          "label": "Disable DevKit Admin Mode",
-          "script": "Set-DevKitAdminMode.ps1",
-          "help": "Undoes item 6 completely: removes the 'NorthstarDevKit-Admin' scheduled task, deletes the hidden launcher and both 'DevKit (Admin)' shortcuts, restores Start-with-Windows to the registry Run key if Admin Mode had moved it (read back exactly from the state marker enable wrote), and deletes that marker. Uses the same one-time self-elevation flow when not already running as Administrator, and reports 'nothing to do' when Admin Mode is not enabled. Safety note: mutates real system state (scheduled task, shortcuts, registry Run key) - gated by the shared Confirm-DevKitDestructiveAction prompt; re-enabling with item 6 restores the feature.",
-          "caution": true,
-          "requiresProject": false,
-          "projectArgName": null,
-          "requiresFile": null,
-          "prompts": null,
-          "staticArgs": {
-            "Off": true
           }
         }
       ]

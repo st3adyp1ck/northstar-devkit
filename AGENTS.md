@@ -103,6 +103,8 @@ DevKit/
 │   │   ├── src/tray.rs                 # System tray icon + menu
 │   │   ├── src/paths.rs                # Resolves pwsh + Invoke-DevKitRpc.ps1
 │   │   │                              # (dev checkout vs. bundled install)
+│   │   ├── src/elevation.rs            # Startup elevation gate (release builds
+│   │   │                              # only): every launch ends up elevated
 │   │   └── tauri.conf.json             # Two windows, NSIS bundle, updater config
 │   └── package.json / pnpm-lock.yaml / vite.config.ts / tsconfig*.json
 │
@@ -353,21 +355,44 @@ try {
 - Supports both User and Machine environment scopes
 - Interactive PATH editor with duplicate detection
 - JSON backup/restore for environment variables
-- **Admin Mode** (`Set-DevKitAdminMode.ps1`/`.bat`, manifest items 6-7):
-  opt-in, one-time setup that registers a `NorthstarDevKit-Admin` scheduled
-  task (RunLevel Highest) so the app launches elevated with no per-launch
-  UAC prompt - started through a tiny hidden wscript launcher and
-  'DevKit (Admin)' Desktop/Start-Menu shortcuts. If Start-with-Windows is
-  on it is MOVED from the HKCU Run key onto the task as a logon trigger
-  (Windows will not auto-start elevated apps from the Run key), and every
-  change is recorded in `%LOCALAPPDATA%\NorthstarDevKit\admin-mode.json` so
-  `-Off` reverses it exactly. When not elevated the script re-launches
-  itself once via `Start-Process -Verb RunAs -Wait` and reads the child's
-  JSON result file (ShellExecute streams nothing back), so it also works
-  from the Control Center's headless Run dialog; `-DryRun` prints the plan.
-  The app surfaces the result through the `system.isElevated` RPC as an
-  amber ADMIN badge in the shared TitleBar (`ElevationIndicator` in
-  `app/src/components/TitleBar.tsx`).
+- **Always-elevated app** (mandatory Admin Mode - there is no un-elevated
+  mode): a startup gate (`app/src-tauri/src/elevation.rs`, release builds
+  only - debug builds and `DEVKIT_ALLOW_UNELEVATED=1` skip it) runs at the
+  top of `run()`, BEFORE the Tauri builder/plugins so a non-elevated
+  process never becomes the single-instance owner. With a filtered token
+  it either starts the `NorthstarDevKit-Admin` scheduled task (RunLevel
+  Highest) and exits, or - on first run, when the task does not exist yet -
+  shows a native consent MessageBox and then elevates
+  `Set-DevKitAdminMode.ps1 -Force -ExePath <self>` itself via
+  `ShellExecuteExW(runas)` (that prompt, requested by the process the user
+  just clicked in, is the ONE UAC consent a user ever sees; the script
+  then runs already-elevated - its own self-elevation is only a fallback
+  for direct CLI use), then starts the task and exits; the task relaunches
+  the app elevated, silently. Because
+  the gate fronts every entry point, each self-corrects: NSIS shortcuts
+  point at the raw exe, and any Start-with-Windows Run-key value the tray
+  toggle writes launches non-elevated at logon and redirects through the
+  task. The setup script (`Set-DevKitAdminMode.ps1`/`.bat`) is unchanged
+  from the opt-in era: it writes the hidden wscript launcher and the
+  'DevKit (Admin)' Desktop/Start-Menu shortcuts, moves Start-with-Windows
+  from the HKCU Run key onto the task's logon trigger when it is on
+  (Windows will not auto-start elevated apps from the Run key), and
+  records every change in `%LOCALAPPDATA%\NorthstarDevKit\admin-mode.json`
+  so `-Off` reverses it exactly; when not elevated it re-launches itself
+  once via `Start-Process -Verb RunAs -Wait` and reads the child's JSON
+  result file (ShellExecute streams nothing back); `-DryRun` prints the
+  plan. It is no longer in the catalog (the System Tools manifest dropped
+  its on/off items - no in-app toggle exists, by design); it remains the
+  teardown path for support (`-Off` from an elevated terminal), and the
+  NSIS `installerHooks` POSTUNINSTALL hook
+  (`app/src-tauri/windows/hooks.nsh`) removes the task, launcher,
+  shortcuts, and marker best-effort. Trade-offs (documented in README):
+  all tools, the sidecar, and the embedded terminal always run as
+  Administrator, and UIPI bars drag-and-drop from Explorer into the
+  elevated windows. The app still surfaces elevation state through the
+  `system.isElevated` RPC as the amber ADMIN badge in the shared TitleBar
+  (`ElevationIndicator` in `app/src/components/TitleBar.tsx`) - now
+  effectively always on in release builds.
 
 ### Workflow Tools (`tools/workflow/`)
 - Detects VS Code and Cursor installations
@@ -611,10 +636,12 @@ reliably drive `document.visibilityState`, which the frontend's
   toggle (`tauri-plugin-autostart`), and Exit. Closing the window via its
   titlebar hides it to the tray rather than quitting (`lib.rs`'s
   `CloseRequested` handler) - only the tray's Exit item, or
-  `tauri-plugin-process`, actually ends the process. When Admin Mode is
-  enabled, the Run-key Start-with-Windows entry is superseded by the
-  elevation task's logon trigger - `Set-DevKitAdminMode.ps1` moves it there
-  on enable and restores it on `-Off`, so the two never fight over the same
+  `tauri-plugin-process`, actually ends the process. The tray's
+  Start-with-Windows toggle still writes the HKCU Run key
+  (`tauri-plugin-autostart`), which Windows will not auto-start elevated -
+  the startup gate redirects that non-elevated logon launch through the
+  elevation task, and when setup moved the autostart onto the task's logon
+  trigger it runs elevated directly, so the two never fight over the same
   mechanism (see System Tools above).
 - **`control-center`** (`app/src/windows/control-center/ControlCenterApp.tsx`)
   - the full catalog-driven tool browser. Renders the `catalog.get`
@@ -747,7 +774,10 @@ means it'll work from the other.
   resolves the sidecar script there in a release build, versus walking up
   from `CARGO_MANIFEST_DIR` to the repo checkout in a dev build. There is
   no custom `Uninstall.ps1` any more - NSIS generates its own uninstaller
-  as part of the bundle.
+  as part of the bundle, extended by a small `installerHooks` file
+  (`app/src-tauri/windows/hooks.nsh`) whose POSTUNINSTALL hook best-effort
+  removes the mandatory-elevation scheduled task, the 'DevKit (Admin)'
+  shortcuts, the hidden launcher, and the admin-mode state marker.
 - **CI** (`.github/workflows/release.yml`): pushing a `vX.Y.Z` tag builds
   and signs the app on `windows-latest` and **publishes** the GitHub
   Release. It is not a draft (`releaseDraft: false` since v4.2.0): the
@@ -835,17 +865,24 @@ cargo build --release -p devkit-cli
   `preferences.confirmDestructive` (default `true`) gates both of the
   helpers above globally; it does not gate any script's own bespoke
   confirmation logic that predates `Confirm-DevKitDestructiveAction`.
-- **Admin Mode** (`tools/system/Set-DevKitAdminMode.ps1`) is a deliberate,
-  opt-in weakening of the least-privilege default: the scheduled task it
-  registers elevates whatever its registered exe path points at with NO
-  prompt, and the per-user install folder is writable by anything running
-  as the user, so replacing `DevKit.exe` afterwards is a silent elevation
-  path. While elevated, every DevKit surface (all tools, the embedded
-  terminal) runs as Administrator. It requires one interactive UAC consent
-  to enable, is gated by `Confirm-DevKitDestructiveAction`, announces the
-  trade-off in its own help text and output, supports a read-only
-  `-DryRun`, and `-Off` removes every trace (task, launcher, shortcuts,
-  restored Run key, state marker).
+- **Always-on elevation** (the mandatory Admin Mode that
+  `tools/system/Set-DevKitAdminMode.ps1` sets up) is a deliberate,
+  product-level weakening of the least-privilege default, not an opt-in
+  any more: the `NorthstarDevKit-Admin` scheduled task elevates whatever
+  its registered exe path points at with NO prompt, and the per-user
+  install folder is writable by anything running as the user, so replacing
+  `devkit-app.exe` afterwards is a silent elevation path. While the app
+  runs, every DevKit surface (all tools, the RPC sidecar, the embedded
+  terminal) runs as Administrator, permanently. Mitigations in place: one
+  interactive UAC consent at first-run setup (the gate's consent
+  MessageBox), the startup gate refuses to run un-elevated at all (so the
+  elevated state can never be silently lost), no in-app on/off toggle
+  exists, and the uninstaller hook removes every trace (task, launcher,
+  shortcuts, state marker). Deliberate escapes: debug builds skip the
+  gate, and `DEVKIT_ALLOW_UNELEVATED=1` bypasses it - both for
+  development/support only. `Set-DevKitAdminMode.ps1 -Off` remains for
+  teardown from an elevated terminal, but the next app launch re-registers
+  by design.
 - **Never execute a destructive/mutating script's real path to "test" it
   - only its documented read-only/`-DryRun`/`-WhatIf` invocation.** Every
   script under `tools/maintenance/` and `tools/agents/` that mutates the

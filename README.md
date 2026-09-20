@@ -78,7 +78,7 @@ cargo build --release -p devkit-cli
 | Vite | Fresh dev server, preview builds |
 | Git | Cleanup, status across all repos, sync forks, standup log |
 | Docker | Nuke containers and images, cleanup, tail logs |
-| System | Edit PATH, back up and restore env vars, hosts file, Admin Mode |
+| System | Edit PATH, back up and restore env vars, hosts file |
 | Workflow | Open editor/repo, copy `.env` templates, `.env` drift check, end-of-day close-out |
 | Diagnostics | Environment health check, system info export |
 | WiFi | Optimize DNS, scan networks, speed test |
@@ -110,9 +110,13 @@ mostly support `-DryRun` — preview first.
   your own authenticated `gh` CLI to list pull requests and issues; the AI CLI updater queries the
   GitHub Releases API for the tools it manages; the installer fetches the Microsoft WebView2
   runtime if it is absent. No telemetry is collected.
-- **Admin Mode** is optional and off by default. Enabling it registers a scheduled task that
-  launches DevKit elevated without a per-launch UAC prompt. The trade-off, stated plainly: while
-  elevated, every tool and the embedded terminal run as Administrator. It is fully reversible.
+- **DevKit always runs as Administrator** — there is no un-elevated mode. A startup
+  gate redirects every launch through a `NorthstarDevKit-Admin` scheduled task (the same
+  mechanism MSI Afterburner uses), so you see exactly one UAC prompt in the app's life,
+  at first-run setup; after that, DevKit starts elevated automatically. The trade-offs,
+  stated plainly: while elevated, every tool and the embedded terminal run as
+  Administrator, and an elevated window cannot accept drag-and-drop from Explorer (a
+  Windows UIPI restriction). Uninstalling removes the task and its shortcuts.
 
 ## Requirements
 

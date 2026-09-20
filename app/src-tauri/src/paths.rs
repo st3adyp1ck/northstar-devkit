@@ -57,7 +57,7 @@ pub fn resolve(app: &tauri::AppHandle) -> anyhow::Result<ResolvedPaths> {
     })
 }
 
-fn which_pwsh() -> anyhow::Result<PathBuf> {
+pub(crate) fn which_pwsh() -> anyhow::Result<PathBuf> {
     if let Ok(path) = which::which("pwsh") {
         return Ok(path);
     }
