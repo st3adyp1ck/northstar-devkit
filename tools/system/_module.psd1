@@ -9,12 +9,10 @@
             Help   = "Interactive and flag-driven editor for the User or Machine PATH environment variable, with duplicate- and missing-path detection. Use -Show for a read-only report of the current PATH; -Add/-Remove/-Clean (or the [A]/[R]/[C] options in the interactive menu you get by running it with no flags) write PATH for real via [Environment]::SetEnvironmentVariable. Editing Machine PATH requires Administrator privileges - the script offers to relaunch itself elevated if it isn't. Safety note: -Remove and -Clean (and their interactive equivalents) each prompt with a y/n confirmation showing exactly what will change before writing, unless -Force is passed; -Add writes immediately (additive, low-risk); -Show never mutates anything."
         }
         @{
-            Key             = '2'
-            Label           = 'Backup Environment Variables'
-            Script          = 'Env-Backup.ps1'
-            RequiresProject = $true
-            ProjectArgName  = 'OutputPath'
-            Help            = "Writes a timestamped JSON snapshot of current User environment variables (and Machine variables too, if run elevated) to disk - additive only, it never changes the live environment. Variable names that look like secrets (TOKEN/KEY/SECRET/PASSWORD/CREDENTIAL/CONNECTIONSTRING/API_KEY) are redacted by default; pass -IncludeSecrets or -Redact:`$false to store raw values instead. From this menu it asks you to pick a linked project first and saves the backup file there. Safety note: shows a warning that the file may contain secrets and asks to continue before writing, unless -Force is passed - low risk overall since it only ever creates a new file, never overwrites or deletes anything."
+            Key    = '2'
+            Label  = 'Backup Environment Variables'
+            Script = 'Env-Backup.ps1'
+            Help   = "Writes a timestamped JSON snapshot of current User environment variables (and Machine variables too, if run elevated) to disk - additive only, it never changes the live environment. By default it saves under %LOCALAPPDATA%\NorthstarDevKit\backups - outside any project or git repo - so a secrets-adjacent file is never dropped into a repository; pass -OutputPath to choose a different folder. Variable names that look like secrets (TOKEN/KEY/SECRET/PASSWORD/CREDENTIAL/CONNECTIONSTRING/API_KEY) are redacted by default; pass -IncludeSecrets or -Redact:`$false to store raw values instead. Safety note: shows a warning that the file may contain secrets and asks to continue before writing, unless -Force is passed - low risk overall since it only ever creates a new file, never overwrites or deletes anything."
         }
         @{
             Key           = '3'

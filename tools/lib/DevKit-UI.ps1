@@ -19,8 +19,14 @@
     3.8.0
 #>
 
-# Prevent double-loading
-if ($global:DevKitUiLoaded) { return }
+# Prevent double-loading. Scope-aware on purpose: a $global: bool would
+# incorrectly skip loading for a sibling script invoked via `&` in the same
+# process (a distinct child scope that never inherits functions defined by
+# another sibling's dot-source), leaving it with the flag set but none of
+# the functions actually defined - the v3.8 MCP crash class. Checking for
+# the function itself detects "already loaded in a scope this one can see"
+# instead (same pattern as DevKit-Common.ps1 documents for itself).
+if (Get-Command Test-DevKitAnimationSupport -ErrorAction SilentlyContinue) { return }
 $global:DevKitUiLoaded = $true
 
 # One-time native interop for a real Windows Console API probe (GetStdHandle

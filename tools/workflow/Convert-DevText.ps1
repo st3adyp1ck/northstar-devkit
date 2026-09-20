@@ -20,6 +20,12 @@
     read-only - the only side effect is copying the result to the
     clipboard, and only when -Clipboard is passed.
 
+    Note: a bare run (no -Mode) lands in the interactive mode picker and
+    needs a real console; the Control Center's headless Run dialog cannot
+    answer it. From the Control Center this tool only makes sense with
+    -Mode and -Input supplied, which its Run form cannot do for this item -
+    run it bare from the CLI menu or a real terminal instead.
+
     Created by Northstar Software Development
     Website: https://www.northstarcoding.com
 .PARAMETER Mode

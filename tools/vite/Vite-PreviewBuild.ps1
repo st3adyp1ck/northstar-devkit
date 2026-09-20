@@ -41,7 +41,12 @@ param(
 )
 
 $CommonModule = Join-Path (Join-Path (Split-Path -Parent $PSScriptRoot) "lib") "DevKit-Common.ps1"
-if (Test-Path $CommonModule) { . $CommonModule }
+if (Test-Path $CommonModule) {
+    . $CommonModule
+} else {
+    Write-Host "ERROR: Required module not found: $CommonModule" -ForegroundColor Red
+    exit 1
+}
 
 try {
     $targetPath = Resolve-DevKitDirectory -Path $Path
@@ -88,6 +93,14 @@ try {
 
     if (-not $hasVite) {
         Write-Host "  WARNING: Vite not found in package.json" -ForegroundColor Yellow
+        # Headless guard: under the Control Center's -NonInteractive runner
+        # Read-Host throws - skip the run (the safe answer) with a note
+        # instead of crashing. Same Test-DevKitCanPrompt probe the
+        # destructive gate uses.
+        if (-not (Test-DevKitCanPrompt)) {
+            Write-DevKitInfo "Cannot prompt for confirmation in a non-interactive session - skipping the build/preview. Re-run from a terminal to continue anyway."
+            exit 0
+        }
         $continue = Read-Host "  Continue anyway? (y/n)"
         if ($continue -ne 'y') {
             Write-DevKitInfo "Cancelled."
@@ -104,6 +117,11 @@ try {
 
         if (Test-Path $outDirFull) {
             if (-not $Force) {
+                # Headless guard: same probe as the vite-detection prompt above.
+                if (-not (Test-DevKitCanPrompt)) {
+                    Write-DevKitInfo "Cannot prompt for confirmation in a non-interactive session - skipping the build/preview. Re-run from a terminal or pass -Force."
+                    exit 0
+                }
                 $confirm = Read-Host "  Replace previous build in '$OutDir'? (y/n)"
                 if ($confirm -ne 'y') {
                     Write-DevKitInfo "Cancelled."

@@ -6,7 +6,7 @@
             Key    = '1'
             Label  = 'Clear NPM Cache'
             Script = 'Clear-NpmCache.ps1'
-            Help   = "Clears the local package-manager cache for the project at -Path (defaults to the current directory). Auto-detects npm/yarn/pnpm/bun from lock files and runs the matching cache-clean command (npm cache clean --force / pnpm store prune / yarn cache clean --all / bun pm cache rm). -Verify additionally runs 'npm cache verify' afterward (npm only - other package managers have no equivalent). Use this when installs are behaving oddly and you want a clean package-manager cache without touching node_modules or any project files. Safety note: mutates the package manager's own (global, per-user) cache - runs immediately with no confirmation prompt and no -Force/-DryRun switch, unlike the other mutating tools in this category."
+            Help   = "Clears the local package-manager cache for the project at -Path (defaults to the current directory). Auto-detects npm/yarn/pnpm/bun from lock files and runs the matching cache-clean command (npm cache clean --force / pnpm store prune / yarn cache clean --all / bun pm cache rm). -Verify additionally runs 'npm cache verify' afterward (npm only - other package managers have no equivalent). Use this when installs are behaving oddly and you want a clean package-manager cache without touching node_modules or any project files. Note: mutates the package manager's own (global, per-user) cache - a fully regenerable store, so the irreversible-changes confirmation does not apply - and runs immediately with no confirmation prompt and no -Force/-DryRun switch, unlike the other mutating tools in this category."
         }
         @{
             Key             = '2'
@@ -33,7 +33,10 @@
             Label           = 'Run Package Script (npm run picker)'
             Script          = 'Start-PackageScript.ps1'
             RequiresProject = $true
-            Help            = "The daily-driver 'npm run' picker (RequiresProject - the menu prompts you to pick a linked project first; from the command line, use -Path): lists the scripts defined in the project's package.json in an arrow-key menu and runs the chosen one with the project's detected package manager via '<pm> run <name>' (works for npm/pnpm/yarn/bun). Pass -Name to skip the picker and run a script directly. Use this instead of typing npm run dev / npm test / npm run build by hand. Safety note: this runs the project's OWN package.json script verbatim - whatever command the project author put there - with no confirmation, since running scripts is the entire point of the tool; DevKit itself never installs, deletes, or modifies anything."
+            Prompts         = @(
+                @{ Name = 'Name'; Type = 'String'; Prompt = 'Enter the package.json script name to run (e.g. dev, build, test)'; InvalidMessage = 'Enter a script name.' }
+            )
+            Help            = "The daily-driver 'npm run' picker (RequiresProject - the menu prompts you to pick a linked project first; from the command line, use -Path): lists the scripts defined in the project's package.json in an arrow-key menu and runs the chosen one with the project's detected package manager via '<pm> run <name>' (works for npm/pnpm/yarn/bun). Pass -Name to skip the picker and run a script directly - headless runners (the Control Center's Run dialog) always require -Name since the picker menu needs an interactive terminal; run the .bat wrapper (or the .ps1) directly in a terminal for the interactive picker. Use this instead of typing npm run dev / npm test / npm run build by hand. Safety note: this runs the project's OWN package.json script verbatim - whatever command the project author put there - with no confirmation, since running scripts is the entire point of the tool; DevKit itself never installs, deletes, or modifies anything."
         }
         @{
             Key             = '6'

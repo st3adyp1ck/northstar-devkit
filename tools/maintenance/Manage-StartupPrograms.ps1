@@ -324,7 +324,6 @@ if ($Disable) {
         }
         Write-DevKitDone
     } catch {
-        Write-DevKitDone
         Write-DevKitError "Failed to disable '$($target.Name)': $_"
         exit 1
     }
@@ -403,7 +402,6 @@ if ($Enable) {
         }
         Write-DevKitDone
     } catch {
-        Write-DevKitDone
         Write-DevKitError "Failed to enable '$($target.Name)': $_"
         exit 1
     }

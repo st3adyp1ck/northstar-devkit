@@ -32,7 +32,12 @@ param(
 
 
 $CommonModule = Join-Path (Join-Path (Split-Path -Parent $PSScriptRoot) "lib") "DevKit-Common.ps1"
-if (Test-Path $CommonModule) { . $CommonModule }
+if (Test-Path $CommonModule) {
+    . $CommonModule
+} else {
+    Write-Host "ERROR: Required module not found: $CommonModule" -ForegroundColor Red
+    exit 1
+}
 
 
 try {
@@ -63,23 +68,36 @@ try {
 # Find Git repositories
 Write-Host "  Scanning for repositories..." -ForegroundColor Cyan
 
-$excludedDirNames = @('node_modules', 'dist', '.next', '.turbo', 'bin', 'obj')
+# Iterative directory-queue scan: Get-ChildItem -Recurse -Exclude only
+# filters matched names out of the OUTPUT - it still descends into
+# node_modules/.git/.venv etc., which on a large tree dwarfs the real work.
+# Here each directory is checked against the exclusion list BEFORE it is
+# enqueued, so those trees are never entered at all.
+# Two deliberate deltas vs the old scan, both benign: the exclusion list
+# grew '.git'/'.venv' (metadata/virtualenv trees are pruned, not merely
+# filtered from output), and the queue scans breadth-first, so repos display
+# grouped by depth rather than in the old depth-first walk's order.
+$excludedDirNames = @('node_modules', 'dist', '.next', '.turbo', 'bin', 'obj', '.git', '.venv')
 
 $gitRepos = @()
 if (Test-Path (Join-Path $targetPath ".git")) {
     $gitRepos += Get-Item -Path $targetPath
 }
-# Note: Get-ChildItem's own -Exclude only filters the matched directory name
-# out of the *output*, it does not stop recursion from descending into it, so
-# we additionally filter out anything nested inside an excluded directory
-# (relative to the scan root) to avoid noise trees like node_modules.
-$gitRepos += Get-ChildItem -Path $targetPath -Directory -Recurse -Depth $Depth -Exclude $excludedDirNames -ErrorAction SilentlyContinue |
-    Where-Object {
-        $relative = $_.FullName.Substring($targetPath.Length).TrimStart('\', '/')
-        $segments = $relative -split '[\\/]'
-        -not ($segments | Where-Object { $excludedDirNames -contains $_ })
-    } |
-    Where-Object { Test-Path (Join-Path $_.FullName ".git") }
+$dirQueue = [System.Collections.Generic.Queue[object]]::new()
+$dirQueue.Enqueue([PSCustomObject]@{ Item = Get-Item -Path $targetPath; Depth = 0 })
+while ($dirQueue.Count -gt 0) {
+    $current = $dirQueue.Dequeue()
+    if ($current.Depth -ge $Depth) { continue }
+    foreach ($childDir in @(Get-ChildItem -Path $current.Item.FullName -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $excludedDirNames -notcontains $_.Name })) {
+        if (Test-Path (Join-Path $childDir.FullName ".git")) {
+            $gitRepos += $childDir
+        }
+        # Keep descending past a found repo - nested repos (submodules,
+        # vendored checkouts) were reported by the old scan too.
+        $dirQueue.Enqueue([PSCustomObject]@{ Item = $childDir; Depth = $current.Depth + 1 })
+    }
+}
 
 if (-not $gitRepos) {
     Write-Host "  No Git repositories found.`n" -ForegroundColor Yellow
@@ -121,12 +139,13 @@ foreach ($repo in $gitRepos) {
         $branch = git branch --show-current 2>$null
         if (-not $branch) { $branch = "(detached HEAD)" }
         
-        # Get status
-        $status = git status --porcelain 2>$null
-        $untracked = git status --porcelain --untracked-files=all 2>$null | 
-            Where-Object { $_ -match '^\?\?' }
-        $modified = git status --porcelain 2>$null | 
-            Where-Object { $_ -notmatch '^\?\?' }
+        # Get status once per repo and split it in memory - three separate
+        # porcelain calls (as before) cost 3x the git invocations for the
+        # same information. --untracked-files=all gives the most accurate
+        # untracked/modified split.
+        $status = @(git status --porcelain --untracked-files=all 2>$null)
+        $untracked = @($status | Where-Object { $_ -match '^\?\?' })
+        $modified = @($status | Where-Object { $_ -notmatch '^\?\?' })
         
         # Check ahead/behind (only meaningful when an upstream is configured;
         # verify @{u} resolves first instead of letting a missing upstream

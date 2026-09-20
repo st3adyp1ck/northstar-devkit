@@ -18,7 +18,7 @@
             Key    = '3'
             Label  = 'Quick Logs (multi-container)'
             Script = 'Docker-QuickLogs.ps1'
-            Help   = "Tails 'docker logs' for one or more containers at once (all running containers by default, or specific names via -Container), with a distinct color prefix per container, an initial line count (-Lines, default 50), optional -Timestamps, and optional -Follow to keep streaming instead of printing the last N lines and exiting. Use this to watch several services' logs together during local development. Safety note: read-only against Docker (no containers/images/volumes are touched), but with -Follow it blocks the terminal indefinitely - press Ctrl+C to stop, and never invoke -Follow from an unattended/non-interactive context."
+            Help   = "Tails 'docker logs' for one or more containers at once (all running containers by default, or specific names via -Container), with a distinct color prefix per container, an initial line count (-Lines, default 50), optional -Timestamps, and optional -Follow to keep streaming instead of printing the last N lines and exiting. Use this to watch several services' logs together during local development. Note: read-only against Docker (no containers/images/volumes are touched), but with -Follow it blocks the terminal indefinitely - press Ctrl+C to stop, and never invoke -Follow from an unattended/non-interactive context."
         }
     )
 }

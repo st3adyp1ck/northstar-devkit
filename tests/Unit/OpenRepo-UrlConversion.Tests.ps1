@@ -101,6 +101,58 @@ Describe "ConvertTo-DevKitBrowsableUrl" {
     }
 }
 
+Describe "Get-DevKitRepoWebUrl" {
+
+    BeforeAll {
+        $script:ScriptPath = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) "tools\workflow\Open-Repo.ps1"
+        . $script:ScriptPath
+    }
+
+    It "leaves a plain GitHub repo URL untouched when no branch or page is requested" {
+        Get-DevKitRepoWebUrl -RemoteUrl "https://github.com/user/repo" | Should -Be "https://github.com/user/repo"
+    }
+
+    It "links a simple branch on GitHub" {
+        Get-DevKitRepoWebUrl -RemoteUrl "https://github.com/user/repo" -Branch "main" |
+            Should -Be "https://github.com/user/repo/tree/main"
+    }
+
+    It "percent-encodes a branch with spaces (GitHub)" {
+        Get-DevKitRepoWebUrl -RemoteUrl "https://github.com/user/repo" -Branch "feature/my thing" |
+            Should -Be "https://github.com/user/repo/tree/feature%2Fmy%20thing"
+    }
+
+    It "percent-encodes a branch containing '/' and '#' instead of producing a malformed URL" {
+        # EscapeDataString encodes every reserved character - including the
+        # '/' in 'fix/#123' - and that form is what the hosting sites decode
+        # back to the branch name.
+        $url = Get-DevKitRepoWebUrl -RemoteUrl "https://github.com/user/repo" -Branch "fix/#123"
+        $url | Should -Be "https://github.com/user/repo/tree/fix%2F%23123"
+        # The encoded form must survive the script's own Start-Process gate.
+        $url | Should -Match '^https?://[A-Za-z0-9.-]+/'
+    }
+
+    It "encodes the branch in the GitLab tree path" {
+        Get-DevKitRepoWebUrl -RemoteUrl "https://gitlab.com/group/repo" -Branch "release 1.0" |
+            Should -Be "https://gitlab.com/group/repo/-/tree/release%201.0"
+    }
+
+    It "encodes the branch in Azure DevOps' GB query value" {
+        Get-DevKitRepoWebUrl -RemoteUrl "https://dev.azure.com/org/project/_git/repo" -Branch "bug hunt" |
+            Should -Be "https://dev.azure.com/org/project/_git/repo?version=GBbug%20hunt"
+    }
+
+    It "opens the PR page and ignores the branch" {
+        Get-DevKitRepoWebUrl -RemoteUrl "https://github.com/user/repo" -Branch "x y" -PullRequest |
+            Should -Be "https://github.com/user/repo/pulls"
+    }
+
+    It "returns an unrecognized-platform URL unchanged" {
+        Get-DevKitRepoWebUrl -RemoteUrl "https://git.example.com/user/repo" -Branch "a b" |
+            Should -Be "https://git.example.com/user/repo"
+    }
+}
+
 Describe "Open-Repo Start-Process safety gate regex" {
     # This mirrors the literal validation Open-Repo.ps1 runs immediately
     # before Start-Process, guarding against a bare/garbage value ever

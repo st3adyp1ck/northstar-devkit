@@ -820,6 +820,81 @@ function Remove-DevKitNodeModules {
     return $true
 }
 
+function Clear-DevKitDirectoryContents {
+    <#
+    .SYNOPSIS
+        Empties a directory's contents WITHOUT following junctions.
+    .DESCRIPTION
+        Windows PowerShell 5.1's Remove-Item -Recurse FOLLOWS junction
+        reparse points, so wiping a folder's children with a bare
+        Remove-Item -Recurse can delete content OUTSIDE the target tree.
+        TEMP folders are exactly where such links appear (other apps'
+        scratch dirs, a developer's own junctions), so the junk-clearing
+        tools must not use that pattern. This enumerates only the top
+        level: reparse points are removed WITHOUT -Recurse (which deletes
+        just the link, never its target), plain files are removed
+        directly, and real directories are emptied with the same robocopy
+        empty-mirror trick Remove-DevKitNodeModules uses, then removed.
+        Per-child failures are skipped with SilentlyContinue - matching
+        the previous behavior - so a locked file degrades to "left
+        behind" and shows up in the caller's re-measure instead of
+        aborting the whole wipe.
+    .PARAMETER Path
+        Directory whose contents should be removed. The directory itself
+        is kept.
+    .OUTPUTS
+        [bool] $true when every enumerated child was removed, $false when
+        something survived (e.g. locked files).
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) { return $true }
+
+    $empty = Join-Path $env:TEMP "empty_devkit_$(Get-Random)"
+    try {
+        New-Item -ItemType Directory -Path $empty -Force | Out-Null
+
+        $allGone = $true
+        foreach ($child in @(Get-ChildItem -LiteralPath $Path -Force -ErrorAction SilentlyContinue)) {
+            if ($child.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+                # A junction/symlink: remove the link itself, never its
+                # target. No -Recurse on purpose (see the doc comment above).
+                Remove-Item -LiteralPath $child.FullName -Force -ErrorAction SilentlyContinue
+            } elseif ($child.PSIsContainer) {
+                # Real directory: long-path-safe deep delete without
+                # following anything - robocopy is junction-safe here.
+                robocopy $empty $child.FullName /MIR /MT:8 /R:2 /W:1 /NFL /NDL /NJH /NJS | Out-Null
+                # Capture the exit code IMMEDIATELY (same idiom as
+                # Remove-DevKitNodeModules): on PowerShell 5.1, proceeding
+                # to Remove-Item -Recurse after a robocopy FAILURE would
+                # follow any junction still standing in the half-cleared
+                # tree - the exact hazard this helper exists to prevent.
+                # Robocopy exit codes 0-7 are all "success" (bitmask of
+                # what happened); only >=8 is a real failure - treat the
+                # directory as survived, never recurse into it.
+                $rc = $LASTEXITCODE
+                if ($rc -ge 8) {
+                    $allGone = $false
+                } else {
+                    Remove-Item -LiteralPath $child.FullName -Recurse -Force -ErrorAction SilentlyContinue
+                }
+            } else {
+                Remove-Item -LiteralPath $child.FullName -Force -ErrorAction SilentlyContinue
+            }
+            if (Test-Path -LiteralPath $child.FullName) { $allGone = $false }
+        }
+    } finally {
+        if (Test-Path -LiteralPath $empty) {
+            Remove-Item -LiteralPath $empty -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    return $allGone
+}
+
 function Clear-DevKitNodeCaches {
     <#
     .SYNOPSIS

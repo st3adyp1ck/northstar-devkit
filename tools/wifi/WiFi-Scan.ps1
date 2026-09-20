@@ -153,10 +153,12 @@ foreach ($net in $sorted) {
     $ssid = $net.SSID
     if ($ssid.Length -gt 28) { $ssid = $ssid.Substring(0, 25) + "..." }
     
-    # Pad for alignment
+    # Pad for alignment. A network block can legitimately lack an
+    # Authentication line (non-English locale output shape) - Auth is then
+    # $null, and a bare $net.Auth.PadRight would throw; coalesce to ''.
     $signalStr = "$bestSignal%".PadRight(6)
     $ssidStr = $ssid.PadRight(28)
-    $authStr = $net.Auth.PadRight(18)
+    $authStr = ([string]$net.Auth).PadRight(18)
     $chanStr = $channels
     
     Write-Host "  $signalStr" -ForegroundColor $sigColor -NoNewline

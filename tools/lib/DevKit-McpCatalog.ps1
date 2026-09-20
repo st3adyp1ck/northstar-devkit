@@ -362,11 +362,37 @@ function Invoke-DevKitMcpAdd {
         }
     }
 
+    # NOT a bare '& claude': npm installs of Claude Code ship claude.ps1 /
+    # claude.cmd / an extension-less POSIX shim side by side, and invoking
+    # the .ps1 or the shim makes PowerShell fall back to ShellExecute, which
+    # pops a real "Select an app to open" Windows dialog instead of failing
+    # cleanly - the exact incident Get-DevKitWindowsExecutable exists for
+    # (DevKit-McpList.ps1 carries the fuller write-up). Resolve through that
+    # helper and invoke only what it vouches for; fall back to its filter
+    # inline if the shared lib isn't in scope.
+    $claudeCmd = $null
+    if (Get-Command Get-DevKitWindowsExecutable -ErrorAction SilentlyContinue) {
+        $claudeCmd = Get-DevKitWindowsExecutable -Name 'claude'
+    } else {
+        $claudeCmd = @(Get-Command claude -All -ErrorAction SilentlyContinue | Where-Object {
+            $_.CommandType -eq 'Application' -and $_.Source -match '\.(exe|cmd|bat)$'
+        })[0]
+        if (-not $claudeCmd) { $claudeCmd = Get-Command claude -ErrorAction SilentlyContinue }
+    }
+    if (-not $claudeCmd) {
+        if ($pushedLocation) { Pop-Location }
+        return [PSCustomObject]@{
+            Success      = $false
+            ExitCode     = $null
+            ErrorMessage = "Failed to run 'claude mcp add': 'claude' was not found on PATH."
+        }
+    }
+
     $addFailed = $false
     $addErrorMessage = $null
     $addExitCode = $null
     try {
-        & claude @argsArray
+        & $claudeCmd @argsArray
         $addExitCode = $LASTEXITCODE
     } catch {
         $addFailed = $true

@@ -999,12 +999,15 @@ foreach ($step in $plan) {
                 foreach ($path in $junkPaths) {
                     if (-not (Test-Path -LiteralPath $path)) { continue }
                     Write-DevKitStep "Clearing $path"
-                    # SilentlyContinue on purpose: files an app still has open
-                    # are locked, and skipping them is correct - the count of
-                    # what survived is reported below rather than hidden.
-                    Get-ChildItem -LiteralPath $path -Force -ErrorAction SilentlyContinue | ForEach-Object {
-                        Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
-                    }
+                    # Junction-safe wipe (shared helper): on Windows
+                    # PowerShell 5.1 a bare Remove-Item -Recurse FOLLOWS
+                    # junction reparse points and can delete content OUTSIDE
+                    # the temp tree. The helper deletes reparse points
+                    # without -Recurse, files directly, and real directories
+                    # via a robocopy empty-mirror. Locked files are skipped
+                    # on purpose - the count of what survived is reported
+                    # below rather than hidden.
+                    Clear-DevKitDirectoryContents -Path $path | Out-Null
                     Write-DevKitDone
                 }
                 if ($IncludeRecycleBin) {

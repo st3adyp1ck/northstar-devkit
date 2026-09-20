@@ -8,6 +8,13 @@
     local (stdio) command, or a remote http-transport server. Mutates real
     Claude Code MCP configuration - always confirms before running.
 
+    Note: -Name and -Command (or -Transport/-Url/-Headers for a remote
+    http server) are MANDATORY parameters - a bare run dies at parameter
+    binding with no explanation, and the Control Center's headless Run
+    dialog cannot supply them. This tool only works when those are passed
+    explicitly; to browse and add a well-known server interactively, use
+    Add-McpServerFromCatalog.ps1 instead.
+
     Created by Northstar Software Development
     Website: https://www.northstarcoding.com
 .PARAMETER Name

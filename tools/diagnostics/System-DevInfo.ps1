@@ -111,7 +111,17 @@ $tools = @(
 foreach ($tool in $tools) {
     try {
         $cmdArgs = $tool.Args
-        $output = & $tool.Cmd @cmdArgs 2>&1 | Select-Object -First 1
+        # Route through the safe resolver (Get-DevKitWindowsExecutable's
+        # doc comment): npm-style installs can leave a .ps1 / extension-
+        # less shim as Get-Command's first match, and invoking that makes
+        # PowerShell fall back to ShellExecute - a real "Select an app to
+        # open" dialog instead of a clean "not installed". A command that
+        # doesn't resolve to a safely launchable exe/cmd/bat counts as
+        # not installed here.
+        $exe = Get-DevKitWindowsExecutable -Name $tool.Cmd
+        if (-not $exe) { throw "Not installed" }
+        $launchTarget = if ($exe.Source) { $exe.Source } else { $exe }
+        $output = & $launchTarget @cmdArgs 2>&1 | Select-Object -First 1
         if ($LASTEXITCODE -eq 0 -or $output -match $tool.Pattern) {
             if ($output -match $tool.Pattern) {
                 $version = $matches[1]
@@ -128,12 +138,16 @@ foreach ($tool in $tools) {
         # Try python3 fallback for Python
         if ($tool.Name -eq "Python") {
             try {
-                $output = & python3 --version 2>&1 | Select-Object -First 1
-                if ($output -match '(\d+\.\d+\.\d+)') {
-                    $version = $matches[1]
-                    $info.Tools += @{ Name = $tool.Name; Version = $version; Installed = $true }
-                    Write-Host "    $($tool.Name.PadRight(12)) v$version (python3)" -ForegroundColor Green
-                    continue
+                $py3 = Get-DevKitWindowsExecutable -Name 'python3'
+                if ($py3) {
+                    $py3Target = if ($py3.Source) { $py3.Source } else { $py3 }
+                    $output = & $py3Target --version 2>&1 | Select-Object -First 1
+                    if ($output -match '(\d+\.\d+\.\d+)') {
+                        $version = $matches[1]
+                        $info.Tools += @{ Name = $tool.Name; Version = $version; Installed = $true }
+                        Write-Host "    $($tool.Name.PadRight(12)) v$version (python3)" -ForegroundColor Green
+                        continue
+                    }
                 }
             } catch {}
         }

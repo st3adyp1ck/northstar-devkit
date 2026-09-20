@@ -136,7 +136,10 @@ function Get-DevKitEnvVariables {
             continue
         }
 
-        if ($line -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$') {
+        # Optional `export ` prefix, exactly like Compare-EnvFiles.ps1's
+        # parser - export-prefixed template vars (common in POSIX-style
+        # .env.example files) must not be silently dropped.
+        if ($line -match '^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$') {
             $varName = $matches[1]
             $rawValue = $matches[2]
             $valueInfo = Get-DevKitEnvValueInfo -RawValue $rawValue
@@ -235,6 +238,13 @@ Invoke-DevKitInDirectory -Path $targetPath -ScriptBlock {
     $envFile = ".env"
     if ((Test-Path $envFile) -and -not $Force -and -not $DryRun) {
         Write-Host "  WARNING: .env file already exists!" -ForegroundColor Yellow
+        # Headless guard: under the Control Center's -NonInteractive runner
+        # Read-Host throws - keep the existing file (the safe answer) with
+        # a note instead of crashing.
+        if (-not (Test-DevKitCanPrompt)) {
+            Write-DevKitInfo "Cannot prompt for confirmation in a non-interactive session - keeping the existing .env. Re-run with -Force to overwrite."
+            exit 0
+        }
         $overwrite = Read-Host "  Overwrite? (y/n)"
         if ($overwrite -ne 'y') {
             Write-DevKitInfo "Cancelled."

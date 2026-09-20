@@ -32,7 +32,12 @@ param(
 
 
 $CommonModule = Join-Path (Join-Path (Split-Path -Parent $PSScriptRoot) "lib") "DevKit-Common.ps1"
-if (Test-Path $CommonModule) { . $CommonModule }
+if (Test-Path $CommonModule) {
+    . $CommonModule
+} else {
+    Write-Host "ERROR: Required module not found: $CommonModule" -ForegroundColor Red
+    exit 1
+}
 
 
 Write-Host "`nNorthstar DevKit - DOCKER NUKE`n" -ForegroundColor Cyan
@@ -135,7 +140,9 @@ $totalSteps = $containerSteps + $imageSteps + $volumeSteps + $networkSteps
 if ($containerCount -gt 0) {
     Write-Host "`n  [$step/$totalSteps] Stopping all containers..." -ForegroundColor Cyan
     $stopHadErrors = $false
-    $stopOutput = @(docker stop $(docker ps -aq) 2>&1)
+    # Reuse the container list captured before the confirmation gate instead
+    # of re-listing - the same targets the counts/prompt above referred to.
+    $stopOutput = @(docker stop $containers 2>&1)
     foreach ($line in $stopOutput) {
         if ($line -match 'error|Error') {
             Write-Host "    ERROR: $line" -ForegroundColor Red
@@ -176,7 +183,8 @@ if ($containerCount -gt 0) {
 if (-not $KeepImages -and $imageCount -gt 0) {
     Write-Host "`n  [$step/$totalSteps] Removing all images..." -ForegroundColor Cyan
     $imagesHadErrors = $false
-    $imagesOutput = @(docker rmi -f $(docker images -q) 2>&1)
+    # Reuse the list captured up front instead of re-querying.
+    $imagesOutput = @(docker rmi -f $images 2>&1)
     foreach ($line in $imagesOutput) {
         if ($line -match 'Untagged|Deleted') {
             Write-Host "    $line" -ForegroundColor DarkGray
@@ -203,7 +211,8 @@ if (-not $KeepImages -and $imageCount -gt 0) {
 if (-not $KeepVolumes -and $volumeCount -gt 0) {
     Write-Host "`n  [$step/$totalSteps] Removing all volumes..." -ForegroundColor Cyan
     $volumesHadErrors = $false
-    $volumesOutput = @(docker volume rm $(docker volume ls -q) 2>&1)
+    # Reuse the list captured up front instead of re-querying.
+    $volumesOutput = @(docker volume rm $volumes 2>&1)
     foreach ($line in $volumesOutput) {
         if ($line -match '^[a-f0-9]') {
             Write-Host "    Removed: $($line.Substring(0,12))..." -ForegroundColor DarkGray
@@ -228,9 +237,17 @@ if (-not $KeepVolumes -and $volumeCount -gt 0) {
 
 # Step 5: Prune networks and build cache
 Write-Host "`n  [$step/$totalSteps] Pruning networks and build cache..." -ForegroundColor Cyan
-docker network prune -f 2>&1 | Out-Null
-docker builder prune -f 2>&1 | Out-Null
-Write-Host "  DONE: Networks and build cache pruned." -ForegroundColor Green
+# These prunes used to discard both output and exit code, unlike every step
+# above - check $LASTEXITCODE so a failed prune can't report "DONE".
+$networkPruneOutput = @(docker network prune -f 2>&1)
+$networkPruneFailed = ($LASTEXITCODE -ne 0)
+$builderPruneOutput = @(docker builder prune -f 2>&1)
+$builderPruneFailed = ($LASTEXITCODE -ne 0)
+if ($networkPruneFailed -or $builderPruneFailed) {
+    Write-Host "  WARNING: Networks/build cache may not have been pruned cleanly." -ForegroundColor Yellow
+} else {
+    Write-Host "  DONE: Networks and build cache pruned." -ForegroundColor Green
+}
 
 # Final system prune to clean up everything else. NOTE: `docker system prune -f`
 # (without -a) still removes DANGLING images even though -a was not passed, so
@@ -240,13 +257,19 @@ if ($KeepImages) {
     Write-Host "`n  Skipping final system prune (KeepImages specified - system prune still removes dangling images)." -ForegroundColor Green
     if (-not $KeepVolumes) {
         Write-Host "  Pruning remaining anonymous volumes..." -ForegroundColor Cyan
-        docker volume prune -f 2>&1 | Out-Null
+        $anonVolumeOutput = @(docker volume prune -f 2>&1)
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "  WARNING: Anonymous volume prune reported errors." -ForegroundColor Yellow
+        }
     }
 } else {
     Write-Host "`n  Final cleanup with system prune..." -ForegroundColor Cyan
     $pruneArgs = @("system", "prune", "-f")
     if (-not $KeepVolumes) { $pruneArgs += "--volumes" }
-    docker @pruneArgs 2>&1 | Out-Null
+    $systemPruneOutput = @(docker @pruneArgs 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  WARNING: Final system prune reported errors." -ForegroundColor Yellow
+    }
 }
 
 Write-Host "`n  ===================================" -ForegroundColor Cyan

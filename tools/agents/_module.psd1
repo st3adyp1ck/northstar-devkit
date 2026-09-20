@@ -37,13 +37,13 @@
             Key    = '6'
             Label  = 'Add MCP Server (From Catalog)'
             Script = 'Add-McpServerFromCatalog.ps1'
-            Help   = "Browsable picker over a curated catalog of popular MCP servers (Supabase, GitHub, Notion, Linear, Stripe, and more) - pick one, choose a variant if it offers more than one, and answer a few prompts (name, scope, API keys/headers, directories) instead of typing the full 'claude mcp add' command yourself. Use this when you want to add a well-known server without looking up its exact invocation. Safety note: mutates real Claude Code MCP configuration - always confirms first unless -Force is passed."
+            Help   = "Browsable picker over a curated catalog of popular MCP servers (Supabase, GitHub, Notion, Linear, Stripe, and more) - pick one, choose a variant if it offers more than one, and answer a few prompts (name, scope, API keys/headers, directories) instead of typing the full 'claude mcp add' command yourself. Use this when you want to add a well-known server without looking up its exact invocation. Note: this is an interactive picker with no non-interactive parameters, so it is not suitable for the Control Center's headless Run dialog - run it from the CLI menu or a real terminal instead. Safety note: mutates real Claude Code MCP configuration - always confirms first unless -Force is passed."
         }
         @{
             Key    = '7'
             Label  = 'Scan MCP Setup (Global + Project)'
             Script = 'Scan-McpServers.ps1'
-            Help   = "Checks which catalog servers are already configured, both globally/user-scope and (if an active project is set) at project scope, and reports what's missing. For each missing entry with an automatable registration, asks whether to add it now, reusing the same catalog add flow as 'Add MCP Server (From Catalog)'. Use this periodically to make sure a project (or this machine) has the MCP servers you expect. Safety note: the scan itself is read-only, but accepting a prompt to add a missing server mutates real Claude Code MCP configuration - always confirms first unless -Force is passed."
+            Help   = "Checks which catalog servers are already configured, both globally/user-scope and (if an active project is set) at project scope, and reports what's missing. For each missing entry with an automatable registration, asks whether to add it now, reusing the same catalog add flow as 'Add MCP Server (From Catalog)'. Use this periodically to make sure a project (or this machine) has the MCP servers you expect. Note: the scan itself is read-only and works headlessly, but the 'add now?' step needs an interactive console - from the Control Center's headless Run dialog the scan completes and the add step is skipped. Safety note: accepting a prompt to add a missing server mutates real Claude Code MCP configuration - always confirms first unless -Force is passed."
         }
     )
 }

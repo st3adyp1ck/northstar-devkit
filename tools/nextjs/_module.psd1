@@ -31,7 +31,7 @@
             Help            = "Clears the .next cache (and, if you answer yes to the Turbopack prompt, the Turbopack-related caches too), then starts the dev server via the auto-detected package manager with Next.js telemetry disabled. Optionally set a port to run on. Use this when you want a guaranteed-clean dev server start in one step. Safety note: deletes cache folders with no confirmation prompt (unlike the standalone cache-clear tools above), then starts a long-running dev server process that keeps running until you stop it (Ctrl+C) - it will not return to the menu on its own."
             Prompts         = @(
                 @{ Name = 'Turbo'; Type = 'YesNo'; Prompt = 'Clear Turbopack cache too?'; Optional = $true }
-                @{ Name = 'Port'; Type = 'Int'; Prompt = 'Port (press Enter for default)'; Optional = $true; Min = 1; Max = 65535 }
+                @{ Name = 'Port'; Type = 'Int'; Prompt = 'Port (0 = package default; press Enter for default)'; Optional = $true; Min = 0; Max = 65535 }
             )
         }
     )

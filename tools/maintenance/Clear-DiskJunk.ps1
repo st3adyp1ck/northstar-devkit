@@ -148,9 +148,14 @@ try {
         }
         Write-DevKitStep "Cleaning $p"
         try {
-            Get-ChildItem -LiteralPath $p -Force -ErrorAction SilentlyContinue | ForEach-Object {
-                Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
-            }
+            # Junction-safe wipe (shared helper): on Windows PowerShell 5.1 a
+            # bare Remove-Item -Recurse FOLLOWS junction reparse points and
+            # can delete content OUTSIDE the temp tree. The helper deletes
+            # reparse points without -Recurse, files directly, and real
+            # directories via a robocopy empty-mirror. Failures on
+            # individual children are skipped, same as the old
+            # SilentlyContinue loop.
+            Clear-DevKitDirectoryContents -Path $p | Out-Null
             Write-DevKitDone
         } catch {
             Write-DevKitError "Failed cleaning '$p': $_"
@@ -173,9 +178,8 @@ try {
         Write-DevKitStep "Clearing Windows Update cache"
         try {
             if (Test-Path -LiteralPath $wuCachePath) {
-                Get-ChildItem -LiteralPath $wuCachePath -Force -ErrorAction SilentlyContinue | ForEach-Object {
-                    Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
-                }
+                # Same junction-safe wipe as the temp folders above.
+                Clear-DevKitDirectoryContents -Path $wuCachePath | Out-Null
             }
             Write-DevKitDone
         } catch {

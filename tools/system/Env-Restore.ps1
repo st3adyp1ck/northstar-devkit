@@ -83,6 +83,13 @@ begin {
         Write-Host "    [O] Overwrite - replace current $Scope PATH with the backed-up value" -ForegroundColor Cyan
         Write-Host "    [M] Merge     - union of current + backed-up entries (keeps both)" -ForegroundColor Cyan
         Write-Host "    [S] Skip      - leave $Scope PATH untouched (default)" -ForegroundColor Cyan
+        # Headless guard: without a console the choice below cannot be
+        # read - take the safe, non-mutating default (Skip) with a note
+        # rather than throwing mid-restore. (-Force never reaches here.)
+        if (-not (Test-DevKitCanPrompt)) {
+            Write-DevKitInfo "Cannot prompt for a PATH choice in a non-interactive session - skipping $Scope PATH restore (same as [S]). Use -Force to overwrite instead."
+            return $null
+        }
         $pathChoice = Read-Host "  Restore $Scope PATH - choose (O/M/S)"
 
         switch ($pathChoice.ToUpper()) {
@@ -183,6 +190,12 @@ process {
     
     # Confirm
     if (-not $Force) {
+        # Headless guard: Read-Host throws under the Control Center's
+        # -NonInteractive runner - decline cleanly instead of crashing.
+        if (-not (Test-DevKitCanPrompt)) {
+            Write-DevKitInfo "Cannot prompt for confirmation in a non-interactive session - restore cancelled, nothing was changed. Re-run with -Force to skip the prompt."
+            return
+        }
         Write-Host "`n  WARNING: This will overwrite current environment variables!" -ForegroundColor Yellow
         $confirm = Read-Host "  Continue with restore? (y/n)"
         if ($confirm -ne 'y') {

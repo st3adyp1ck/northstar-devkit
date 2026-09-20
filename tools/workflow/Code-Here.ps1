@@ -47,8 +47,11 @@ function Find-DevKitCursorCommand {
     [CmdletBinding()]
     param()
 
-    $onPath = Get-Command cursor -ErrorAction SilentlyContinue
-    if ($onPath) { return $onPath.Source }
+    # NOT a bare Get-Command: the same npm-shim/ShellExecute hazard as the
+    # 'code' path in the script body (see Get-DevKitWindowsExecutable's doc
+    # comment) - only a safely launchable exe/cmd/bat is returned.
+    $onPath = Get-DevKitWindowsExecutable -Name 'cursor'
+    if ($onPath -and $onPath.Source) { return $onPath.Source }
 
     $candidates = @()
     if ($env:LOCALAPPDATA) {
@@ -87,8 +90,15 @@ function Find-DevKitCursorCommand {
 
 Write-DevKitHeader "Code Here"
 
-# Detect available editors
-$vsCodePath = Get-Command code -ErrorAction SilentlyContinue
+# NOT a bare Get-Command / bare `& code`: installs can ship code.ps1 / an
+# extension-less shim next to code.cmd, and Get-Command's first match may
+# be one of those - invoking it makes PowerShell fall back to ShellExecute,
+# popping a real "Select an app to open" Windows dialog instead of failing
+# cleanly (the documented 3.1 incident; see Get-DevKitWindowsExecutable's
+# doc comment in tools/lib/DevKit-Common.ps1). The resolver returns only a
+# safely launchable exe/cmd/bat (or $null when there isn't one).
+$vsCodeResolved = Get-DevKitWindowsExecutable -Name 'code'
+$vsCodePath = if ($vsCodeResolved) { $vsCodeResolved.Source } else { $null }
 $cursorCmd = Find-DevKitCursorCommand
 
 if ($Cursor -and $cursorCmd) {
@@ -98,10 +108,10 @@ if ($Cursor -and $cursorCmd) {
     Write-Host "  WARNING: Cursor was requested but could not be found (checked PATH, common install locations, and the registry)." -ForegroundColor Yellow
     Write-Host "  Falling back to VS Code.`n" -ForegroundColor Yellow
     $editorName = "VS Code"
-    $editorCmd = "code"
+    $editorCmd = $vsCodePath
 } elseif ($vsCodePath) {
     $editorName = "VS Code"
-    $editorCmd = "code"
+    $editorCmd = $vsCodePath
 } elseif ($cursorCmd) {
     $editorName = "Cursor"
     $editorCmd = $cursorCmd
@@ -120,7 +130,7 @@ if ($Recent) {
     # Get recent folders from VS Code/Cursor storage
     $recentPaths = @()
     
-    if ($editorCmd -eq "code") {
+    if ($editorName -eq "VS Code") {
         $workspaceStorage = Join-Path $env:APPDATA "Code\User\workspaceStorage"
         if (Test-Path $workspaceStorage) {
             Get-ChildItem $workspaceStorage -Directory | ForEach-Object {

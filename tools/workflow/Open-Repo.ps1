@@ -105,6 +105,76 @@ function ConvertTo-DevKitBrowsableUrl {
     return $null
 }
 
+function Get-DevKitRepoWebUrl {
+    <#
+    .SYNOPSIS
+        Builds the browsable platform URL (repo root, branch view, or a
+        repo-level page) from an ALREADY-CONVERTED http(s) remote URL.
+    .DESCRIPTION
+        The branch name goes into the URL (path segment or query value),
+        so a legal branch containing spaces, '#', '%', etc. must be
+        percent-encoded first - [uri]::EscapeDataString - or the result
+        is a malformed URL the safety gate then rejects (or, worse, one
+        that opens the wrong page). Returns the remote URL unchanged for
+        unrecognized platforms.
+    .PARAMETER RemoteUrl
+        A browsable http(s) URL, as returned by ConvertTo-DevKitBrowsableUrl.
+    .PARAMETER Branch
+        Branch name to deep-link, if any. May be empty/whitespace.
+    .OUTPUTS
+        [string] The URL to open.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$RemoteUrl,
+        [AllowEmptyString()][string]$Branch = '',
+        [switch]$PullRequest,
+        [switch]$Issues,
+        [switch]$Actions
+    )
+
+    $hasBranch = -not [string]::IsNullOrWhiteSpace($Branch)
+    # Percent-encode the branch: it lands in a URL path/query, and legal
+    # branch names can contain spaces or '#' - both of which would break
+    # (or redirect) the URL if passed through raw.
+    $encodedBranch = if ($hasBranch) { [uri]::EscapeDataString($Branch) } else { '' }
+
+    if ($RemoteUrl -match 'github\.com') {
+        if ($PullRequest) { return "$RemoteUrl/pulls" }
+        if ($Issues) { return "$RemoteUrl/issues" }
+        if ($Actions) { return "$RemoteUrl/actions" }
+        if ($hasBranch) { return "$RemoteUrl/tree/$encodedBranch" }
+        return $RemoteUrl
+    }
+    if ($RemoteUrl -match 'gitlab\.com') {
+        if ($PullRequest) { return "$RemoteUrl/-/merge_requests" }
+        if ($Issues) { return "$RemoteUrl/-/issues" }
+        if ($Actions) { return "$RemoteUrl/-/pipelines" }
+        if ($hasBranch) { return "$RemoteUrl/-/tree/$encodedBranch" }
+        return $RemoteUrl
+    }
+    if ($RemoteUrl -match 'bitbucket\.org') {
+        if ($PullRequest) { return "$RemoteUrl/pull-requests" }
+        if ($Issues) { return "$RemoteUrl/issues" }
+        if ($hasBranch) { return "$RemoteUrl/src/$encodedBranch" }
+        return $RemoteUrl
+    }
+    if ($RemoteUrl -match 'dev\.azure\.com|visualstudio\.com') {
+        if ($PullRequest) { return "$RemoteUrl/pullrequests" }
+        if ($Issues) { return "$RemoteUrl/_workitems" }
+        if ($Actions) { return "$RemoteUrl/_build" }
+        # ${RemoteUrl} braces REQUIRED: "$RemoteUrl?version" would parse
+        # 'RemoteUrl?version' as one variable name and silently expand to
+        # empty - this deep link was broken that way before the extraction.
+        if ($hasBranch) { return "${RemoteUrl}?version=GB$encodedBranch" }
+        return $RemoteUrl
+    }
+
+    # Unrecognized platform: the caller's safety gate validates before
+    # opening either way.
+    return $RemoteUrl
+}
+
 # When this file is dot-sourced (e.g. by Pester tests that only need
 # ConvertTo-DevKitBrowsableUrl), stop here - do not run the interactive
 # script body, touch the current repo, or launch a browser.
@@ -197,61 +267,16 @@ Invoke-DevKitInDirectory -Path $targetPath -ScriptBlock {
         Write-DevKitInfo "Branch: (could not be resolved - opening repo root)"
     }
 
-    # Determine platform and build URL
+    # Determine platform (for display) and build the URL. The branch is
+    # percent-encoded inside Get-DevKitRepoWebUrl - legal branch names can
+    # contain spaces or '#', which would otherwise yield a malformed URL.
     $platform = "unknown"
-    $url = $remoteUrl
+    if ($remoteUrl -match 'github\.com') { $platform = "GitHub" }
+    elseif ($remoteUrl -match 'gitlab\.com') { $platform = "GitLab" }
+    elseif ($remoteUrl -match 'bitbucket\.org') { $platform = "Bitbucket" }
+    elseif ($remoteUrl -match 'dev\.azure\.com|visualstudio\.com') { $platform = "Azure DevOps" }
 
-    if ($remoteUrl -match 'github\.com') {
-        $platform = "GitHub"
-        if ($PullRequest) {
-            $url = "$remoteUrl/pulls"
-        } elseif ($Issues) {
-            $url = "$remoteUrl/issues"
-        } elseif ($Actions) {
-            $url = "$remoteUrl/actions"
-        } elseif ($hasBranch) {
-            $url = "$remoteUrl/tree/$Branch"
-        } else {
-            $url = $remoteUrl
-        }
-    } elseif ($remoteUrl -match 'gitlab\.com') {
-        $platform = "GitLab"
-        if ($PullRequest) {
-            $url = "$remoteUrl/-/merge_requests"
-        } elseif ($Issues) {
-            $url = "$remoteUrl/-/issues"
-        } elseif ($Actions) {
-            $url = "$remoteUrl/-/pipelines"
-        } elseif ($hasBranch) {
-            $url = "$remoteUrl/-/tree/$Branch"
-        } else {
-            $url = $remoteUrl
-        }
-    } elseif ($remoteUrl -match 'bitbucket\.org') {
-        $platform = "Bitbucket"
-        if ($PullRequest) {
-            $url = "$remoteUrl/pull-requests"
-        } elseif ($Issues) {
-            $url = "$remoteUrl/issues"
-        } elseif ($hasBranch) {
-            $url = "$remoteUrl/src/$Branch"
-        } else {
-            $url = $remoteUrl
-        }
-    } elseif ($remoteUrl -match 'dev\.azure\.com|visualstudio\.com') {
-        $platform = "Azure DevOps"
-        if ($PullRequest) {
-            $url = "$remoteUrl/pullrequests"
-        } elseif ($Issues) {
-            $url = "$remoteUrl/_workitems"
-        } elseif ($Actions) {
-            $url = "$remoteUrl/_build"
-        } elseif ($hasBranch) {
-            $url = "$remoteUrl?version=GB$Branch"
-        } else {
-            $url = $remoteUrl
-        }
-    }
+    $url = Get-DevKitRepoWebUrl -RemoteUrl $remoteUrl -Branch $Branch -PullRequest:$PullRequest -Issues:$Issues -Actions:$Actions
 
     Write-DevKitInfo "Platform: $platform"
 

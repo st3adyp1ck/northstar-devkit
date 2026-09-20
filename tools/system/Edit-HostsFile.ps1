@@ -277,7 +277,8 @@ $isAdmin = Test-DevKitAdmin
 if (-not $Show -and -not $isAdmin) {
     Write-Host "  ERROR: Editing the hosts file requires Administrator privileges.`n" -ForegroundColor Red
 
-    $elevate = Read-Host "  Relaunch this script elevated now? (y/n)"
+    # Headless guard: no console to answer - skip the relaunch offer.
+    $elevate = if (Test-DevKitCanPrompt) { Read-Host "  Relaunch this script elevated now? (y/n)" } else { 'n' }
     if ($elevate -eq 'y') {
         $relaunchArgs = @()
         if ($Add) { $relaunchArgs += @('-Add', $Add) }

@@ -28,6 +28,11 @@
     and register one catalog entry". That flow always confirms before
     mutating real Claude Code MCP configuration (unless -Force).
 
+    Note: the scan itself is read-only and runs fine headlessly; only the
+    trailing "add now?" step needs an interactive console - a
+    non-interactive run (Control Center's headless tool.run) completes the
+    scan and cleanly skips that step with a note.
+
     Created by Northstar Software Development
     Website: https://www.northstarcoding.com
 .PARAMETER Force
@@ -169,6 +174,16 @@ if ($toOffer.Count -eq 0) {
 
 Write-Host "  Missing catalog entries with an automatable registration:" -ForegroundColor Cyan
 Write-Host ""
+
+# The scan above is complete at this point; only the add step needs a
+# console. Under the Control Center's headless runner (-NonInteractive,
+# stdin closed) Read-Host throws - so skip the offers cleanly instead of
+# crashing mid-loop. Same Test-DevKitCanPrompt probe the destructive gate
+# uses.
+if (-not (Test-DevKitCanPrompt)) {
+    Write-DevKitInfo "Non-interactive session - scan complete; skipping the 'add missing servers' step. Re-run from the CLI menu or a terminal to add."
+    exit 0
+}
 
 foreach ($entry in $toOffer) {
     $answer = Read-Host "  Add '$($entry.Name)' now? (y/N)"

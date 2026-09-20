@@ -27,7 +27,12 @@ param(
 )
 
 $CommonModule = Join-Path (Join-Path (Split-Path -Parent $PSScriptRoot) "lib") "DevKit-Common.ps1"
-if (Test-Path $CommonModule) { . $CommonModule }
+if (Test-Path $CommonModule) {
+    . $CommonModule
+} else {
+    Write-Host "ERROR: Required module not found: $CommonModule" -ForegroundColor Red
+    exit 1
+}
 
 try {
     $targetPath = Resolve-DevKitDirectory -Path $Path
@@ -63,7 +68,15 @@ Invoke-DevKitInDirectory -Path $targetPath -ScriptBlock {
         Name = "Stop local node processes"
         Action = {
             $killed = Stop-DevKitNodeProcesses -Path .
-            Write-DevKitInfo "Stopped $killed process(es)"
+            # Always emit output (and a newline) here regardless of $killed -
+            # this step is excluded from the loop's generic Write-DevKitDone
+            # call below, so without this the next step's step-header would
+            # print on the same line when 0 processes were killed (mirrors
+            # Next-FullClean.ps1).
+            Write-DevKitDone
+            if ($killed -gt 0) {
+                Write-DevKitInfo "Stopped $killed process(es)"
+            }
         }
     }
 

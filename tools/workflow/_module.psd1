@@ -34,7 +34,7 @@
             Key    = '5'
             Label  = 'Dev Text Converter (base64/url/jwt/guid/hash)'
             Script = 'Convert-DevText.ps1'
-            Help   = "The 'google-this' converter box, with nothing leaving your machine: Base64 encode/decode, URL encode/decode, Unix timestamp (seconds or milliseconds, auto-detected) to local time, current time to Unix timestamp, new GUID, SHA-256 hash of a string, and JWT header/payload decoding (base64url only - the signature is NEVER verified and the tool says so, so never trust decoded content for authentication). Run with no -Mode for an interactive picker, or pass -Mode and -Input for scripted use; -Clipboard copies the result (the tool's only side effect). Pure .NET, no external dependencies, never touches files or the network."
+            Help   = "The 'google-this' converter box, with nothing leaving your machine: Base64 encode/decode, URL encode/decode, Unix timestamp (seconds or milliseconds, auto-detected) to local time, current time to Unix timestamp, new GUID, SHA-256 hash of a string, and JWT header/payload decoding (base64url only - the signature is NEVER verified and the tool says so, so never trust decoded content for authentication). Run with no -Mode for an interactive picker, or pass -Mode and -Input for scripted use; -Clipboard copies the result (the tool's only side effect). Pure .NET, no external dependencies, never touches files or the network. Note: a bare run needs the interactive mode picker, which the Control Center's headless Run dialog cannot drive - run it bare from the CLI menu or a terminal, or pass -Mode/-Input explicitly when running it any other scripted way."
         }
         @{
             Key    = '6'

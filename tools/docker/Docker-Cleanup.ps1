@@ -35,7 +35,12 @@ param(
 
 
 $CommonModule = Join-Path (Join-Path (Split-Path -Parent $PSScriptRoot) "lib") "DevKit-Common.ps1"
-if (Test-Path $CommonModule) { . $CommonModule }
+if (Test-Path $CommonModule) {
+    . $CommonModule
+} else {
+    Write-Host "ERROR: Required module not found: $CommonModule" -ForegroundColor Red
+    exit 1
+}
 
 
 Write-Host "`nNorthstar DevKit - Docker Cleanup`n" -ForegroundColor Cyan
@@ -120,6 +125,17 @@ if ($df) {
     }
 }
 
+# Normalize the build-cache reclaimable text (e.g. "2.1GB (45%)") to bytes so
+# the early-exit gate below can weigh it numerically. go-units prints
+# kB/MB/GB/TB (case-insensitive); anything unparseable stays 0 (treated as
+# "no known reclaimable cache"), preserving the gate's old behavior.
+$builderReclaimableBytes = 0
+if ($builderReclaimable -and $builderReclaimable -ne 'Unknown' -and
+    ($builderReclaimable -match '(?i)^\s*(\d+\.?\d*)\s*(B|KB|MB|GB|TB)')) {
+    $unitMultiplier = @{ 'B' = 1; 'KB' = 1KB; 'MB' = 1MB; 'GB' = 1GB; 'TB' = 1TB }
+    $builderReclaimableBytes = [double]$Matches[1] * $unitMultiplier[$Matches[2].ToUpper()]
+}
+
 # Show status
 Write-Host "  Resources available for cleanup:" -ForegroundColor Yellow
 Write-Host "    Stopped containers: $containerCount" -ForegroundColor $(if($containerCount -gt 0){'Yellow'}else{'Green'})
@@ -143,10 +159,13 @@ Write-Host ""
 
 # Check if there's anything to clean. Stopped containers are excluded from
 # this check when -DanglingOnly is set, since that mode skips container
-# removal entirely (see Step 1 below).
+# removal entirely (see Step 1 below). Reclaimable BUILD CACHE also counts:
+# Step 5 always prunes it (unless -DanglingOnly), so a machine with 0 stopped
+# containers/images but GBs of builder cache must not exit "nothing to clean".
 if (($DanglingOnly -or $containerCount -eq 0) -and $unusedImageCount -eq 0 -and
     (-not $Volumes -or $volumeCount -eq 0) -and
-    (-not $AllUnused -or $networkCount -eq 0)) {
+    (-not $AllUnused -or $networkCount -eq 0) -and
+    ($DanglingOnly -or $builderReclaimableBytes -eq 0)) {
     Write-Host "  OK: Nothing to clean up!`n" -ForegroundColor Green
     exit 0
 }

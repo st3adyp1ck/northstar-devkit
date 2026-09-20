@@ -12,7 +12,7 @@
             Key    = '2'
             Label  = 'Disk Usage Report (top folders by size)'
             Script = 'Show-DiskUsageReport.ps1'
-            Help   = "Measures the immediate subfolders under a path (defaults to the system drive root) and lists the largest ones by size, descending. Use this to find what's eating disk space before deciding what to clean up manually or with Clear Disk Junk. Fully read-only - never prompts, deletes, or modifies anything, even with custom -Path/-Top values."
+            Help   = "Measures the immediate subfolders under a path (defaults to the system drive root) and lists the largest ones by size, descending. Use this to find what's eating disk space before deciding what to clean up manually or with Clear Disk Junk. By default each subfolder is measured to depth 2 (quick; sizes are estimates that exclude anything deeper) - pass -Depth to change that, or -Full for a complete recursive measure, which can take several minutes on a system drive. Fully read-only - never prompts, deletes, or modifies anything, even with custom -Path/-Top values."
         }
         @{
             Key    = '3'

@@ -11,7 +11,11 @@
     Created by Northstar Software Development
     Website: https://www.northstarcoding.com
 .PARAMETER OutputPath
-    Directory to save backup file. Defaults to current directory.
+    Directory to save backup file. Defaults to
+    %LOCALAPPDATA%\NorthstarDevKit\backups - DevKit's own state dir, kept
+    outside any project/git repo - so a secrets-adjacent backup file is
+    never written into a repository by default. Pass -OutputPath to choose
+    a different folder.
 .PARAMETER Name
     Optional name for this backup.
 .PARAMETER IncludePath
@@ -34,7 +38,10 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$OutputPath = ".",
+    # DevKit's own state dir, NOT the current/project directory: this file
+    # is secrets-adjacent, and defaulting to "." made the menu surfaces
+    # write it into the selected git repo.
+    [string]$OutputPath = (Join-Path (Join-Path $env:LOCALAPPDATA "NorthstarDevKit") "backups"),
     [string]$Name = "",
     [switch]$IncludePath = $true,
     [switch]$Redact = $true,
@@ -52,6 +59,13 @@ Write-Host "  Store the output file in a secure location and keep it out of Git.
 Write-Host ""
 
 if (-not $Force) {
+    # Headless guard: under the Control Center's runner (-NonInteractive,
+    # stdin closed) Read-Host throws instead of prompting - decline
+    # cleanly, same as a 'no' answer.
+    if (-not (Test-DevKitCanPrompt)) {
+        Write-DevKitInfo "Cannot prompt for confirmation in a non-interactive session - nothing was written. Re-run with -Force to skip the prompt."
+        exit 0
+    }
     $confirm = Read-Host "  Continue? (y/n)"
     if ($confirm -ne 'y') {
         Write-DevKitInfo "Cancelled."

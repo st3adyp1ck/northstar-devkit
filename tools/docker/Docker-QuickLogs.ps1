@@ -38,7 +38,12 @@ param(
 
 
 $CommonModule = Join-Path (Join-Path (Split-Path -Parent $PSScriptRoot) "lib") "DevKit-Common.ps1"
-if (Test-Path $CommonModule) { . $CommonModule }
+if (Test-Path $CommonModule) {
+    . $CommonModule
+} else {
+    Write-Host "ERROR: Required module not found: $CommonModule" -ForegroundColor Red
+    exit 1
+}
 
 
 Write-Host "`nNorthstar DevKit - Docker Quick Logs`n" -ForegroundColor Cyan
@@ -158,19 +163,39 @@ if ($containers.Count -eq 1) {
             }
         }
 
-        # Prints any lines appended to a container's redirected output file
-        # since the last poll, tracking a per-file read position.
+        # Prints any bytes appended to a container's redirected output file
+        # since the last poll. Tracks a per-file BYTE offset and seeks to it
+        # on every poll instead of re-reading the whole file with
+        # Get-Content - under the old line-count approach each 100ms poll
+        # re-read the entire growing log, which is O(n^2) on a chatty
+        # container.
         function Write-DevKitQuickLogLines {
             param($ProcInfo, [string]$Path, [string]$PositionProperty)
 
-            $allLines = @(Get-Content -Path $Path -ErrorAction SilentlyContinue)
-            $position = $ProcInfo.$PositionProperty
-            if ($allLines.Count -gt $position) {
-                foreach ($line in $allLines[$position..($allLines.Count - 1)]) {
+            if (-not (Test-Path -LiteralPath $Path)) { return }
+            $stream = $null
+            $reader = $null
+            try {
+                $stream = [System.IO.File]::Open($Path, 'Open', 'Read', 'ReadWrite')
+                # If the log shrank below our tracked offset (not expected
+                # from docker's append-only single writer, but cheap to
+                # guard), restart from the beginning instead of seeking past
+                # EOF and silently stalling the tail forever.
+                if ($stream.Length -lt $ProcInfo.$PositionProperty) {
+                    $ProcInfo.$PositionProperty = 0
+                }
+                $stream.Seek($ProcInfo.$PositionProperty, 'Begin') | Out-Null
+                $reader = New-Object System.IO.StreamReader($stream)
+                while (-not $reader.EndOfStream) {
+                    $line = $reader.ReadLine()
                     Write-Host "[$($ProcInfo.Container)] " -ForegroundColor $ProcInfo.Color -NoNewline
                     Write-Host $line
                 }
-                $ProcInfo.$PositionProperty = $allLines.Count
+                $ProcInfo.$PositionProperty = $stream.Position
+            } catch {
+                # A locked or vanishing file on one poll must not kill the tail
+            } finally {
+                if ($reader) { $reader.Dispose() } elseif ($stream) { $stream.Dispose() }
             }
         }
 

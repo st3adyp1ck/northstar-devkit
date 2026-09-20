@@ -131,4 +131,24 @@ AFTER_KEY=stillworks
     It "resumes correct parsing immediately after the multi-line block (no corruption)" {
         ($script:Variables | Where-Object { $_.Name -eq "AFTER_KEY" }).Default | Should -Be "stillworks"
     }
+
+    It "parses 'export '-prefixed lines, matching Compare-EnvFiles' parser" {
+        # POSIX-style .env.example files commonly prefix assignments with
+        # `export ` - these vars used to be silently dropped by this parser
+        # (while Compare-EnvFiles counted them, so the two tools disagreed).
+        $exportFixture = @'
+export API_URL=https://api.example.com
+export  SPACED_KEY = some value
+exportNOT_A_PREFIX=plain
+'@
+        $exportLines = $exportFixture -split "`r?`n"
+        $exportVars = Get-DevKitEnvVariables -Lines $exportLines
+
+        $exportVars.Count | Should -Be 3
+        ($exportVars | Where-Object { $_.Name -eq "API_URL" }).Default | Should -Be "https://api.example.com"
+        ($exportVars | Where-Object { $_.Name -eq "SPACED_KEY" }).Default | Should -Be "some value"
+        # 'exportNOT_A_PREFIX' has no space after 'export' - it is a plain
+        # variable NAME, not an export prefix.
+        ($exportVars | Where-Object { $_.Name -eq "exportNOT_A_PREFIX" }).Default | Should -Be "plain"
+    }
 }

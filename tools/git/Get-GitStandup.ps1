@@ -58,9 +58,9 @@ if (-not $gitExe) {
 # re-resolves its own identity from its local config first (see the main
 # loop), since developers commonly configure a different identity per repo
 # (e.g. separate work vs. personal email).
-$author = [string](git config user.email 2>$null)
+$author = [string](& $gitExe config user.email 2>$null)
 if ([string]::IsNullOrWhiteSpace($author)) {
-    $author = [string](git config user.name 2>$null)
+    $author = [string](& $gitExe config user.name 2>$null)
 }
 if ([string]::IsNullOrWhiteSpace($author)) {
     Write-DevKitError "Could not determine your git identity - set 'git config --global user.email' (or user.name) first."
@@ -139,20 +139,22 @@ foreach ($repo in $repos) {
     # above if this repo has no local override) so repos configured with a
     # different git identity (work vs. personal email, etc.) are matched
     # correctly instead of silently excluded.
-    $repoAuthor = [string](git -C $repo.Path config user.email 2>$null)
+    $repoAuthor = [string](& $gitExe -C $repo.Path config user.email 2>$null)
     if ([string]::IsNullOrWhiteSpace($repoAuthor)) {
-        $repoAuthor = [string](git -C $repo.Path config user.name 2>$null)
+        $repoAuthor = [string](& $gitExe -C $repo.Path config user.name 2>$null)
     }
     if ([string]::IsNullOrWhiteSpace($repoAuthor)) {
         $repoAuthor = $author
     }
     $repoAuthor = $repoAuthor.Trim()
 
-    $lines = @(git -C $repo.Path log --all "--since=$sinceArg" "--author=$repoAuthor" "--pretty=format:%h %s (%cr)" 2>$null)
+    # All git invocations go through $gitExe (resolved above via the safe
+    # resolver) - bare 'git' would bypass the ShellExecute-shim guard.
+    $lines = @(& $gitExe -C $repo.Path log --all "--since=$sinceArg" "--author=$repoAuthor" "--pretty=format:%h %s (%cr)" 2>$null)
     if ($LASTEXITCODE -ne 0) {
         # A repo with no commits at all (unborn HEAD) makes git log exit
         # non-zero - that is an honest "no commits", not an error.
-        $null = git -C $repo.Path rev-parse --verify HEAD 2>$null
+        $null = & $gitExe -C $repo.Path rev-parse --verify HEAD 2>$null
         if ($LASTEXITCODE -eq 0) {
             Write-Host "  $($repo.Name)" -ForegroundColor Red -NoNewline
             Write-Host " [ERROR: git log failed]" -ForegroundColor DarkGray

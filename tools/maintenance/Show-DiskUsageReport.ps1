@@ -5,6 +5,9 @@
 .DESCRIPTION
     Read-only report of the biggest immediate subfolders under a path, sorted
     by size descending. Never prompts and never deletes or modifies anything.
+    By default each subfolder is measured to a depth of 2 levels (sizes are
+    then an estimate of the real total); pass -Full for a complete recursive
+    measure, which can take several minutes on a system drive.
 
     Created by Northstar Software Development
     Website: https://www.northstarcoding.com
@@ -12,14 +15,25 @@
     Root path to scan. Defaults to the system drive root (e.g. C:\).
 .PARAMETER Top
     How many of the largest subfolders to display.
+.PARAMETER Depth
+    How many directory levels below each immediate subfolder to measure
+    (default 2). Sizes treat anything deeper as excluded, so with a small
+    depth they are estimates of the real totals - fine for ranking what to
+    investigate, not exact byte counts. Ignored when -Full is passed.
+.PARAMETER Full
+    Measure each subfolder fully recursively (the old default). This can
+    take several minutes on a system drive.
 .EXAMPLE
     .\Show-DiskUsageReport.ps1
     .\Show-DiskUsageReport.ps1 -Path "D:\" -Top 25
+    .\Show-DiskUsageReport.ps1 -Full
 #>
 [CmdletBinding()]
 param(
     [string]$Path = $env:SystemDrive + "\",
-    [int]$Top = 15
+    [int]$Top = 15,
+    [int]$Depth = 2,
+    [switch]$Full
 )
 
 $CommonModule = Join-Path (Join-Path (Split-Path -Parent $PSScriptRoot) "lib") "DevKit-Common.ps1"
@@ -32,6 +46,11 @@ if ($Top -lt 1) {
     exit 1
 }
 
+if ($Depth -lt 1) {
+    Write-DevKitError "Depth must be a positive number (or pass -Full for a complete recursive scan)."
+    exit 1
+}
+
 function Format-DevKitByteSize {
     param([Parameter(Mandatory = $true)][double]$Bytes)
     if ($Bytes -ge 1GB) { return "{0:N2} GB" -f ($Bytes / 1GB) }
@@ -41,10 +60,26 @@ function Format-DevKitByteSize {
 }
 
 function Get-DevKitFolderSize {
-    param([Parameter(Mandatory = $true)][string]$Path)
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        # Depth 1 = the folder's own files only; each extra level descends
+        # one more directory. Sizes are then estimates of the real totals,
+        # which is the point: ranking what to investigate must not require
+        # a multi-minute full recursion of e.g. C:\Program Files.
+        [Parameter(Mandatory = $true)][int]$Depth,
+        [switch]$Full
+    )
     $total = 0
     try {
-        $items = Get-ChildItem -LiteralPath $Path -Recurse -Force -File -ErrorAction SilentlyContinue
+        $gciParams = @{
+            LiteralPath = $Path
+            Recurse     = $true
+            Force       = $true
+            File        = $true
+            ErrorAction = 'SilentlyContinue'
+        }
+        if (-not $Full) { $gciParams['Depth'] = $Depth - 1 }
+        $items = Get-ChildItem @gciParams
         foreach ($item in $items) { $total += $item.Length }
     } catch {
         # A hard failure enumerating this one subfolder (e.g. access denied
@@ -76,10 +111,14 @@ try {
         exit 0
     }
 
-    Write-DevKitStep "Measuring $($subfolders.Count) subfolder(s) (this can take a while)"
+    if ($Full) {
+        Write-DevKitStep "Measuring $($subfolders.Count) subfolder(s) FULLY recursive (this can take a while)"
+    } else {
+        Write-DevKitStep "Measuring $($subfolders.Count) subfolder(s) to depth $Depth (this can take a while; pass -Full for exact recursive sizes)"
+    }
     $results = @()
     foreach ($folder in $subfolders) {
-        $size = Get-DevKitFolderSize -Path $folder.FullName
+        $size = Get-DevKitFolderSize -Path $folder.FullName -Depth $Depth -Full:$Full
         $results += [PSCustomObject]@{ Path = $folder.FullName; Bytes = $size }
     }
     Write-DevKitDone
@@ -99,6 +138,9 @@ try {
 
     Write-Host ""
     Write-Host ("  Total across {0} subfolder(s): {1}" -f $results.Count, (Format-DevKitByteSize $totalBytes)) -ForegroundColor Green
+    if (-not $Full) {
+        Write-DevKitInfo "Sizes measured to depth $Depth - deeper content is excluded (pass -Full for exact recursive totals)."
+    }
 
     exit 0
 } catch {

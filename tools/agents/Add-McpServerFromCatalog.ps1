@@ -21,6 +21,13 @@
     can't sustain) just prints its Description - which already contains a
     docs pointer - and exits without attempting any registration.
 
+    Note: this is an INTERACTIVE tool - a browsable picker, variant
+    prompts, and Read-Host inputs throughout - with no script parameters
+    to supply those answers non-interactively. It is not suitable for the
+    Control Center's headless Run dialog (which spawns tools
+    -NonInteractive with stdin closed); run it from the CLI menu, the
+    embedded terminal, or a real PowerShell window instead.
+
     Created by Northstar Software Development
     Website: https://www.northstarcoding.com
 .PARAMETER Force

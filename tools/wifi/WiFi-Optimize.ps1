@@ -40,7 +40,16 @@ param(
 $CommonModule = Join-Path (Join-Path (Split-Path -Parent $PSScriptRoot) "lib") "DevKit-Common.ps1"
 if (Test-Path $CommonModule) { . $CommonModule }
 
-$DnsBackupPath = Join-Path $env:TEMP "DevKit-WiFi-DnsBackup.json"
+# The DNS undo backup lives under %LOCALAPPDATA%\NorthstarDevKit\ - NOT
+# %TEMP%: DevKit's own junk wipers (Close-OutSession, Clear-DiskJunk) empty
+# TEMP, which used to destroy this backup and leave -RestoreDns with nothing
+# to restore. %LOCALAPPDATA%\NorthstarDevKit\ is DevKit's persistent state
+# dir (settings.json, projects.json), so it survives cleanup.
+$DnsBackupDir = Join-Path $env:LOCALAPPDATA "NorthstarDevKit"
+$DnsBackupPath = Join-Path $DnsBackupDir "DevKit-WiFi-DnsBackup.json"
+# Pre-migration backups were written to %TEMP% - -RestoreDns falls back to
+# this path when the new one has nothing yet.
+$LegacyDnsBackupPath = Join-Path $env:TEMP "DevKit-WiFi-DnsBackup.json"
 
 # Admin check
 if (-not (Test-DevKitAdmin)) {
@@ -128,8 +137,17 @@ if ($RestoreDns) {
     Write-Host "     https://www.northstarcoding.com" -ForegroundColor Gray
     Write-Host ""
 
+    # Migration: backups written before the move out of %TEMP% are still
+    # honored, so an existing user's undo path is not lost to a TEMP wipe.
+    if (-not (Test-Path $DnsBackupPath) -and (Test-Path $LegacyDnsBackupPath)) {
+        Write-DevKitInfo "Using the pre-migration backup at $LegacyDnsBackupPath (new location: $DnsBackupPath)."
+        $DnsBackupPath = $LegacyDnsBackupPath
+    }
+
     if (-not (Test-Path $DnsBackupPath)) {
-        Write-DevKitError "No DNS backup found at: $DnsBackupPath"
+        Write-DevKitError "No DNS backup found - checked both:"
+        Write-DevKitInfo "  $DnsBackupPath"
+        Write-DevKitInfo "  $LegacyDnsBackupPath (pre-migration location)"
         Write-DevKitInfo "Nothing to restore automatically. To reset DNS to automatic (DHCP) manually, run:"
         Write-DevKitInfo "  Set-DnsClientServerAddress -InterfaceIndex <n> -ResetServerAddresses"
         # Every "Press Enter to exit" in this script is guarded like this:
@@ -308,6 +326,9 @@ if (-not $KeepDNS) {
         # so -RestoreDns (or a manual Set-DnsClientServerAddress -ResetServerAddresses)
         # can undo this. Without this, DNS changes were previously a one-way door.
         try {
+            if (-not (Test-Path -LiteralPath $DnsBackupDir)) {
+                New-Item -ItemType Directory -Path $DnsBackupDir -Force | Out-Null
+            }
             $backupV4 = Get-DnsClientServerAddress -InterfaceIndex $adapter.InterfaceIndex -AddressFamily IPv4 -ErrorAction Stop
             $backupV6 = Get-DnsClientServerAddress -InterfaceIndex $adapter.InterfaceIndex -AddressFamily IPv6 -ErrorAction Stop
             $dnsBackup = [PSCustomObject]@{

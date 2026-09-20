@@ -62,8 +62,30 @@ $removeFailed = $false
 $removeErrorMessage = $null
 $removeExitCode = $null
 $output = $null
+
+# NOT a bare `claude` call: npm installs of Claude Code ship claude.ps1 /
+# claude.cmd / an extension-less POSIX shim side by side, and a bare call
+# lets PowerShell pick the .ps1 or shim - which CreateProcess cannot launch,
+# so the fallback ShellExecute pops a real "Select an app to open" Windows
+# dialog and hangs the run (the repo's documented 3.1 incident). The safe
+# resolver's doc comment in tools/lib/DevKit-Common.ps1 explains the hazard;
+# lib/DevKit-McpList.ps1 (Invoke-DevKitMcpList) has the full pattern.
+$claudeCmd = $null
+if (Get-Command Get-DevKitWindowsExecutable -ErrorAction SilentlyContinue) {
+    $claudeCmd = Get-DevKitWindowsExecutable -Name 'claude'
+}
+if (-not $claudeCmd) {
+    Write-DevKitError "'claude' was not found on PATH, or only resolves to a non-Windows shim that cannot be launched directly."
+    exit 1
+}
+
 try {
-    $output = claude mcp remove $Name 2>&1
+    if ($claudeCmd.CommandType -eq 'Application') {
+        $output = & $claudeCmd.Source mcp remove $Name 2>&1
+    } else {
+        # A profile-defined function or alias - runnable in-process only.
+        $output = & $claudeCmd mcp remove $Name 2>&1
+    }
     $removeExitCode = $LASTEXITCODE
 } catch {
     $removeFailed = $true

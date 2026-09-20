@@ -156,4 +156,28 @@ SSID 1 : Mr.Robot
         $results.Count | Should -Be 1
         $results[0].SSID | Should -Be "Mr.Robot"
     }
+
+    It "parses a network block that has no Authentication line, and stays PadRight-safe" {
+        # Some netsh output shapes/locales omit the Authentication line -
+        # Auth must come back unset rather than crashing the display code's
+        # $net.Auth.PadRight(18) (which a $null .Auth would).
+        $noAuthOutput = @"
+Interface name : Wi-Fi
+There are 1 networks currently visible.
+
+SSID 1 : HiddenNet
+    Network type            : Infrastructure
+    BSSID 1                 : aa:bb:cc:dd:ee:ff
+         Signal             : 70%
+         Channel             : 6
+
+"@ -replace "`r?`n", "`r`n"
+
+        $results = ConvertFrom-DevKitWlanScan -RawOutput $noAuthOutput
+        $results.Count | Should -Be 1
+        $results[0].SSID | Should -Be "HiddenNet"
+        $results[0].Auth | Should -BeNullOrEmpty
+        # The exact expression the display loop uses - must not throw.
+        { ([string]$results[0].Auth).PadRight(18) } | Should -Not -Throw
+    }
 }

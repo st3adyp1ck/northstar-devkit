@@ -29,7 +29,12 @@ param(
 )
 
 $CommonModule = Join-Path (Join-Path (Split-Path -Parent $PSScriptRoot) "lib") "DevKit-Common.ps1"
-if (Test-Path $CommonModule) { . $CommonModule }
+if (Test-Path $CommonModule) {
+    . $CommonModule
+} else {
+    Write-Host "ERROR: Required module not found: $CommonModule" -ForegroundColor Red
+    exit 1
+}
 
 try {
     $targetPath = Resolve-DevKitDirectory -Path $Path
@@ -78,7 +83,17 @@ Invoke-DevKitInDirectory -Path $targetPath -ScriptBlock {
         $env:NEXT_TELEMETRY_DISABLED = "1"
 
         $devArgs = @("run", "dev")
-        if ($Port -gt 0) { $devArgs += @("--", "--port", $Port) }
+        if ($Port -gt 0) {
+            # npm strips a literal '--' before forwarding args; pnpm tolerates
+            # it; yarn and bun forward verbatim, where a stray '--' can be
+            # parsed by next dev (Commander) as end-of-options and swallow
+            # the port - so only npm/pnpm get the separator.
+            if ($manager.Command -in @('npm', 'pnpm')) {
+                $devArgs += @("--", "--port", $Port)
+            } else {
+                $devArgs += @("--port", $Port)
+            }
+        }
 
         & $manager.Command @devArgs
     } catch {

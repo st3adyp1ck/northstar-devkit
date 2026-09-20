@@ -102,7 +102,8 @@ function Request-DevKitElevation {
 if ($Machine -and -not $isAdmin) {
     Write-Host "  ERROR: Editing system PATH requires Administrator privileges.`n" -ForegroundColor Red
 
-    $elevate = Read-Host "  Relaunch this script elevated now? (y/n)"
+    # Headless guard: no console to answer - skip the relaunch offer.
+    $elevate = if (Test-DevKitCanPrompt) { Read-Host "  Relaunch this script elevated now? (y/n)" } else { 'n' }
     if ($elevate -eq 'y') {
         $relaunchArgs = @('-Machine')
         if ($Show) { $relaunchArgs += '-Show' }
@@ -140,12 +141,17 @@ if ($Show) {
         Write-Host $entry -ForegroundColor $color
     }
 
-    # Show duplicates
-    $duplicates = $pathEntries | Group-Object | Where-Object { $_.Count -gt 1 }
+    # Show duplicates. Grouping key matches Get-DevKitDedupedPathEntries'
+    # normalization (trim + strip one trailing '\' + case-fold), so -Show
+    # flags exactly what -Clean would remove - a PATH differing only by
+    # case or a trailing backslash IS a duplicate as far as -Clean is
+    # concerned, and the two views must not disagree.
+    $duplicates = $pathEntries | Group-Object -Property { $_.Trim().TrimEnd('\').ToLowerInvariant() } | Where-Object { $_.Count -gt 1 }
     if ($duplicates) {
         Write-Host "`n  WARNING: Duplicate entries found:" -ForegroundColor Yellow
         $duplicates | ForEach-Object {
-            Write-Host "    - $($_.Name) ($($_.Count) times)" -ForegroundColor Red
+            # .Name is the folded key; show the original first-seen entry.
+            Write-Host "    - $($_.Group[0]) ($($_.Count) times)" -ForegroundColor Red
         }
     }
     
@@ -162,7 +168,15 @@ if ($Add) {
     }
     
     $fullPath = $newPath.Path
-    if ($pathEntries -contains $fullPath) {
+    # Case-insensitive + trailing-slash-insensitive, matching -Clean's
+    # dedupe key - adding "C:\Tools" when "c:\tools\" is already there
+    # would create a duplicate -Clean then removes.
+    $addKey = $fullPath.Trim().TrimEnd('\').ToLowerInvariant()
+    $alreadyPresent = $false
+    foreach ($existing in $pathEntries) {
+        if ($existing.Trim().TrimEnd('\').ToLowerInvariant() -eq $addKey) { $alreadyPresent = $true; break }
+    }
+    if ($alreadyPresent) {
         Write-Host "  WARNING: Path already exists in PATH.`n" -ForegroundColor Yellow
         exit 0
     }
@@ -187,7 +201,13 @@ if ($Remove) {
             exit 1
         }
         $removed = $pathEntries[$index]
-        $newEntries = $pathEntries | Where-Object { $_ -ne $removed }
+        # Remove EXACTLY the indexed entry: a -ne filter would drop every
+        # entry equal to it, including legitimate duplicates at other
+        # indices (PATH may hold the same dir twice on purpose).
+        $newEntries = @()
+        for ($i = 0; $i -lt $pathEntries.Count; $i++) {
+            if ($i -ne $index) { $newEntries += $pathEntries[$i] }
+        }
     } else {
         # Treat as pattern
         $pattern = $Remove
@@ -204,6 +224,11 @@ if ($Remove) {
     Write-Host "    $removed" -ForegroundColor Gray
 
     if (-not $Force) {
+        # Headless guard: decline cleanly instead of throwing on Read-Host.
+        if (-not (Test-DevKitCanPrompt)) {
+            Write-DevKitInfo "Cannot prompt for confirmation in a non-interactive session - nothing was removed. Re-run with -Force to skip the prompt."
+            exit 0
+        }
         $confirmRemove = Read-Host "  Continue? (y/n)"
         if ($confirmRemove -ne 'y') {
             Write-Host "  Cancelled.`n" -ForegroundColor Gray
@@ -241,6 +266,11 @@ if ($Clean) {
     Write-Host "`n  Summary: entries before $($pathEntries.Count), after cleanup $($validEntries.Count) ($removedCount to remove)." -ForegroundColor Yellow
 
     if (-not $Force) {
+        # Headless guard: decline cleanly instead of throwing on Read-Host.
+        if (-not (Test-DevKitCanPrompt)) {
+            Write-DevKitInfo "Cannot prompt for confirmation in a non-interactive session - nothing was cleaned. Re-run with -Force to skip the prompt."
+            exit 0
+        }
         $confirmClean = Read-Host "  Apply cleanup to $target PATH? (y/n)"
         if ($confirmClean -ne 'y') {
             Write-Host "  Cancelled.`n" -ForegroundColor Gray
@@ -307,7 +337,7 @@ while ($true) {
             $resolved = Resolve-Path -LiteralPath $newPath -ErrorAction SilentlyContinue
             if (-not $resolved) {
                 Write-Host "  ERROR: Path does not exist.`n" -ForegroundColor Red
-            } elseif ($pathEntries -contains $resolved.Path) {
+            } elseif ($pathEntries | Where-Object { $_.Trim().TrimEnd('\').ToLowerInvariant() -eq $resolved.Path.Trim().TrimEnd('\').ToLowerInvariant() }) {
                 Write-Host "  WARNING: Path already exists.`n" -ForegroundColor Yellow
             } else {
                 $newPathString = if ([string]::IsNullOrEmpty($currentPath)) { $resolved.Path } else { $currentPath + ";" + $resolved.Path }
@@ -325,7 +355,12 @@ while ($true) {
 
                 $confirmRemove = if ($Force) { 'y' } else { Read-Host "  Remove this entry from $target PATH? (y/n)" }
                 if ($confirmRemove -eq 'y') {
-                    $newEntries = $pathEntries | Where-Object { $_ -ne $entryToRemove }
+                    # Remove EXACTLY the indexed entry, not every entry
+                    # equal to it (same rule as -Remove above).
+                    $newEntries = @()
+                    for ($i = 0; $i -lt $pathEntries.Count; $i++) {
+                        if ($i -ne $parsedIdx) { $newEntries += $pathEntries[$i] }
+                    }
                     $newPathString = $newEntries -join ';'
                     [Environment]::SetEnvironmentVariable("PATH", $newPathString, $target)
                     Write-Host "  DONE: Entry removed.`n" -ForegroundColor Green
@@ -364,7 +399,8 @@ while ($true) {
             $newTarget = if ($target -eq 'User') { 'Machine' } else { 'User' }
             if ($newTarget -eq 'Machine' -and -not $isAdmin) {
                 Write-Host "  ERROR: Admin required for Machine PATH.`n" -ForegroundColor Red
-                $elevate = Read-Host "  Relaunch this editor elevated now? (y/n)"
+                # Headless guard: no console to answer - skip the relaunch offer.
+                $elevate = if (Test-DevKitCanPrompt) { Read-Host "  Relaunch this editor elevated now? (y/n)" } else { 'n' }
                 if ($elevate -eq 'y') {
                     if (Request-DevKitElevation -ExtraArgs @('-Machine')) {
                         Write-Host "  Relaunched elevated. Exiting this session.`n" -ForegroundColor Green
