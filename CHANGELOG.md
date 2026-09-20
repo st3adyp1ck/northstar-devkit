@@ -2,6 +2,115 @@
 
 All notable changes to Northstar DevKit are documented here.
 
+## [4.6.0] - 2026-09-20
+
+The full-review release: every surface (widget, Control Center, CLI, RPC
+sidecar, and all ~65 tool scripts) went through a functionality, UX,
+performance, and lifecycle review; every finding was fixed, then an
+adversarial re-review of the fixes caught and fixed a second wave
+(including reverting a `gh -c` stall guard that would have broken the
+GitHub panels, and closing an atomicity hole in the new tool-lane gate).
+Test counts grew with the work: Pester 573 -> 614, cargo 16 -> 21,
+vitest 68 -> 73.
+
+### Added
+
+- **Control Center tools that take a file now get a real file picker.**
+  `RequiresFile` manifests (today: Restore Environment Variables) render
+  a validated text field with a Browse button backed by the native file
+  dialog - Restore Environment Variables previously could not succeed
+  from the Run dialog at all.
+- **Run history keeps running tools visible and stoppable.** Closing the
+  Run dialog (or Stop watching) no longer orphans an in-flight tool:
+  live runs stay in history with a Stop button, finished rows show their
+  exit state (including "cancelled"), and applied staticArgs show as
+  read-only chips.
+- **A second tool run while one is active now fails fast.** `tool.run` is
+  single-flighted in the sidecar (`toolLaneBusy` error) instead of
+  queuing silently behind a never-ending dev server - which is also the
+  guard between the embedded tray and the standalone Control Center both
+  launching at once.
+- **CLI navigation and input catch up to a real TUI**: j/k,
+  PageUp/PageDown, Home/End, `q` to go back, editable text prompts
+  (cursor, Home/End, Delete, bracketed paste), a "Loading catalog…"
+  first paint, a 120s hang deadline plus stderr surfacing on the file
+  picker, and a TTY gate so piped invocations get a useful error instead
+  of escape codes.
+- **Broken tool categories surface instead of vanishing.** `catalog.get`
+  carries a `loadErrors` list and the Control Center shows a dismissible
+  banner naming what failed to load.
+- **MCP status honesty in the widget**: the claude MCP parser classifies
+  only the status portion (a server URL containing "error" no longer
+  badges a healthy server disconnected, and genuine "Disconnected"/"Not
+  connected" phrasings no longer badge green).
+
+### Changed
+
+- **Batch wrappers' Windows PowerShell fallback actually works.** All 66
+  wrappers used a nested `%ERRORLEVEL%` test that cmd expands at parse
+  time, so machines without pwsh 7 reported "No PowerShell found" and
+  quit; they now use the conditional-execution pattern (and 21 wrappers
+  got their missing trailing newline back).
+- **The sidecar is hardened end to end**: UTF-8 console encoding at boot,
+  lossy per-line decoding on both streams (one non-ASCII line from the
+  powershell.exe 5.1 OEM fallback can no longer kill the sidecar into a
+  respawn loop), bounded stdin writes with generation teardown, an
+  interruptible shutdown backoff, a lane-health probe that respawns the
+  process if a lane faults, and instant-wake request handling.
+- **Polled read-only collectors moved to the metrics lane** (top CPU/
+  memory processes, directory enumeration) so a slow enumeration no
+  longer stalls `tool.stop` or settings writes.
+- **Terminal sessions are owned and reaped**: sessions carry their window
+  label, die with their window (tray-hide deliberately doesn't kill
+  them), an idle reaper sweeps sessions silent for ~6h, output
+  reassembles split multi-byte characters without transient replacement
+  glyphs, and one stalled child can no longer block the other sessions.
+- **Environment backups no longer default into your git repo**: Env-Backup
+  writes to `%LOCALAPPDATA%\NorthstarDevKit\backups` and no longer
+  requires a linked project; the WiFi DNS undo backup moved there too
+  (the old `%TEMP%` file is still honored as a fallback).
+- **Junction-safe temp wipes**: Close-Out Session and Clear Disk Junk no
+  longer follow reparse points on Windows PowerShell 5.1 (which could
+  delete content outside the temp tree) and abort honestly if the mirror
+  pass hard-fails.
+- **Dead RPC surface removed** (the junk-dial collectors had no callers);
+  `catalog.json` snapshot regenerated. Docker QuickLogs and Clear NPM
+  Cache lost their caution flags (read-only / regenerable cache); Git
+  StatusAll scans with one porcelain call and prunes `.git`/`.venv`
+  before descending; Vite/Next dev servers forward `-Port` correctly
+  under bun (no stray `--`).
+
+### Fixed
+
+- **A minimized Control Center can be surfaced again** - tray, palette,
+  and DEVKIT-button paths previously no-oped on an iconic window, and
+  toggling it could hide a minimized window.
+- **Exit no longer waits out a crash-looping sidecar's backoff**; a shown
+  window always emits its visibility event even when Windows refuses
+  focus; a sidecar that stops reading stdin can no longer wedge every
+  later call indefinitely.
+- **Bare `claude`/`code`/`cursor` invocations** in the MCP and launcher
+  tools now resolve through the defensive executable resolver (the
+  ShellExecute "Select an app" hang class from the old `gh` incident).
+- **Edit-Path** removes exactly the indexed entry (not every duplicate),
+  and its duplicate checks are case-insensitive everywhere. **Docker
+  Cleanup** stops claiming "nothing to clean" when gigabytes of build
+  cache are reclaimable.
+- **Unguarded prompts across the toolkit** (system env/hosts/path editors,
+  Vite build/dev continue prompts, Scan-McpServers' add loop,
+  Close-Out/Edit-Path elevation offers) now decline cleanly under the
+  headless runner instead of throwing; Start-PackageScript gained a
+  required `-Name` prompt so it works from the Run dialog.
+- **Misc**: the DNS undo backup survives DevKit's own temp wipes;
+  Open-Repo URL-encodes branch names (plus the Azure DevOps deep link a
+  variable-parse quirk silently broke); Copy-EnvTemplate parses
+  `export KEY=` lines; WiFi Scan tolerates network blocks without an
+  Authentication line; the Error Center's quiet-machine check no longer
+  depends on an English Windows; Kimi auth detection reads User-scope
+  environment variables; `settings.set` rejects malformed payloads
+  instead of corrupting settings.json; routine lane-busy refusals no
+  longer land in the Error Center.
+
 ## [4.5.1] - 2026-09-19
 
 ### Fixed
