@@ -147,10 +147,19 @@ Describe "Test-DevKitBenignSidecarLine" {
         Test-DevKitBenignSidecarLine -Message '[devkit-rpc] child stdin detached (STD_INPUT_HANDLE -> inheritable NUL)' | Should -BeTrue
     }
 
+    It "recognizes the guarded boot fallbacks (would otherwise warn on every launch)" {
+        Test-DevKitBenignSidecarLine -Message '[devkit-rpc] WARNING: could not open NUL; child spawns may be slow' | Should -BeTrue
+        Test-DevKitBenignSidecarLine -Message '[devkit-rpc] WARNING: stdin detach failed (Access is denied); child spawns may be slow' | Should -BeTrue
+    }
+
+    It "recognizes request/response race chatter, not faults" {
+        Test-DevKitBenignSidecarLine -Message '[devkit-rpc] malformed request line, ignored: {' | Should -BeTrue
+        Test-DevKitBenignSidecarLine -Message '[devkit-rpc][mcp] response for request 9 dropped - output queue already closed (shutdown race)' | Should -BeTrue
+    }
+
     It "does NOT swallow a real sidecar fault" {
         Test-DevKitBenignSidecarLine -Message '[devkit-rpc][work] FAILED to initialize after 12ms: boom' | Should -BeFalse
-        Test-DevKitBenignSidecarLine -Message '[devkit-rpc][mcp] response for request 9 dropped - output queue already closed' | Should -BeFalse
-        Test-DevKitBenignSidecarLine -Message '[devkit-rpc] malformed request line, ignored: {' | Should -BeFalse
+        Test-DevKitBenignSidecarLine -Message '[devkit-rpc] lane ''work'' died unexpectedly; exiting non-zero so the host respawns a healthy sidecar' | Should -BeFalse
     }
 
     It "is false for empty input" {
@@ -308,7 +317,11 @@ Describe "ConvertFrom-DevKitAppLogText filtering and folding" {
     It "does not mistake an ordinary sidecar diagnostic for a stack frame" {
         $text = @(
             (New-TestLogLine -Target 'devkit_sidecar_stderr' -Message '[devkit-rpc][work] FAILED to initialize after 12ms: boom')
-            (New-TestLogLine -Target 'devkit_sidecar_stderr' -Message '[devkit-rpc] malformed request line, ignored: {')
+            # Not a continuation, and deliberately NOT benign either: the
+            # 'malformed request line' diagnostic used here before is now
+            # filtered upstream as routine chatter, which would drop this
+            # record and flip the count this test asserts.
+            (New-TestLogLine -Target 'devkit_sidecar_stderr' -Message "[devkit-rpc] lane 'work' died unexpectedly; exiting non-zero so the host respawns a healthy sidecar")
         ) -join "`n"
         @(ConvertFrom-DevKitAppLogText -Text $text).Count | Should -Be 2
     }
@@ -444,6 +457,45 @@ Describe "Get-DevKitKnownTransientEventNote" {
         Get-DevKitKnownTransientEventNote -Provider 'Perflib-ish' -EventId 1023 | Should -BeNullOrEmpty
         Get-DevKitKnownTransientEventNote -Provider '' -EventId 1023 | Should -BeNullOrEmpty
         Get-DevKitKnownTransientEventNote -Provider 'Perflib' -EventId $null | Should -BeNullOrEmpty
+    }
+}
+
+Describe "Test-DevKitWinEventNoMatch" {
+
+    BeforeAll {
+        function New-TestWinEventError {
+            param(
+                [string]$FullyQualifiedErrorId,
+                [string]$Message
+            )
+            return [System.Management.Automation.ErrorRecord]::new(
+                [System.Exception]::new($Message),
+                $FullyQualifiedErrorId,
+                [System.Management.Automation.ErrorCategory]::ObjectNotFound,
+                $null)
+        }
+    }
+
+    It "recognizes the no-match error by its identity, whatever the message language" {
+        # The point of the fix: FullyQualifiedErrorId is NOT localized, so a
+        # non-English Windows reporting a healthy empty Event Log must still
+        # read as "quiet machine", not "collector failure".
+        $e = New-TestWinEventError -FullyQualifiedErrorId 'NoMatchingEventsFound,Microsoft.PowerShell.Commands.GetWinEventCommand' -Message 'Es wurden keine Ereignisse gefunden, die den angegebenen Auswahlkriterien entsprechen.'
+        Test-DevKitWinEventNoMatch -ErrorRecord $e | Should -BeTrue
+    }
+
+    It "keeps the English message check as a fallback for hosts with a different error id" {
+        $e = New-TestWinEventError -FullyQualifiedErrorId 'SomeOtherError,Microsoft.PowerShell.Commands.GetWinEventCommand' -Message 'No events were found that match the specified selection criteria.'
+        Test-DevKitWinEventNoMatch -ErrorRecord $e | Should -BeTrue
+    }
+
+    It "is false for a genuine event-log failure, whatever the message language" {
+        $e = New-TestWinEventError -FullyQualifiedErrorId 'SystemUnauthorizedAccessException,Microsoft.PowerShell.Commands.GetWinEventCommand' -Message 'Es wurden keine Ereignisse gefunden, die den angegebenen Auswahlkriterien entsprechen.'
+        Test-DevKitWinEventNoMatch -ErrorRecord $e | Should -BeFalse
+    }
+
+    It "is false for a null record" {
+        Test-DevKitWinEventNoMatch -ErrorRecord $null | Should -BeFalse
     }
 }
 

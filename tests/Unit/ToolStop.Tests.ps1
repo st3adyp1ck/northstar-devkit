@@ -47,6 +47,24 @@ BeforeAll {
         { param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Get-DevKitRpcLaneForMethod' },
         $true)
     . ([scriptblock]::Create($laneFn.Extent.Text))
+    # Same for the tool.run occupancy-gate frame builder; it needs the
+    # protocol helpers (New-DevKitRpcFailure), which dot-source cleanly.
+    $global:DevKitRpcProtocolLoaded = $false
+    . (Join-Path $script:RepoRoot 'core\RpcProtocol.ps1')
+    $refusalFn = $rpcAst.Find(
+        { param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Get-DevKitToolRunRefusal' },
+        $true)
+    . ([scriptblock]::Create($refusalFn.Extent.Text))
+    # The single-flight claim helper is self-contained (no protocol deps).
+    $slotFn = $rpcAst.Find(
+        { param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Request-DevKitToolLaneSlot' },
+        $true)
+    . ([scriptblock]::Create($slotFn.Extent.Text))
+    # The refusal frame builder that Get-DevKitToolRunRefusal delegates to.
+    $busyFn = $rpcAst.Find(
+        { param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'New-DevKitToolLaneBusyFailure' },
+        $true)
+    . ([scriptblock]::Create($busyFn.Extent.Text))
 
     $script:Base = [datetime]'2026-08-26T10:00:00'
 
@@ -325,6 +343,25 @@ Describe "the tool-run registry" {
         $script:Registry.ContainsKey('run-1') | Should -BeFalse
     }
 
+    It "with -Entry, removes the slot only when it still holds the caller's own entry" {
+        $entry = Register-DevKitToolRun -Registry $script:Registry -RunId 'run-1' -Process (Get-Process -Id $PID)
+        Unregister-DevKitToolRun -Registry $script:Registry -RunId 'run-1' -Entry $entry
+        $script:Registry.ContainsKey('run-1') | Should -BeFalse
+    }
+
+    It "with -Entry, leaves a reused runId's NEW entry untouched when the OLD run's finally runs" {
+        # The overwrite in Register is deliberate (the registry must point at
+        # the LIVE process); the fix is that the old run's cleanup must not
+        # then delete the new run's entry and make it invisible to tool.stop.
+        $first = Register-DevKitToolRun -Registry $script:Registry -RunId 'run-1' -Process (Get-Process -Id $PID)
+        $second = Register-DevKitToolRun -Registry $script:Registry -RunId 'run-1' -Process (Get-Process -Id $PID)
+        Unregister-DevKitToolRun -Registry $script:Registry -RunId 'run-1' -Entry $first
+        $script:Registry.ContainsKey('run-1') | Should -BeTrue
+        $script:Registry['run-1'] | Should -Be $second
+        Unregister-DevKitToolRun -Registry $script:Registry -RunId 'run-1' -Entry $second
+        $script:Registry.ContainsKey('run-1') | Should -BeFalse
+    }
+
     It "tolerates a missing registry so this file stays runnable outside a lane" {
         { Register-DevKitToolRun -Registry $null -RunId 'run-1' -Process (Get-Process -Id $PID) } | Should -Not -Throw
         { Unregister-DevKitToolRun -Registry $null -RunId 'run-1' } | Should -Not -Throw
@@ -401,5 +438,89 @@ Describe "Get-DevKitRpcLaneForMethod (lifted from Invoke-DevKitRpc.ps1)" {
         Get-DevKitRpcLaneForMethod -Method 'git.overview' | Should -Be 'slow'
         Get-DevKitRpcLaneForMethod -Method 'github.prs' | Should -Be 'slow'
         Get-DevKitRpcLaneForMethod -Method 'settings.get' | Should -Be 'work'
+    }
+
+    It "routes the 3s-polled gauge top-process collectors to the metrics lane" {
+        # Get-DevKitTopCpuProcesses samples a ~1s window and the gauges flyout
+        # polls both every 3s - on 'work' they would starve tool.stop,
+        # settings.set, notes.save and process.kill behind them.
+        Get-DevKitRpcLaneForMethod -Method 'process.topCpu' | Should -Be 'metrics'
+        Get-DevKitRpcLaneForMethod -Method 'process.topMemory' | Should -Be 'metrics'
+    }
+
+    It "routes the Files panel's read-only directory enumeration to the metrics lane" {
+        # files.children is polled UI browsing, not an interactive action - a
+        # large listing on 'work' would sit in front of settings saves and
+        # note writes.
+        Get-DevKitRpcLaneForMethod -Method 'files.children' | Should -Be 'metrics'
+    }
+}
+
+Describe "single-flight tool-lane gate" {
+
+    BeforeEach {
+        $script:Gate = [System.Collections.Concurrent.ConcurrentDictionary[string, string]]::new()
+    }
+
+    It "admits the first request and refuses a second with no intervening release" {
+        # The two-windows simultaneous-launch case: two consecutive gate
+        # calls before any lane dequeues must NOT both succeed (that was the
+        # spawn-window race - RunRegistry stays empty until Process.Start).
+        $first = Request-DevKitToolLaneSlot -Gate $script:Gate
+        $first | Should -Not -BeNullOrEmpty
+        Request-DevKitToolLaneSlot -Gate $script:Gate | Should -BeNullOrEmpty
+    }
+
+    It "admits a new request once the previous run released the slot" {
+        $first = Request-DevKitToolLaneSlot -Gate $script:Gate
+        Release-DevKitToolLaneSlot -Gate $script:Gate -Token $first
+        Request-DevKitToolLaneSlot -Gate $script:Gate | Should -Not -BeNullOrEmpty
+    }
+
+    It "release is ownership-checked: a foreign token leaves the slot alone" {
+        $first = Request-DevKitToolLaneSlot -Gate $script:Gate
+        Release-DevKitToolLaneSlot -Gate $script:Gate -Token 'not-the-claim'
+        $script:Gate.ContainsKey('active') | Should -BeTrue
+        Release-DevKitToolLaneSlot -Gate $script:Gate -Token $first
+        $script:Gate.ContainsKey('active') | Should -BeFalse
+    }
+
+    It "a denied request leaves no slot behind" {
+        # Refusal path: the TryAdd failed, so the gate must still hold the
+        # ORIGINAL claim - nothing was overwritten or removed.
+        $first = Request-DevKitToolLaneSlot -Gate $script:Gate
+        Request-DevKitToolLaneSlot -Gate $script:Gate | Should -BeNullOrEmpty
+        $script:Gate['active'] | Should -Be $first
+    }
+
+    It "tolerates a null gate (dot-sourced outside a lane)" {
+        { Release-DevKitToolLaneSlot -Gate $null -Token 'x' } | Should -Not -Throw
+        Request-DevKitToolLaneSlot -Gate $null | Should -Not -BeNullOrEmpty
+    }
+}
+
+Describe "Get-DevKitToolRunRefusal (lifted from Invoke-DevKitRpc.ps1)" {
+
+    BeforeEach {
+        $script:RefusalRegistry = [System.Collections.Concurrent.ConcurrentDictionary[string, object]]::new()
+    }
+
+    It "is null when no run is active - the normal path is unchanged" {
+        Get-DevKitToolRunRefusal -Registry $script:RefusalRegistry -Id 1 | Should -BeNullOrEmpty
+    }
+
+    It "refuses with the exact toolLaneBusy contract while a run is active" {
+        $script:RefusalRegistry['run-1'] = [hashtable]::Synchronized(@{ RunId = 'run-1' })
+        $f = Get-DevKitToolRunRefusal -Registry $script:RefusalRegistry -Id 42
+        $f.ok | Should -BeFalse
+        $f.id | Should -Be 42
+        $f.error.kind | Should -Be 'toolLaneBusy'
+        $f.error.message | Should -Be 'Another DevKit tool is already running. Wait for it to finish or stop it first.'
+        # Exactly the two contract keys - no detail field.
+        @($f.error.Keys) | Should -Be @('kind', 'message')
+    }
+
+    It "tolerates a null registry (dot-sourced outside a lane, e.g. Pester)" {
+        Get-DevKitToolRunRefusal -Registry $null -Id 1 | Should -BeNullOrEmpty
     }
 }

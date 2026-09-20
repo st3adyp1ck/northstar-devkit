@@ -8,8 +8,10 @@
 
       - errors.system      Windows Event Log Critical/Error entries. Same
                            Get-WinEvent FilterHashtable approach - and the
-                           same defensive posture about "No events were
-                           found" being a NORMAL outcome - as
+                           same defensive posture about "no matching events"
+                           being a NORMAL outcome, detected by the error
+                           record's identity so non-English Windows stays
+                           quiet - as
                            tools/maintenance/Get-RecentEventErrors.ps1.
                            Confirmed transient host-OS events are DEMOTED
                            to warning with a "what to do" note, never
@@ -334,6 +336,29 @@ function ConvertTo-DevKitSystemErrorEntry {
             -Timestamp $timeCreated -Title $title -Detail $detail -Origin $provider -Meta $meta)
 }
 
+function Test-DevKitWinEventNoMatch {
+    <#
+    .SYNOPSIS
+        $true when a Get-WinEvent error record means "the filter matched
+        nothing" - the normal quiet-machine outcome, not a failure.
+    .DESCRIPTION
+        Matched on the error record's IDENTITY (FullyQualifiedErrorId), which
+        Windows never localizes, because the message text IS localized: on a
+        non-English Windows a healthy empty Event Log would otherwise surface
+        as a bogus "could not read the Event Log" warning row. The English
+        message check is kept as a fallback for hosts whose error id differs.
+    #>
+    param($ErrorRecord)
+
+    if ($null -eq $ErrorRecord) { return $false }
+    $fqid = ''
+    try { $fqid = [string]$ErrorRecord.FullyQualifiedErrorId } catch { $fqid = '' }
+    if ($fqid -match '^NoMatchingEventsFound') { return $true }
+    $message = ''
+    try { $message = [string]$ErrorRecord.Exception.Message } catch { $message = '' }
+    return ($message -match 'No events were found')
+}
+
 function Get-DevKitSystemErrors {
     <#
     .SYNOPSIS
@@ -368,8 +393,10 @@ function Get-DevKitSystemErrors {
     } catch {
         # Get-WinEvent THROWS (rather than returning an empty collection)
         # when the filter matches nothing - that is the normal quiet-machine
-        # outcome, not a failure. Everything else genuinely failed.
-        if ($_.Exception.Message -match 'No events were found') { return @() }
+        # outcome, not a failure (identity-based, so it works on non-English
+        # Windows too - see Test-DevKitWinEventNoMatch). Everything else
+        # genuinely failed.
+        if (Test-DevKitWinEventNoMatch -ErrorRecord $_) { return @() }
         return @(New-DevKitErrorNote -Origin 'errors.system' `
                 -Title 'Could not read the Windows Event Log' `
                 -Detail "Get-WinEvent failed: $($_.Exception.Message)")
@@ -422,6 +449,17 @@ $script:DevKitBenignSidecarPatterns = @(
     # fix) reports success at every startup - lifecycle chatter, not a fault.
     '^\[devkit-rpc\] child stdin detached\b'
     '^\[devkit-rpc\]\[[a-z]+\] ready after\b'
+    # Best-effort boot paths and their failure fallbacks (the sidecar keeps
+    # the old slow-but-correct behavior when NUL can't be opened or the
+    # detach throws) - a boot hitting these would otherwise land WARNING rows
+    # in the Error Center on every launch.
+    '^\[devkit-rpc\] WARNING: could not open NUL\b'
+    '^\[devkit-rpc\] WARNING: stdin detach failed\b'
+    # Client/protocol sloppiness, not sidecar faults: a malformed line is
+    # ignored per-request, and a response dropped means shutdown won a race
+    # the lane was already prepared to lose.
+    '^\[devkit-rpc\] malformed request line, ignored\b'
+    '^\[devkit-rpc\]\[[a-z]+\] response for request \d+ dropped\b'
 )
 
 # Messages that are worse than their level says. The sidecar's lane-init

@@ -8,9 +8,7 @@
     free space, reboot-pending + uptime), a Node-process + listening-port
     snapshot (with process ages and winnat reserved-port detection), Claude
     Code / Kimi Code MCP server status for the user scope and a selected
-    project, a system-junk size scan (plus the GUI-driven clean: user temp,
-    Recycle Bin, and - when elevated - Windows\Temp and the Windows Update
-    download cache), the process-management backend for the clickable CPU/
+    project, the process-management backend for the clickable CPU/
     MEM/GPU gauges (process classification, top-CPU/top-memory/top-GPU
     collectors, a guarded kill, and a working-set trim), a git repo overview
     (branch, ahead/behind, dirty/stash counts,
@@ -1159,10 +1157,25 @@ function ConvertFrom-DevKitClaudeMcpLine {
     $name = $Matches.name.Trim()
     $rest = $Matches.rest.Trim()
 
+    # The status words are classified against the STATUS portion only -
+    # everything after the LAST ' - ' separator - never against the target
+    # (a command or URL, which can legitimately contain 'error', 'failed',
+    # 'timeout', ... and would badge a healthy server dead). No separator:
+    # fall back to the whole string rather than guessing.
+    $statusText = $rest
+    $sepIdx = $rest.LastIndexOf(' - ')
+    if ($sepIdx -ge 0) { $statusText = $rest.Substring($sepIdx + 3).Trim() }
+
     $status = 'Unknown'
-    if ($rest -match '(?i)connected') { $status = 'Connected' }
-    elseif ($rest -match '(?i)needs? authentication|requires? auth|unauthorized') { $status = 'RequiresAuth' }
-    elseif ($rest -match '(?i)failed|error|unreachable|timed? ?out') { $status = 'Disconnected' }
+    # Order matters, and the positive match is anchored: the failure branch
+    # must come FIRST so 'Failed to connect'/'Disconnected'/'Not connected'
+    # never reach the connected test (a bare '(?i)connected' matches the
+    # substring of 'disconnected' and would badge a dead server green), and
+    # the positive lookbehinds reject a 'dis'/'re'/'not ' prefix outright -
+    # 'reconnected' phrasings are not evidence of a healthy server either.
+    if ($statusText -match '(?i)needs? authentication|requires? auth|unauthorized') { $status = 'RequiresAuth' }
+    elseif ($statusText -match '(?i)failed|error|unreachable|timed? ?out|not connected|disconnect') { $status = 'Disconnected' }
+    elseif ($statusText -match '(?i)(?<!dis)(?<!re)(?<!not )connected') { $status = 'Connected' }
 
     $target = ($rest -split '\s+-\s+')[0]
     return @{ Name = $name; Status = $status; Target = $target }
@@ -1224,6 +1237,26 @@ function Get-DevKitClaudeMcpStatus {
 
 # ==================== KIMI CODE MCP STATUS ====================
 
+function Get-DevKitKimiBearerToken {
+    <#
+    .SYNOPSIS
+        Reads a bearer-token env var, Process scope first, then User scope.
+    .DESCRIPTION
+        The sidecar is a LONG-LIVED process: a token variable set after it
+        started is invisible at Process scope but present in the User
+        registry scope - reading Process only would badge a correctly
+        configured server "RequiresAuth". A function (not inline .NET calls)
+        so Pester can Mock the two scopes without touching the real registry.
+    #>
+    param([Parameter(Mandatory = $true)][string]$Name)
+
+    $value = [Environment]::GetEnvironmentVariable($Name)
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        $value = [Environment]::GetEnvironmentVariable($Name, 'User')
+    }
+    return $value
+}
+
 function ConvertFrom-DevKitKimiMcpConfig {
     <#
     .SYNOPSIS
@@ -1254,7 +1287,7 @@ function ConvertFrom-DevKitKimiMcpConfig {
             $status = 'Disabled'
         } elseif ($entry.bearerTokenEnvVar) {
             $envName = [string]$entry.bearerTokenEnvVar
-            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($envName))) {
+            if ([string]::IsNullOrWhiteSpace([string](Get-DevKitKimiBearerToken -Name $envName))) {
                 $status = 'RequiresAuth'
             }
         }
@@ -1353,158 +1386,6 @@ function Get-DevKitMcpWidgetReport {
                 @{ Name = $_.Name; Scope = $_.Scope; Status = $_.Status; Target = $_.Target; Transport = $_.Transport }
             })
         }
-    }
-}
-
-# ==================== SYSTEM JUNK ====================
-# Size logic mirrors maintenance/Clear-DiskJunk.ps1's scan (same paths, same
-# COM recycle-bin read). The clean below is now fully GUI-driven and covers
-# everything the widget dials advertise: user temp + Recycle Bin always, and
-# Windows\Temp + the Windows Update download cache when elevated (attempted
-# silently; non-admin runs report them via SkippedNeedsAdmin instead). What
-# still separates this from the real Clear-DiskJunk tool is the admin-heavy
-# machinery: DISM/WinSxS and service stop/start stay with the terminal tool,
-# which the widget launches via "Cleanup Tool...".
-
-function Get-DevKitJunkPathSize {
-    <#
-    .SYNOPSIS
-        Recursive file-size total of one folder, best-effort: unreadable
-        subtrees are skipped via -ErrorAction SilentlyContinue and a broken
-        root enumeration counts as 0 rather than aborting the whole scan.
-    #>
-    param([Parameter(Mandatory = $true)][string]$Path)
-    if (-not (Test-Path -LiteralPath $Path)) { return 0 }
-    $total = 0
-    try {
-        $items = Get-ChildItem -LiteralPath $Path -Recurse -Force -File -ErrorAction SilentlyContinue
-        foreach ($item in $items) { $total += $item.Length }
-    } catch { }
-    return $total
-}
-
-function Get-DevKitRecycleBinSize {
-    <# Shell.Application COM, same source Clear-DiskJunk.ps1 uses. Silent: this runs in a background runspace. #>
-    $shell = $null
-    try {
-        $shell = New-Object -ComObject Shell.Application
-        $recycleBin = $shell.Namespace(10)
-        if (-not $recycleBin) { return 0 }
-        $total = 0
-        foreach ($item in $recycleBin.Items()) { $total += $item.Size }
-        return $total
-    } catch {
-        return 0
-    } finally {
-        if ($shell) { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($shell) }
-    }
-}
-
-function Get-DevKitSystemJunk {
-    <#
-    .SYNOPSIS
-        Total reclaimable junk across the user + Windows temp folders, the
-        Windows Update download cache, and the Recycle Bin. Never throws;
-        slow (recursive enumeration) - run it in the background runspace.
-    #>
-    $tempPaths = @($env:TEMP, (Join-Path $env:SystemRoot 'Temp')) | Select-Object -Unique
-    $wuCachePath = Join-Path (Join-Path $env:SystemRoot 'SoftwareDistribution') 'Download'
-    $tempBytes = 0
-    foreach ($p in $tempPaths) { $tempBytes += Get-DevKitJunkPathSize -Path $p }
-    $wuBytes = Get-DevKitJunkPathSize -Path $wuCachePath
-    $recycleBytes = Get-DevKitRecycleBinSize
-    return [PSCustomObject]@{
-        TempBytes    = $tempBytes
-        WuBytes      = $wuBytes
-        RecycleBytes = $recycleBytes
-        TotalBytes   = $tempBytes + $wuBytes + $recycleBytes
-    }
-}
-
-function Clear-DevKitSystemJunk {
-    <#
-    .SYNOPSIS
-        The GUI-driven junk clean behind the widget's junk dial: deletes the
-        CONTENTS of the user temp folder and empties the Recycle Bin (always
-        works unelevated), and - when elevated - also clears Windows\Temp
-        and the Windows Update SoftwareDistribution\Download cache contents.
-        Non-admin runs skip those two admin-gated categories and report them
-        in SkippedNeedsAdmin so the UI can say why they're untouched. What
-        this still does NOT do (vs the real Clear-DiskJunk tool): DISM/
-        WinSxS and service stop/start. Every category is measured before/
-        after so "freed X" and the per-category breakdown stay honest.
-        Never throws; designed for the background runspace.
-    .OUTPUTS
-        BytesBefore/BytesAfter/FreedBytes (totals, as before), plus
-        TempUserFreed/TempWindowsFreed/WuCacheFreed/RecycleFreed per
-        category and SkippedNeedsAdmin (category names skipped because the
-        process is not elevated: 'Windows Temp', 'Windows Update Cache').
-    #>
-    $userTempPath = $env:TEMP
-    $windowsTempPath = Join-Path $env:SystemRoot 'Temp'
-    $wuCachePath = Join-Path (Join-Path $env:SystemRoot 'SoftwareDistribution') 'Download'
-
-    $isAdmin = $false
-    try { $isAdmin = Test-DevKitAdmin } catch { }
-    $skippedNeedsAdmin = @()
-    if (-not $isAdmin) { $skippedNeedsAdmin = @('Windows Temp', 'Windows Update Cache') }
-
-    # Before-snapshot per category (admin categories only when elevated -
-    # the delete would silently no-op anyway, so skip the slow enumeration).
-    $tempUserBefore = Get-DevKitJunkPathSize -Path $userTempPath
-    $recycleBefore = Get-DevKitRecycleBinSize
-    $tempWindowsBefore = 0
-    $wuBefore = 0
-    if ($isAdmin) {
-        $tempWindowsBefore = Get-DevKitJunkPathSize -Path $windowsTempPath
-        $wuBefore = Get-DevKitJunkPathSize -Path $wuCachePath
-    }
-
-    $clearPaths = @($userTempPath)
-    if ($isAdmin) { $clearPaths += @($windowsTempPath, $wuCachePath) }
-    foreach ($p in ($clearPaths | Select-Object -Unique)) {
-        if ([string]::IsNullOrWhiteSpace($p)) { continue }
-        if (-not (Test-Path -LiteralPath $p)) { continue }
-        try {
-            Get-ChildItem -LiteralPath $p -Force -ErrorAction SilentlyContinue | ForEach-Object {
-                Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
-            }
-        } catch { }
-    }
-    try { Clear-RecycleBin -Force -ErrorAction SilentlyContinue } catch { }
-
-    $tempUserAfter = Get-DevKitJunkPathSize -Path $userTempPath
-    $recycleAfter = Get-DevKitRecycleBinSize
-    $tempWindowsAfter = 0
-    $wuAfter = 0
-    if ($isAdmin) {
-        $tempWindowsAfter = Get-DevKitJunkPathSize -Path $windowsTempPath
-        $wuAfter = Get-DevKitJunkPathSize -Path $wuCachePath
-    }
-
-    $tempUserFreed = $tempUserBefore - $tempUserAfter
-    $tempWindowsFreed = $tempWindowsBefore - $tempWindowsAfter
-    $wuFreed = $wuBefore - $wuAfter
-    $recycleFreed = $recycleBefore - $recycleAfter
-    $before = $tempUserBefore + $tempWindowsBefore + $wuBefore + $recycleBefore
-    $after = $tempUserAfter + $tempWindowsAfter + $wuAfter + $recycleAfter
-    $freed = $before - $after
-    # Files appear in temp between the two measurements all the time; a
-    # negative delta means "grew while cleaning", not "freed negative bytes".
-    if ($freed -lt 0) { $freed = 0 }
-    if ($tempUserFreed -lt 0) { $tempUserFreed = 0 }
-    if ($tempWindowsFreed -lt 0) { $tempWindowsFreed = 0 }
-    if ($wuFreed -lt 0) { $wuFreed = 0 }
-    if ($recycleFreed -lt 0) { $recycleFreed = 0 }
-    return [PSCustomObject]@{
-        BytesBefore       = $before
-        BytesAfter        = $after
-        FreedBytes        = $freed
-        TempUserFreed     = $tempUserFreed
-        TempWindowsFreed  = $tempWindowsFreed
-        WuCacheFreed      = $wuFreed
-        RecycleFreed      = $recycleFreed
-        SkippedNeedsAdmin = $skippedNeedsAdmin
     }
 }
 
@@ -2235,6 +2116,13 @@ function Get-DevKitGitHubPullRequests {
     try {
         Push-Location -LiteralPath $Path
         try {
+            # NOTE: gh has NO equivalent of git's `-c http.lowSpeed*`
+            # config override (passing `-c` makes gh exit 1 with "unknown
+            # shorthand flag: 'c'"), and gh applies no transfer timeout of
+            # its own. A real stall guard would need an external watchdog
+            # (spawn + kill timer); that is deliberately not implemented here
+            # - these calls hold the 'slow' lane, which is bounded by the
+            # host's per-request timeout instead.
             $out = (& $gh.Source 'pr' 'list' '--json' 'number,title,author,url,isDraft,headRefName,headRefOid,baseRefName,updatedAt,reviewDecision,labels' '--state' 'open' '--limit' ([string]($prDisplayLimit + 1)) 2>&1 | Out-String)
             $exitCode = $LASTEXITCODE
         } finally {
@@ -2304,6 +2192,10 @@ function Get-DevKitGitHubIssues {
     try {
         Push-Location -LiteralPath $Path
         try {
+            # No stall guard here for the reason documented in
+            # Get-DevKitGitHubPullRequests: gh has no `-c http.lowSpeed*`
+            # equivalent and no built-in transfer timeout; an external
+            # kill-timer watchdog is deliberately out of scope.
             $out = (& $gh.Source 'issue' 'list' '--json' 'number,title,author,url,labels,body,comments,updatedAt' '--state' 'open' '--limit' ([string]($issueDisplayLimit + 1)) 2>&1 | Out-String)
             $exitCode = $LASTEXITCODE
         } finally {

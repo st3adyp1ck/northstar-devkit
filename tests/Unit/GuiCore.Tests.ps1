@@ -226,3 +226,29 @@ Describe "Get-DevKitGuiCatalog (against the real manifests)" {
         $preview[0].StaticArgs.Contains('IncludeRecycleBin') | Should -BeFalse
     }
 }
+
+Describe "Get-DevKitCatalogPayload loadErrors" {
+
+    BeforeAll {
+        # The payload builder lives in the dispatch layer (RpcMethods.ps1);
+        # Get-DevKitGuiCatalog + Get-DevKitModule are already loaded above.
+        $global:DevKitRpcMethodsLoaded = $false
+        . (Join-Path $script:RepoRoot 'core\RpcMethods.ps1')
+    }
+
+    It "emits an empty loadErrors array alongside a populated modules array for a healthy catalog" {
+        $payload = Get-DevKitCatalogPayload -RootPath $script:RepoRoot
+        , $payload.loadErrors | Should -BeOfType [array]
+        @($payload.loadErrors) | Should -Be @()
+        @($payload.modules).Count | Should -BeGreaterThan 0
+    }
+
+    It "surfaces per-folder load errors instead of letting a category vanish silently" {
+        $payload = Get-DevKitCatalogPayload -RootPath (Join-Path $TestDrive 'no-such-root')
+        @($payload.modules) | Should -Be @()
+        # All 12 category folders fail to load (missing manifest) -> one
+        # recorded error each, prefixed with the folder name.
+        @($payload.loadErrors).Count | Should -Be 12
+        @($payload.loadErrors)[0] | Should -Match '^\[ports\] '
+    }
+}

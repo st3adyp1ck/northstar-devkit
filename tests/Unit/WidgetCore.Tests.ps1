@@ -61,6 +61,28 @@ Describe "ConvertFrom-DevKitClaudeMcpLine" {
         $r.Status | Should -Be 'Disconnected'
     }
 
+    It "maps 'Disconnected' wording to Disconnected, not Connected" {
+        # Regression: a bare '(?i)connected' matches the substring inside
+        # 'Disconnected' - the widget badged a dead server green.
+        $r = ConvertFrom-DevKitClaudeMcpLine -Line "gone-server: https://example.com/mcp - $([char]0x2717) Disconnected"
+        $r.Status | Should -Be 'Disconnected'
+    }
+
+    It "maps 'Not connected' wording to Disconnected, not Connected" {
+        $r = ConvertFrom-DevKitClaudeMcpLine -Line "idle-server: npx -y @modelcontextprotocol/server-filesystem - $([char]0x2717) Not connected"
+        $r.Status | Should -Be 'Disconnected'
+    }
+
+    It "classifies the STATUS portion only - a target containing 'error' with a healthy status stays Connected" {
+        # Regression on the reorder fix: matching the failure words against
+        # the whole rest-of-line badged servers dead just because their
+        # command/URL contains 'error' (e.g. an error-tracker service).
+        $r = ConvertFrom-DevKitClaudeMcpLine -Line "error-tracker: cmd /c npx -y @someorg/mcp-error-tracker - $([char]0x2714) Connected"
+        $r.Name | Should -Be 'error-tracker'
+        $r.Status | Should -Be 'Connected'
+        $r.Target | Should -Be 'cmd /c npx -y @someorg/mcp-error-tracker'
+    }
+
     It "maps auth-needed to RequiresAuth" {
         $r = ConvertFrom-DevKitClaudeMcpLine -Line "private-api: https://example.com/mcp - Needs authentication"
         $r.Status | Should -Be 'RequiresAuth'
@@ -112,6 +134,38 @@ Describe "ConvertFrom-DevKitKimiMcpConfig" {
 
     It "returns no rows for a missing/empty mcpServers object" {
         @(ConvertFrom-DevKitKimiMcpConfig -McpServers $null -Scope 'User').Count | Should -Be 0
+    }
+
+    It "badges via the helper so a User-scope token set after the sidecar started counts" {
+        # Regression: the env var was read process-scope only, so a token set
+        # while the long-lived sidecar was already running read as missing
+        # and a configured server showed "Requires Auth". The Mock stands in
+        # for the helper's Process->User fallback (the real User scope would
+        # mean writing the registry inside a test).
+        Mock Get-DevKitKimiBearerToken { return $null }
+        $rows = @(ConvertFrom-DevKitKimiMcpConfig -McpServers $script:doc -Scope 'User')
+        ($rows | Where-Object Name -eq 'needsToken').Status | Should -Be 'RequiresAuth'
+
+        Mock Get-DevKitKimiBearerToken { return 'tok' }
+        $rows = @(ConvertFrom-DevKitKimiMcpConfig -McpServers $script:doc -Scope 'User')
+        ($rows | Where-Object Name -eq 'needsToken').Status | Should -Be 'Configured'
+    }
+}
+
+Describe "Get-DevKitKimiBearerToken" {
+
+    It "returns the process-scope value when set" {
+        $name = 'DEVKIT_TEST_TOKEN_PROC_9F8E7D'
+        [Environment]::SetEnvironmentVariable($name, 'proc-tok')   # 2-arg = Process scope
+        try {
+            Get-DevKitKimiBearerToken -Name $name | Should -Be 'proc-tok'
+        } finally {
+            [Environment]::SetEnvironmentVariable($name, $null)
+        }
+    }
+
+    It "returns empty for a variable set in neither scope" {
+        Get-DevKitKimiBearerToken -Name 'DEVKIT_TEST_TOKEN_ABSENT_9F8E7D' | Should -BeNullOrEmpty
     }
 }
 

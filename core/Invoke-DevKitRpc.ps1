@@ -49,8 +49,19 @@ $ErrorActionPreference = 'Stop'
 # Deliberately no Set-StrictMode: the libraries this sidecar loads (DevKit.Core
 # and everything it dot-sources) predate strict mode and rely on the
 # `if ($global:XLoaded)` guard pattern reading an unset variable as falsy.
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-[Console]::InputEncoding = [System.Text.Encoding]::UTF8
+# UTF-8 BEFORE anything writes: powershell.exe 5.1 consoles default to an OEM
+# codepage, and one non-ASCII tool-output line would corrupt the NDJSON
+# framing for every request after it. No BOM preamble ([Encoding]::UTF8 would
+# emit one into the stream); guarded because 5.1 throws on some hosts.
+try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catch { }
+try { [Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false) } catch { }
+# stderr too: a lane-init failure whose message carries non-ASCII text would
+# otherwise mojibake into the Rust host's tracing log on a 5.1 OEM console.
+try {
+    $stderrWriter = [System.IO.StreamWriter]::new([Console]::OpenStandardError(), [System.Text.UTF8Encoding]::new($false))
+    $stderrWriter.AutoFlush = $true
+    [Console]::SetError($stderrWriter)
+} catch { }
 
 # Defense in depth against Win32 verbatim ("\\?\"-prefixed) paths: pwsh will
 # RUN a script invoked via a verbatim path (so $PSScriptRoot inherits the
@@ -91,6 +102,11 @@ function Write-DevKitRpcDiag {
 
 # ==================== SHARED QUEUES ====================
 
+# Intentionally UNBOUNDED BlockingCollections: the only producer is the main
+# thread (one Add per request) and each consumer drains continuously, so a
+# capacity bound would buy no backpressure protection - it could only turn a
+# temporarily slow lane into a blocked main thread. The host drains the
+# response side continuously too, so memory stays flat in practice.
 $script:OutQueue = [System.Collections.Concurrent.BlockingCollection[string]]::new()
 
 # Shared across the three lane runspaces (passed by live reference, like the
@@ -140,7 +156,29 @@ $script:LaneQueues = @{
 # writer runspace has $OutQueue, the lanes have $ImportLock, and cancellation
 # has this. See the RUNNING-TOOL REGISTRY section in RpcMethods.ps1 for the
 # entry shape and for why the key is the runId rather than the pid.
+#
+# It is ALSO the single source of truth for "a tool run is active": the main
+# thread consults it at REQUEST TIME to refuse a second tool.run while one is
+# in flight (see Get-DevKitToolRunRefusal below). An entry lives from spawn
+# until tool.run's finally drops it, so Count -gt 0 means the tool lane is
+# occupied - including the window after tool.stop killed the process but
+# before the drain unwound.
+#
+# Known limitation: this registry is in-process only and there is no job
+# object anywhere - a tool's orphaned GRANDCHILDREN can survive a sidecar
+# respawn (tool.stop's sweep only covers the run it is aimed at).
 $script:RunRegistry = [System.Collections.Concurrent.ConcurrentDictionary[string, object]]::new()
+
+# SINGLE-FLIGHT gate for the tool lane, taken on the MAIN THREAD at request
+# time: RunRegistry alone cannot close the spawn window - the lane only
+# Registers AFTER Process.Start (~50-150ms), so two tool.run requests read in
+# consecutive main-loop iterations (the two-windows simultaneous-launch case)
+# would both see an empty registry, both enqueue, and run 2 would sit behind
+# a never-ending run 1. This fixed-key TryAdd closes that: the main thread
+# claims 'active' BEFORE enqueueing and stamps the claim token onto the
+# request; tool.run's finally releases it, ownership-checked. Shared with the
+# lanes exactly as RunRegistry is.
+$script:ToolLaneGate = [System.Collections.Concurrent.ConcurrentDictionary[string, string]]::new()
 
 # ==================== WRITER RUNSPACE ====================
 # The only code in this process allowed to touch [Console]::Out.
@@ -183,6 +221,7 @@ function Start-DevKitRpcLane {
     $rs.SessionStateProxy.SetVariable('RepoRoot', $script:RepoRoot)
     $rs.SessionStateProxy.SetVariable('ImportLock', $script:ImportLock)
     $rs.SessionStateProxy.SetVariable('RunRegistry', $script:RunRegistry)
+    $rs.SessionStateProxy.SetVariable('ToolLaneGate', $script:ToolLaneGate)
 
     $ps = [powershell]::Create()
     $ps.Runspace = $rs
@@ -291,6 +330,15 @@ function Start-DevKitRpcLane {
 function Get-DevKitRpcLaneForMethod {
     param([Parameter(Mandatory)][string]$Method)
     if ($Method -like 'metrics.*') { return 'metrics' }
+    # process.topCpu/topMemory ride the metrics lane, not 'work': each
+    # top-CPU call samples a ~1s window and the gauges flyout polls both every
+    # 3s - on 'work' they would stack up in front of tool.stop, settings.set,
+    # notes.save and process.kill, the interactions a click on a gauge makes.
+    # files.children joins them for the same reason: the Files panel polls it
+    # as a read-only directory enumeration, which can be a large listing on a
+    # busy project folder - 'work' latency (a settings save, a note write)
+    # must never ride behind UI browsing.
+    if ($Method -eq 'process.topCpu' -or $Method -eq 'process.topMemory' -or $Method -eq 'files.children') { return 'metrics' }
     if ($Method -like 'mcp.*') { return 'mcp' }
     # tool.stop is the ONE tool.* method that must not ride the tool lane.
     # By the time anyone asks to cancel a run, that lane is - by definition -
@@ -299,11 +347,12 @@ function Get-DevKitRpcLaneForMethod {
     # it was meant to kill had already finished. It goes to 'work' because
     # that is where the other interactive process action already lives
     # (process.kill), and because 'work' has no long-blocking residents: its
-    # slowest members (catalog.get, junk.clear, process.freeMemory) are
-    # user-initiated, rare, and bounded in seconds, so a stop can queue
-    # behind at most one of them rather than behind a dev server that never
-    # exits. Stop-DevKitToolRun is itself bounded (~2s worst case) so it can
-    # never become a blocking resident of the lane it borrows.
+    # slowest members (catalog.get, process.freeMemory) are user-initiated,
+    # rare, and bounded in seconds, so a stop can queue behind at most one of
+    # them rather than behind a dev server that never exits.
+    # Stop-DevKitToolRun is itself bounded (~3.5s worst case - 2s exit wait
+    # plus 1.5s release wait, plus two CIM sweeps) so it can never become a
+    # blocking resident of the lane it borrows.
     if ($Method -eq 'tool.stop') { return 'work' }
     if ($Method -like 'tool.*') { return 'tool' }
     # errors.* joins git/github on 'slow' for the same reason they are there:
@@ -315,6 +364,70 @@ function Get-DevKitRpcLaneForMethod {
     if ($Method -like 'errors.*') { return 'errors' }
     if ($Method -like 'git.*' -or $Method -like 'github.*') { return 'slow' }
     return 'work'
+}
+
+function New-DevKitToolLaneBusyFailure {
+    <#
+    .SYNOPSIS
+        The one place the toolLaneBusy refusal frame is built, so the exact
+        kind/message pair the Rust/TS contract keys on is written once.
+    #>
+    param([Parameter(Mandatory)]$Id)
+    return (New-DevKitRpcFailure -Id $Id -Kind 'toolLaneBusy' -Message 'Another DevKit tool is already running. Wait for it to finish or stop it first.')
+}
+
+function Get-DevKitToolRunRefusal {
+    <#
+    .SYNOPSIS
+        The toolLaneBusy refusal frame for a tool.run request that arrives
+        while another run is active, or $null when the tool lane is free.
+    .DESCRIPTION
+        Consulted by the MAIN THREAD at REQUEST TIME, before the request would
+        be enqueued - by dequeue time a never-ending run (a dev server) would
+        already hold the lane, and a queued second request could sit behind it
+        forever. The shared occupancy state is $script:RunRegistry itself: an
+        entry lives from spawn until tool.run's finally drops it, so a non-
+        empty registry IS "a run is active". This doubles as the cross-window
+        in-flight guard - the embedded tray and the standalone Control Center
+        are two UI instances talking to one sidecar, and neither may start a
+        tool while the other's is running. tool.stop is NOT gated here: it is
+        routed to 'work' precisely so it can reach a run the tool lane owns.
+        Note this is the coarse check only - the single-flight claim in
+        Request-DevKitToolLaneSlot closes the spawn window this cannot.
+    #>
+    param($Registry, [Parameter(Mandatory)]$Id)
+
+    if ($null -eq $Registry) { return $null }
+    $busy = $false
+    try { $busy = ($Registry.Count -gt 0) } catch { $busy = $false }
+    if (-not $busy) { return $null }
+    return (New-DevKitToolLaneBusyFailure -Id $Id)
+}
+
+function Request-DevKitToolLaneSlot {
+    <#
+    .SYNOPSIS
+        Single-flight claim on the tool lane, taken on the MAIN THREAD before
+        a tool.run is enqueued. Returns the claim token, or $null when the
+        lane is already claimed (caller refuses with toolLaneBusy).
+    .DESCRIPTION
+        RunRegistry alone cannot close the spawn window: the lane only
+        Registers AFTER Process.Start (~50-150ms), so two tool.run requests
+        read in consecutive main-loop iterations (the two-windows
+        simultaneous-launch case) would both see an empty registry, both
+        enqueue, and run 2 would sit behind a never-ending run 1. The fixed-
+        key TryAdd makes "one in flight per sidecar" atomic at request time.
+        The token is stamped onto the request (Add-Member) and tool.run's
+        finally releases the slot with Release-DevKitToolLaneSlot,
+        ownership-checked, on ANY exit path - spawn throw, kill, natural end.
+        A $null gate (dot-sourced outside a lane/test) means un-gated.
+    #>
+    param($Gate)
+
+    if ($null -eq $Gate) { return [guid]::NewGuid().ToString('N') }
+    $token = [guid]::NewGuid().ToString('N')
+    if ($Gate.TryAdd('active', $token)) { return $token }
+    return $null
 }
 
 # ==================== BOOT ====================
@@ -401,8 +514,52 @@ try {
 
 $shuttingDown = $false
 
+# Lane-wedge probe cadence. A lane's BeginInvoke handle is only ever supposed
+# to complete at shutdown (its script ends when GetConsumingEnumerable drains
+# after CompleteAdding) - the boot-time import catch and the per-request
+# try/catch both keep the lane alive through individual failures. A native
+# fault on the lane's thread bypasses BOTH, and without a probe the lane then
+# sits dead forever: every request routed to it queues unconsumed until each
+# caller's own timeout, with zero diagnostic. Probe while idle via the
+# ReadLineAsync wait below; never during shutdown (handles completing is the
+# NORMAL shutdown path there).
+$laneProbeInterval = [timespan]::FromSeconds(30)
+$lastLaneProbeAt = [DateTime]::UtcNow
+
 while (-not $shuttingDown) {
-    $rawLine = $stdin.ReadLine()
+    # ReadLineAsync rather than a blocking ReadLine: the main thread would
+    # otherwise never wake up to run the lane-wedge probe while idle.
+    $readTask = $stdin.ReadLineAsync()
+    while (-not $readTask.IsCompleted) {
+        # AsyncWaitHandle (available since .NET 1.1, so fine on the 5.1
+        # fallback) signals the instant the task completes: WaitOne returns
+        # immediately on a freshly arrived line instead of adding a fixed
+        # 200ms poll latency to every request, and only times out into the
+        # lane-probe cadence below.
+        $signaled = $false
+        try { $signaled = $readTask.AsyncWaitHandle.WaitOne(200) } catch { Start-Sleep -Milliseconds 200 }
+        if ($signaled) { continue }
+        if (-not $shuttingDown -and ([DateTime]::UtcNow - $lastLaneProbeAt) -ge $laneProbeInterval) {
+            $lastLaneProbeAt = [DateTime]::UtcNow
+            foreach ($lane in $lanes.Values) {
+                if ($lane.Handle.IsCompleted) {
+                    # A completed handle mid-life means the runspace thread is
+                    # gone. Exit non-zero so the Rust host respawns a healthy
+                    # sidecar - every alternative (silently dropping requests
+                    # routed here, answering them with a synthetic error from
+                    # this thread) reimplements lane machinery on the wrong
+                    # side of the process boundary.
+                    Write-DevKitRpcDiag "lane '$($lane.Name)' died unexpectedly; exiting non-zero so the host respawns a healthy sidecar"
+                    exit 1
+                }
+            }
+        }
+    }
+    if ($readTask.IsFaulted -or $readTask.IsCanceled) {
+        Write-DevKitRpcDiag "stdin read failed, shutting down"
+        break
+    }
+    $rawLine = $readTask.Result
     if ($null -eq $rawLine) {
         # EOF on stdin (parent process closed the pipe / died) - exit clean.
         Write-DevKitRpcDiag "stdin EOF, shutting down"
@@ -431,8 +588,42 @@ while (-not $shuttingDown) {
             $shuttingDown = $true
         }
         default {
-            $lane = Get-DevKitRpcLaneForMethod -Method $request.method
-            $script:LaneQueues[$lane].Add($request)
+            # tool.run occupancy gate, checked at REQUEST TIME on the main
+            # thread: while a run is active the refusal goes back immediately
+            # instead of queueing behind a run that may never exit. Two
+            # layers, both before enqueue: the RunRegistry count (coarse -
+            # an in-flight run already registered), then the single-flight
+            # TryAdd (closes the ~50-150ms spawn window before the lane
+            # Registers - this is what stops two simultaneous launches from
+            # both enqueueing). The claim token travels on the request and
+            # tool.run's finally releases it, ownership-checked, on ANY exit
+            # path. tool.stop stays ungated - it rides the 'work' lane
+            # precisely so it can reach a run the tool lane owns.
+            $refusal = $null
+            if ($request.method -eq 'tool.run') {
+                $refusal = Get-DevKitToolRunRefusal -Registry $script:RunRegistry -Id $request.id
+                if ($null -eq $refusal) {
+                    $slot = Request-DevKitToolLaneSlot -Gate $script:ToolLaneGate
+                    if ($null -eq $slot) {
+                        $refusal = New-DevKitToolLaneBusyFailure -Id $request.id
+                    } else {
+                        # The lane reads params, not the request envelope -
+                        # stamp the claim where tool.run's finally will find
+                        # it (creating an empty params for token-less
+                        # requests so the slot can always be released).
+                        if ($null -eq $request.params) {
+                            Add-Member -InputObject $request -Force -NotePropertyName 'params' -NotePropertyValue ([PSCustomObject]@{})
+                        }
+                        Add-Member -InputObject $request.params -Force -NotePropertyName '__toolLaneToken' -NotePropertyValue $slot
+                    }
+                }
+            }
+            if ($null -ne $refusal) {
+                $script:OutQueue.Add((ConvertTo-DevKitRpcLine $refusal))
+            } else {
+                $lane = Get-DevKitRpcLaneForMethod -Method $request.method
+                $script:LaneQueues[$lane].Add($request)
+            }
         }
     }
 }

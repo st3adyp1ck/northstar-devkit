@@ -39,7 +39,6 @@ $script:DevKitRpcArrayMethods = @{
     'ondeck.setStatus'   = $true
     'ondeck.clearDone'   = $true
     'process.topCpu'     = $true
-    'metrics.excludedPorts' = $true
     'errors.system'      = $true
     'errors.app'         = $true
 }
@@ -297,9 +296,25 @@ function Unregister-DevKitToolRun {
         Removes a finished run. MUST run in tool.run's finally: while an
         entry is present the app believes the run is alive and stoppable,
         and the Process handle it holds keeps that pid pinned.
+    .DESCRIPTION
+        Conditional removal: Register-DevKitToolRun's set-indexer overwrite on
+        a REUSED runId is deliberate (the registry must point at the LIVE
+        process), but this finally belongs to the OLD run - with an
+        unconditional TryRemove, its cleanup would delete the NEW run's entry
+        and leave a live, stoppable run invisible to tool.stop. The check is
+        IDENTITY, not runId: after an overwrite the runId is identical, only
+        the entry object differs. Callers that predate -Entry (Pester) pass
+        none and get the old unconditional behavior.
     #>
-    param($Registry, [Parameter(Mandatory)][string]$RunId)
+    param($Registry, [Parameter(Mandatory)][string]$RunId, $Entry = $null)
     if ($null -eq $Registry) { return }
+    if ($null -ne $Entry) {
+        $current = $null
+        try {
+            if (-not $Registry.TryGetValue($RunId, [ref]$current)) { return }
+        } catch { return }
+        if (-not [object]::ReferenceEquals($current, $Entry)) { return }
+    }
     $removed = $null
     try { [void]$Registry.TryRemove($RunId, [ref]$removed) } catch { }
 }
@@ -309,6 +324,32 @@ function Test-DevKitToolRunCancelled {
     param($Entry)
     if ($null -eq $Entry) { return $false }
     try { return [bool]$Entry['Stopped'] } catch { return $false }
+}
+
+function Release-DevKitToolLaneSlot {
+    <#
+    .SYNOPSIS
+        Releases the main thread's single-flight tool-lane claim at the end
+        of a tool.run, on EVERY exit path (spawn throw, drain error, natural
+        end - the case body is wrapped in try/finally for exactly this).
+    .DESCRIPTION
+        Ownership-checked: the 'active' slot is cleared only when its current
+        value still equals the token this run was admitted with, so a stale
+        or duplicated release can never clear a newer claim. $Gate is the
+        live ConcurrentDictionary Invoke-DevKitRpc.ps1 hands to every lane
+        runspace; $null (dot-sourced outside a lane, e.g. Pester) means
+        un-gated - the release simply no-ops, same as a $null $RunRegistry.
+    #>
+    param($Gate, [AllowNull()][string]$Token)
+
+    if ($null -eq $Gate -or [string]::IsNullOrEmpty($Token)) { return }
+    $current = $null
+    try {
+        if ($Gate.TryGetValue('active', [ref]$current) -and [object]::Equals($current, $Token)) {
+            $removed = $null
+            [void]$Gate.TryRemove('active', [ref]$removed)
+        }
+    } catch { }
 }
 
 function Test-DevKitProcessStartTimeMatch {
@@ -691,10 +732,21 @@ function Get-DevKitCatalogPayload {
         a computed `Caution` flag (every manifest Help string that documents
         a destructive action prefixes it "Safety note:" - see AGENTS.md's
         Code Style Guidelines) into the shape the frontend renders directly.
+    .DESCRIPTION
+        The payload carries a top-level `loadErrors` string array alongside
+        `modules`: Get-DevKitGuiCatalog records every folder whose manifest
+        failed to load into $global:DevKitCatalogLoadErrors, and because this
+        function runs in the SAME lane runspace that variable is readable
+        here (lane runspaces share nothing with the main thread - this is the
+        one hop it ever needs). A broken _module.psd1 would otherwise make a
+        category vanish from both UIs with zero diagnostic; empty when clean.
     #>
     param([Parameter(Mandatory)][string]$RootPath)
 
     $groups = @(Get-DevKitGuiCatalog -RootPath $RootPath)
+    # @(...) keeps the empty case a real 0-element array; the Where-Object
+    # drops a $null global (fresh runspace) instead of stringifying it.
+    $loadErrors = @(@($global:DevKitCatalogLoadErrors) | Where-Object { $null -ne $_ } | ForEach-Object { [string]$_ })
     $modules = @()
     foreach ($group in $groups) {
         foreach ($module in @($group.Modules)) {
@@ -723,7 +775,7 @@ function Get-DevKitCatalogPayload {
             }
         }
     }
-    return [ordered]@{ modules = $modules }
+    return [ordered]@{ modules = $modules; loadErrors = $loadErrors }
 }
 
 function Invoke-DevKitRpcMethod {
@@ -743,6 +795,24 @@ function Invoke-DevKitRpcMethod {
         }
         'settings.set' {
             $settings = Get-DevKitRpcParam $Params 'settings'
+            # Shape gate: a non-object `preferences` (JSON string/array/number)
+            # makes Set-DevKitSettings' merge loop enumerate SCALAR properties
+            # (Length, etc.) and write junk keys into settings.json. Reject it
+            # here, at the RPC boundary, before anything touches the file.
+            if ($null -ne $settings -and $settings -isnot [PSCustomObject]) {
+                throw 'settings.set: "settings" must be a JSON object.'
+            }
+            $preferences = Get-DevKitRpcParam $settings 'preferences' $null
+            # $null is not "no patch": the app always sends an object, so a
+            # null caller is a bug - and letting it through hits the
+            # pre-existing clobber path (writes the caller's object verbatim,
+            # wiping on-disk preferences).
+            if ($null -eq $preferences) {
+                throw 'settings.set: "preferences" is required and must be a JSON object (null is not a valid patch).'
+            }
+            if ($preferences -isnot [PSCustomObject]) {
+                throw 'settings.set: "preferences" must be a JSON object, not a string, array, or scalar.'
+            }
             Set-DevKitSettings -Settings $settings
             return (Get-DevKitSettings)
         }
@@ -753,12 +823,6 @@ function Invoke-DevKitRpcMethod {
         }
         'metrics.node' {
             return Get-DevKitNodeSnapshot
-        }
-        'metrics.junk' {
-            return Get-DevKitSystemJunk
-        }
-        'metrics.excludedPorts' {
-            return Get-DevKitExcludedPortRanges
         }
         'metrics.gpuProcesses' {
             $count = [int](Get-DevKitRpcParam $Params 'count' 15)
@@ -780,9 +844,6 @@ function Invoke-DevKitRpcMethod {
         }
         'process.freeMemory' {
             return Invoke-DevKitFreeMemory
-        }
-        'junk.clear' {
-            return Clear-DevKitSystemJunk
         }
         'system.isElevated' {
             # True when the sidecar (and therefore the app and every tool it
@@ -955,122 +1016,142 @@ function Invoke-DevKitRpcMethod {
         }
 
         # ---------- tool execution (Control Center "Run") ----------
+        # CONTRACT: RPC is AT-LEAST-ONCE from the client's view - a retried
+        # tool.run can re-execute - so caution tools rely on the confirm gate
+        # (params.confirmed -> -Force via Add-DevKitForceArgument), not on
+        # retries being deduplicated.
         'tool.run' {
-            $folder = [string](Get-DevKitRpcParam $Params 'folder' '')
-            $script = [string](Get-DevKitRpcParam $Params 'script' '')
-            $toolArgs = @(Get-DevKitRpcParam $Params 'args' @())
-            $runId = [string](Get-DevKitRpcParam $Params 'runId' ([guid]::NewGuid().ToString('N')))
-            # params.confirmed: "the user already approved this in the app's
-            # caution dialog". Defaults to $false - see Add-DevKitForceArgument
-            # for why this is opt-in and what it fixes.
-            $confirmed = Test-DevKitRpcConfirmedFlag (Get-DevKitRpcParam $Params 'confirmed' $false)
-
-            $scriptPath = Join-Path (Join-Path $RepoRoot 'tools') (Join-Path $folder $script)
-            if (-not (Test-Path -LiteralPath $scriptPath)) {
-                throw "Tool script not found: $scriptPath"
-            }
-
-            $toolArgs = @($toolArgs | ForEach-Object { [string]$_ })
-            if ($confirmed) {
-                $toolArgs = @(Add-DevKitForceArgument -ScriptPath $scriptPath -Arguments $toolArgs)
-            }
-
-            $pwshExe = (Get-Process -Id $PID).Path
-            $psi = [System.Diagnostics.ProcessStartInfo]::new()
-            $psi.FileName = $pwshExe
-            $allArgs = @('-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $scriptPath) + $toolArgs
-            # ProcessStartInfo.ArgumentList is .NET Core 2.1+ only - on a
-            # machine with no pwsh 7 the sidecar runs under Windows
-            # PowerShell 5.1 (.NET Framework), where the property doesn't
-            # exist and .Add() dies with a null-method error, silently
-            # breaking every tool run. Branch: use ArgumentList when
-            # available (it quotes correctly for us), else build the single
-            # .Arguments string with the same C-runtime quoting rules via
-            # ConvertTo-DevKitQuotedArgument.
-            if ($null -ne $psi.PSObject.Properties['ArgumentList'] -and $null -ne $psi.ArgumentList) {
-                foreach ($a in $allArgs) { [void]$psi.ArgumentList.Add($a) }
-            } else {
-                $psi.Arguments = ($allArgs | ForEach-Object { ConvertTo-DevKitQuotedArgument -Value $_ }) -join ' '
-            }
-            $psi.RedirectStandardOutput = $true
-            $psi.RedirectStandardError = $true
-            $psi.RedirectStandardInput = $true
-            $psi.UseShellExecute = $false
-            $psi.CreateNoWindow = $true
-            # The Run dialog renders output as plain text, so pwsh's styled
-            # error formatting must not reach it: in the app's clean child
-            # environment (no TERM/NO_COLOR hint) pwsh defaults $PSStyle to
-            # ANSI rendering and every error arrives wrapped in raw
-            # "^[[31;1m" escape codes. NO_COLOR is honored by pwsh 7.2+;
-            # PS 5.1 and the DevKit-UI gradient engine never emit ANSI into
-            # a redirected stream in the first place.
-            $psi.EnvironmentVariables['NO_COLOR'] = '1'
-
-            $proc = [System.Diagnostics.Process]::new()
-            $proc.StartInfo = $psi
-            [void]$proc.Start()
-            $proc.StandardInput.Close()  # non-interactive: never let a tool block waiting on stdin
-
-            # Published BEFORE tool.started goes out, so a stop racing the
-            # very first event still finds the run. $RunRegistry is the live
-            # ConcurrentDictionary Invoke-DevKitRpc.ps1 hands to every lane
-            # runspace (see the registry section above); it is $null only
-            # when this file is dot-sourced outside a lane, e.g. in Pester.
-            $runEntry = Register-DevKitToolRun -Registry $RunRegistry -RunId $runId -Process $proc -Label "$folder/$script"
-
-            & $EmitEvent 'tool.started' $runId @{ pid = $proc.Id }
-
-            $exitCode = -1
-            $cancelled = $false
+            # Single-flight claim token stamped onto the request by the main
+            # thread before it was enqueued ($null/empty when dot-sourced
+            # outside the sidecar - un-gated, like $RunRegistry).
+            $gateToken = [string](Get-DevKitRpcParam $Params '__toolLaneToken' '')
             try {
-                # Drain stderr concurrently via an async Task so a chatty stderr
-                # stream can never fill its pipe buffer and deadlock the child
-                # while we're synchronously draining stdout below.
-                $stderrTask = $proc.StandardError.ReadToEndAsync()
+                $folder = [string](Get-DevKitRpcParam $Params 'folder' '')
+                $script = [string](Get-DevKitRpcParam $Params 'script' '')
+                $toolArgs = @(Get-DevKitRpcParam $Params 'args' @())
+                $runId = [string](Get-DevKitRpcParam $Params 'runId' ([guid]::NewGuid().ToString('N')))
+                # params.confirmed: "the user already approved this in the app's
+                # caution dialog". Defaults to $false - see Add-DevKitForceArgument
+                # for why this is opt-in and what it fixes.
+                $confirmed = Test-DevKitRpcConfirmedFlag (Get-DevKitRpcParam $Params 'confirmed' $false)
 
-                # This is the read that blocks the tool lane for the whole
-                # run, and the reason tool.stop cannot be answered here. It
-                # unblocks on EOF, which arrives only once EVERY process
-                # holding the child's stdout write handle is gone - hence
-                # Stop-DevKitToolRun killing the tree rather than the child.
-                while (-not $proc.StandardOutput.EndOfStream) {
-                    $outLine = $proc.StandardOutput.ReadLine()
-                    if ($null -ne $outLine) {
-                        & $EmitEvent 'tool.output' $runId @{ stream = 'stdout'; line = $outLine }
-                    }
+                $scriptPath = Join-Path (Join-Path $RepoRoot 'tools') (Join-Path $folder $script)
+                if (-not (Test-Path -LiteralPath $scriptPath)) {
+                    throw "Tool script not found: $scriptPath"
                 }
-                $proc.WaitForExit()
-                $stderrText = $stderrTask.GetAwaiter().GetResult()
-                if ($stderrText) {
-                    foreach ($errLine in ($stderrText -split "`r?`n")) {
-                        if ($errLine) { & $EmitEvent 'tool.output' $runId @{ stream = 'stderr'; line = $errLine } }
-                    }
+
+                $toolArgs = @($toolArgs | ForEach-Object { [string]$_ })
+                if ($confirmed) {
+                    $toolArgs = @(Add-DevKitForceArgument -ScriptPath $scriptPath -Arguments $toolArgs)
                 }
-                $exitCode = $proc.ExitCode
-            } catch {
-                # A tree kill landing mid-read can surface as a broken-pipe
-                # IOException instead of a clean EOF. Letting that escape to
-                # the lane worker would return an RPC failure and never emit
-                # tool.finished, leaving every watching dialog spinning
-                # forever - so absorb it and still report a terminal result.
-                & $EmitEvent 'tool.output' $runId @{ stream = 'stderr'; line = "Run stream ended abnormally: $($_.Exception.Message)" }
-                try { [void]$proc.WaitForExit(5000); $exitCode = $proc.ExitCode } catch { $exitCode = -1 }
+
+                $pwshExe = (Get-Process -Id $PID).Path
+                $psi = [System.Diagnostics.ProcessStartInfo]::new()
+                $psi.FileName = $pwshExe
+                $allArgs = @('-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $scriptPath) + $toolArgs
+                # ProcessStartInfo.ArgumentList is .NET Core 2.1+ only - on a
+                # machine with no pwsh 7 the sidecar runs under Windows
+                # PowerShell 5.1 (.NET Framework), where the property doesn't
+                # exist and .Add() dies with a null-method error, silently
+                # breaking every tool run. Branch: use ArgumentList when
+                # available (it quotes correctly for us), else build the single
+                # .Arguments string with the same C-runtime quoting rules via
+                # ConvertTo-DevKitQuotedArgument.
+                if ($null -ne $psi.PSObject.Properties['ArgumentList'] -and $null -ne $psi.ArgumentList) {
+                    foreach ($a in $allArgs) { [void]$psi.ArgumentList.Add($a) }
+                } else {
+                    $psi.Arguments = ($allArgs | ForEach-Object { ConvertTo-DevKitQuotedArgument -Value $_ }) -join ' '
+                }
+                $psi.RedirectStandardOutput = $true
+                $psi.RedirectStandardError = $true
+                $psi.RedirectStandardInput = $true
+                $psi.UseShellExecute = $false
+                $psi.CreateNoWindow = $true
+                # The Run dialog renders output as plain text, so pwsh's styled
+                # error formatting must not reach it: in the app's clean child
+                # environment (no TERM/NO_COLOR hint) pwsh defaults $PSStyle to
+                # ANSI rendering and every error arrives wrapped in raw
+                # "^[[31;1m" escape codes. NO_COLOR is honored by pwsh 7.2+;
+                # PS 5.1 and the DevKit-UI gradient engine never emit ANSI into
+                # a redirected stream in the first place.
+                $psi.EnvironmentVariables['NO_COLOR'] = '1'
+
+                $proc = [System.Diagnostics.Process]::new()
+                $proc.StartInfo = $psi
+                [void]$proc.Start()
+                $proc.StandardInput.Close()  # non-interactive: never let a tool block waiting on stdin
+
+                # Published BEFORE tool.started goes out, so a stop racing the
+                # very first event still finds the run. $RunRegistry is the live
+                # ConcurrentDictionary Invoke-DevKitRpc.ps1 hands to every lane
+                # runspace (see the registry section above); it is $null only
+                # when this file is dot-sourced outside a lane, e.g. in Pester.
+                $runEntry = Register-DevKitToolRun -Registry $RunRegistry -RunId $runId -Process $proc -Label "$folder/$script"
+
+                & $EmitEvent 'tool.started' $runId @{ pid = $proc.Id }
+
+                $exitCode = -1
+                $cancelled = $false
+                try {
+                    # Drain stderr concurrently via an async Task so a chatty stderr
+                    # stream can never fill its pipe buffer and deadlock the child
+                    # while we're synchronously draining stdout below.
+                    $stderrTask = $proc.StandardError.ReadToEndAsync()
+
+                    # This is the read that blocks the tool lane for the whole
+                    # run, and the reason tool.stop cannot be answered here. It
+                    # unblocks on EOF, which arrives only once EVERY process
+                    # holding the child's stdout write handle is gone - hence
+                    # Stop-DevKitToolRun killing the tree rather than the child.
+                    while (-not $proc.StandardOutput.EndOfStream) {
+                        $outLine = $proc.StandardOutput.ReadLine()
+                        if ($null -ne $outLine) {
+                            & $EmitEvent 'tool.output' $runId @{ stream = 'stdout'; line = $outLine }
+                        }
+                    }
+                    $proc.WaitForExit()
+                    $stderrText = $stderrTask.GetAwaiter().GetResult()
+                    if ($stderrText) {
+                        foreach ($errLine in ($stderrText -split "`r?`n")) {
+                            if ($errLine) { & $EmitEvent 'tool.output' $runId @{ stream = 'stderr'; line = $errLine } }
+                        }
+                    }
+                    $exitCode = $proc.ExitCode
+                } catch {
+                    # A tree kill landing mid-read can surface as a broken-pipe
+                    # IOException instead of a clean EOF. Letting that escape to
+                    # the lane worker would return an RPC failure and never emit
+                    # tool.finished, leaving every watching dialog spinning
+                    # forever - so absorb it and still report a terminal result.
+                    & $EmitEvent 'tool.output' $runId @{ stream = 'stderr'; line = "Run stream ended abnormally: $($_.Exception.Message)" }
+                    try { [void]$proc.WaitForExit(5000); $exitCode = $proc.ExitCode } catch { $exitCode = -1 }
+                } finally {
+                    $cancelled = Test-DevKitToolRunCancelled -Entry $runEntry
+                    # Dropped LAST: tool.stop's Wait-DevKitToolRunReleased watches
+                    # for exactly this to know the tool lane is free again. -Entry
+                    # makes the remove conditional: a reused runId may already
+                    # have been overwritten by a newer run, which must survive.
+                    Unregister-DevKitToolRun -Registry $RunRegistry -RunId $runId -Entry $runEntry
+                }
+
+                if ($cancelled) {
+                    # stdout, not stderr: a cancelled run is not a failed one, and
+                    # the dialog paints stderr red. This is deliberately the last
+                    # console line a cancelled run produces, so the app and the
+                    # recorded run history both end on the plain truth.
+                    & $EmitEvent 'tool.output' $runId @{ stream = 'stdout'; line = "-- Run cancelled. PID $($proc.Id) and its child processes were terminated by DevKit. --" }
+                }
+                & $EmitEvent 'tool.finished' $runId @{ exitCode = $exitCode; cancelled = $cancelled }
+                return [ordered]@{ runId = $runId; exitCode = $exitCode; cancelled = $cancelled }
             } finally {
-                $cancelled = Test-DevKitToolRunCancelled -Entry $runEntry
-                # Dropped LAST: tool.stop's Wait-DevKitToolRunReleased watches
-                # for exactly this to know the tool lane is free again.
-                Unregister-DevKitToolRun -Registry $RunRegistry -RunId $runId
+                # Single-flight gate release on EVERY exit path (a throw before
+                # or after spawn, a kill, a natural finish): the main thread
+                # refuses new tool.run requests while the slot is held.
+                # Ownership-checked so a stale release can never clear a
+                # newer claim. $ToolLaneGate is $null outside a lane runspace
+                # (Pester) - the release no-ops, matching the un-gated claim.
+                Release-DevKitToolLaneSlot -Gate $ToolLaneGate -Token $gateToken
             }
-
-            if ($cancelled) {
-                # stdout, not stderr: a cancelled run is not a failed one, and
-                # the dialog paints stderr red. This is deliberately the last
-                # console line a cancelled run produces, so the app and the
-                # recorded run history both end on the plain truth.
-                & $EmitEvent 'tool.output' $runId @{ stream = 'stdout'; line = "-- Run cancelled. PID $($proc.Id) and its child processes were terminated by DevKit. --" }
-            }
-            & $EmitEvent 'tool.finished' $runId @{ exitCode = $exitCode; cancelled = $cancelled }
-            return [ordered]@{ runId = $runId; exitCode = $exitCode; cancelled = $cancelled }
         }
 
         'tool.stop' {

@@ -58,6 +58,40 @@ Describe "Test-DevKitRpcArrayMethod" {
         Test-DevKitRpcArrayMethod -Method 'metrics.system' | Should -BeFalse
         Test-DevKitRpcArrayMethod -Method 'no.such.method' | Should -BeFalse
     }
+
+    It "is false for the removed junk/excluded-ports methods" {
+        # metrics.junk / junk.clear / metrics.excludedPorts were dead RPC
+        # surface (zero callers) and are gone - including the registry entry.
+        Test-DevKitRpcArrayMethod -Method 'metrics.excludedPorts' | Should -BeFalse
+        Test-DevKitRpcArrayMethod -Method 'metrics.junk' | Should -BeFalse
+        Test-DevKitRpcArrayMethod -Method 'junk.clear' | Should -BeFalse
+    }
+}
+
+Describe "settings.set input validation" {
+
+    It "rejects a string preferences value before anything is written" {
+        # A non-object preferences made the merge loop enumerate scalar
+        # properties and write junk keys into settings.json - the gate must
+        # trip first, so this throw happens before Set-DevKitSettings runs.
+        $params = [PSCustomObject]@{ settings = [PSCustomObject]@{ preferences = 'not-an-object' } }
+        { Invoke-DevKitRpcMethod -Method 'settings.set' -Params $params -EmitEvent {} } | Should -Throw '*preferences*'
+    }
+
+    It "rejects an array preferences value" {
+        $params = [PSCustomObject]@{ settings = [PSCustomObject]@{ preferences = @('a', 'b') } }
+        { Invoke-DevKitRpcMethod -Method 'settings.set' -Params $params -EmitEvent {} } | Should -Throw '*preferences*'
+    }
+
+    It "rejects a non-object settings root" {
+        $params = [PSCustomObject]@{ settings = 'junk' }
+        { Invoke-DevKitRpcMethod -Method 'settings.set' -Params $params -EmitEvent {} } | Should -Throw '*"settings"*'
+    }
+
+    It "rejects a null preferences (null is not 'no patch' - it would clobber on-disk preferences)" {
+        $params = [PSCustomObject]@{ settings = [PSCustomObject]@{ preferences = $null } }
+        { Invoke-DevKitRpcMethod -Method 'settings.set' -Params $params -EmitEvent {} } | Should -Throw '*preferences*required*'
+    }
 }
 
 Describe "Get-DevKitRpcParam" {

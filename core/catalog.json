@@ -29,12 +29,12 @@
           "requiresFile": null,
           "prompts": [
             {
-              "Type": "Int",
               "Name": "Port",
-              "Min": 1,
-              "Max": 65535,
               "InvalidMessage": "Invalid port number.",
-              "Prompt": "Enter port number"
+              "Type": "Int",
+              "Max": 65535,
+              "Prompt": "Enter port number",
+              "Min": 1
             }
           ],
           "staticArgs": {
@@ -52,12 +52,12 @@
           "requiresFile": null,
           "prompts": [
             {
-              "Type": "Int",
               "Name": "ProcessId",
-              "Min": 1,
-              "Max": 2147483647,
               "InvalidMessage": "Invalid PID.",
-              "Prompt": "Enter PID to kill"
+              "Type": "Int",
+              "Max": 2147483647,
+              "Prompt": "Enter PID to kill",
+              "Min": 1
             }
           ],
           "staticArgs": null
@@ -85,12 +85,12 @@
           "requiresFile": null,
           "prompts": [
             {
-              "Type": "Int",
               "Name": "Port",
-              "Min": 1,
-              "Max": 65535,
               "InvalidMessage": "Invalid port number.",
-              "Prompt": "Enter port number"
+              "Type": "Int",
+              "Max": 65535,
+              "Prompt": "Enter port number",
+              "Min": 1
             }
           ],
           "staticArgs": {
@@ -108,12 +108,12 @@
           "requiresFile": null,
           "prompts": [
             {
-              "Type": "Int",
               "Name": "Port",
-              "Min": 1,
-              "Max": 65535,
               "InvalidMessage": "Invalid port number.",
-              "Prompt": "Enter port number"
+              "Type": "Int",
+              "Max": 65535,
+              "Prompt": "Enter port number",
+              "Min": 1
             }
           ],
           "staticArgs": null
@@ -141,10 +141,10 @@
           "requiresFile": null,
           "prompts": [
             {
-              "Type": "String",
-              "Name": "Url",
               "Optional": true,
-              "Prompt": "Enter URL to test (blank = scan listening dev ports)"
+              "Prompt": "Enter URL to test (blank = scan listening dev ports)",
+              "Name": "Url",
+              "Type": "String"
             }
           ],
           "staticArgs": null
@@ -161,8 +161,8 @@
           "key": "1",
           "label": "Clear NPM Cache",
           "script": "Clear-NpmCache.ps1",
-          "help": "Clears the local package-manager cache for the project at -Path (defaults to the current directory). Auto-detects npm/yarn/pnpm/bun from lock files and runs the matching cache-clean command (npm cache clean --force / pnpm store prune / yarn cache clean --all / bun pm cache rm). -Verify additionally runs 'npm cache verify' afterward (npm only - other package managers have no equivalent). Use this when installs are behaving oddly and you want a clean package-manager cache without touching node_modules or any project files. Safety note: mutates the package manager's own (global, per-user) cache - runs immediately with no confirmation prompt and no -Force/-DryRun switch, unlike the other mutating tools in this category.",
-          "caution": true,
+          "help": "Clears the local package-manager cache for the project at -Path (defaults to the current directory). Auto-detects npm/yarn/pnpm/bun from lock files and runs the matching cache-clean command (npm cache clean --force / pnpm store prune / yarn cache clean --all / bun pm cache rm). -Verify additionally runs 'npm cache verify' afterward (npm only - other package managers have no equivalent). Use this when installs are behaving oddly and you want a clean package-manager cache without touching node_modules or any project files. Note: mutates the package manager's own (global, per-user) cache - a fully regenerable store, so the irreversible-changes confirmation does not apply - and runs immediately with no confirmation prompt and no -Force/-DryRun switch, unlike the other mutating tools in this category.",
+          "caution": false,
           "requiresProject": false,
           "projectArgName": null,
           "requiresFile": null,
@@ -209,12 +209,19 @@
           "key": "5",
           "label": "Run Package Script (npm run picker)",
           "script": "Start-PackageScript.ps1",
-          "help": "The daily-driver 'npm run' picker (RequiresProject - the menu prompts you to pick a linked project first; from the command line, use -Path): lists the scripts defined in the project's package.json in an arrow-key menu and runs the chosen one with the project's detected package manager via '<pm> run <name>' (works for npm/pnpm/yarn/bun). Pass -Name to skip the picker and run a script directly. Use this instead of typing npm run dev / npm test / npm run build by hand. Safety note: this runs the project's OWN package.json script verbatim - whatever command the project author put there - with no confirmation, since running scripts is the entire point of the tool; DevKit itself never installs, deletes, or modifies anything.",
+          "help": "The daily-driver 'npm run' picker (RequiresProject - the menu prompts you to pick a linked project first; from the command line, use -Path): lists the scripts defined in the project's package.json in an arrow-key menu and runs the chosen one with the project's detected package manager via '<pm> run <name>' (works for npm/pnpm/yarn/bun). Pass -Name to skip the picker and run a script directly - headless runners (the Control Center's Run dialog) always require -Name since the picker menu needs an interactive terminal; run the .bat wrapper (or the .ps1) directly in a terminal for the interactive picker. Use this instead of typing npm run dev / npm test / npm run build by hand. Safety note: this runs the project's OWN package.json script verbatim - whatever command the project author put there - with no confirmation, since running scripts is the entire point of the tool; DevKit itself never installs, deletes, or modifies anything.",
           "caution": true,
           "requiresProject": true,
           "projectArgName": null,
           "requiresFile": null,
-          "prompts": null,
+          "prompts": [
+            {
+              "InvalidMessage": "Enter a script name.",
+              "Prompt": "Enter the package.json script name to run (e.g. dev, build, test)",
+              "Name": "Name",
+              "Type": "String"
+            }
+          ],
           "staticArgs": null
         },
         {
@@ -284,18 +291,18 @@
           "requiresFile": null,
           "prompts": [
             {
-              "Type": "YesNo",
-              "Name": "Turbo",
               "Optional": true,
-              "Prompt": "Clear Turbopack cache too?"
+              "Prompt": "Clear Turbopack cache too?",
+              "Name": "Turbo",
+              "Type": "YesNo"
             },
             {
-              "Type": "Int",
-              "Min": 1,
               "Name": "Port",
-              "Optional": true,
+              "Type": "Int",
               "Max": 65535,
-              "Prompt": "Port (press Enter for default)"
+              "Prompt": "Port (0 = package default; press Enter for default)",
+              "Min": 0,
+              "Optional": true
             }
           ],
           "staticArgs": null
@@ -387,13 +394,13 @@
           "requiresFile": null,
           "prompts": [
             {
-              "Type": "Int",
-              "Optional": true,
               "Name": "Hours",
-              "Min": 1,
-              "Max": 720,
               "InvalidMessage": "Invalid hours.",
-              "Prompt": "How many hours back? (blank = 24)"
+              "Type": "Int",
+              "Max": 720,
+              "Prompt": "How many hours back? (blank = 24)",
+              "Min": 1,
+              "Optional": true
             }
           ],
           "staticArgs": null
@@ -434,8 +441,8 @@
           "key": "3",
           "label": "Quick Logs (multi-container)",
           "script": "Docker-QuickLogs.ps1",
-          "help": "Tails 'docker logs' for one or more containers at once (all running containers by default, or specific names via -Container), with a distinct color prefix per container, an initial line count (-Lines, default 50), optional -Timestamps, and optional -Follow to keep streaming instead of printing the last N lines and exiting. Use this to watch several services' logs together during local development. Safety note: read-only against Docker (no containers/images/volumes are touched), but with -Follow it blocks the terminal indefinitely - press Ctrl+C to stop, and never invoke -Follow from an unattended/non-interactive context.",
-          "caution": true,
+          "help": "Tails 'docker logs' for one or more containers at once (all running containers by default, or specific names via -Container), with a distinct color prefix per container, an initial line count (-Lines, default 50), optional -Timestamps, and optional -Follow to keep streaming instead of printing the last N lines and exiting. Use this to watch several services' logs together during local development. Note: read-only against Docker (no containers/images/volumes are touched), but with -Follow it blocks the terminal indefinitely - press Ctrl+C to stop, and never invoke -Follow from an unattended/non-interactive context.",
+          "caution": false,
           "requiresProject": false,
           "projectArgName": null,
           "requiresFile": null,
@@ -466,10 +473,10 @@
           "key": "2",
           "label": "Backup Environment Variables",
           "script": "Env-Backup.ps1",
-          "help": "Writes a timestamped JSON snapshot of current User environment variables (and Machine variables too, if run elevated) to disk - additive only, it never changes the live environment. Variable names that look like secrets (TOKEN/KEY/SECRET/PASSWORD/CREDENTIAL/CONNECTIONSTRING/API_KEY) are redacted by default; pass -IncludeSecrets or -Redact:$false to store raw values instead. From this menu it asks you to pick a linked project first and saves the backup file there. Safety note: shows a warning that the file may contain secrets and asks to continue before writing, unless -Force is passed - low risk overall since it only ever creates a new file, never overwrites or deletes anything.",
+          "help": "Writes a timestamped JSON snapshot of current User environment variables (and Machine variables too, if run elevated) to disk - additive only, it never changes the live environment. By default it saves under %LOCALAPPDATA%\\NorthstarDevKit\\backups - outside any project or git repo - so a secrets-adjacent file is never dropped into a repository; pass -OutputPath to choose a different folder. Variable names that look like secrets (TOKEN/KEY/SECRET/PASSWORD/CREDENTIAL/CONNECTIONSTRING/API_KEY) are redacted by default; pass -IncludeSecrets or -Redact:$false to store raw values instead. Safety note: shows a warning that the file may contain secrets and asks to continue before writing, unless -Force is passed - low risk overall since it only ever creates a new file, never overwrites or deletes anything.",
           "caution": true,
-          "requiresProject": true,
-          "projectArgName": "OutputPath",
+          "requiresProject": false,
+          "projectArgName": null,
           "requiresFile": null,
           "prompts": null,
           "staticArgs": null
@@ -484,8 +491,8 @@
           "projectArgName": null,
           "requiresFile": {
             "ParamName": "BackupFile",
-            "Filter": "DevKit backups (*.json)|*.json|All files (*.*)|*.*",
             "TypePrompt": "Enter backup file path to restore",
+            "Filter": "DevKit backups (*.json)|*.json|All files (*.*)|*.*",
             "Description": "Select an environment backup to restore"
           },
           "prompts": null,
@@ -603,7 +610,7 @@
           "key": "5",
           "label": "Dev Text Converter (base64/url/jwt/guid/hash)",
           "script": "Convert-DevText.ps1",
-          "help": "The 'google-this' converter box, with nothing leaving your machine: Base64 encode/decode, URL encode/decode, Unix timestamp (seconds or milliseconds, auto-detected) to local time, current time to Unix timestamp, new GUID, SHA-256 hash of a string, and JWT header/payload decoding (base64url only - the signature is NEVER verified and the tool says so, so never trust decoded content for authentication). Run with no -Mode for an interactive picker, or pass -Mode and -Input for scripted use; -Clipboard copies the result (the tool's only side effect). Pure .NET, no external dependencies, never touches files or the network.",
+          "help": "The 'google-this' converter box, with nothing leaving your machine: Base64 encode/decode, URL encode/decode, Unix timestamp (seconds or milliseconds, auto-detected) to local time, current time to Unix timestamp, new GUID, SHA-256 hash of a string, and JWT header/payload decoding (base64url only - the signature is NEVER verified and the tool says so, so never trust decoded content for authentication). Run with no -Mode for an interactive picker, or pass -Mode and -Input for scripted use; -Clipboard copies the result (the tool's only side effect). Pure .NET, no external dependencies, never touches files or the network. Note: a bare run needs the interactive mode picker, which the Control Center's headless Run dialog cannot drive - run it bare from the CLI menu or a terminal, or pass -Mode/-Input explicitly when running it any other scripted way.",
           "caution": false,
           "requiresProject": false,
           "projectArgName": null,
@@ -648,8 +655,8 @@
           "requiresFile": null,
           "prompts": null,
           "staticArgs": {
-            "IncludeRecycleBin": true,
-            "IncludePackageCache": true
+            "IncludePackageCache": true,
+            "IncludeRecycleBin": true
           }
         }
       ]
@@ -720,7 +727,7 @@
           "key": "2",
           "label": "Disk Usage Report (top folders by size)",
           "script": "Show-DiskUsageReport.ps1",
-          "help": "Measures the immediate subfolders under a path (defaults to the system drive root) and lists the largest ones by size, descending. Use this to find what's eating disk space before deciding what to clean up manually or with Clear Disk Junk. Fully read-only - never prompts, deletes, or modifies anything, even with custom -Path/-Top values.",
+          "help": "Measures the immediate subfolders under a path (defaults to the system drive root) and lists the largest ones by size, descending. Use this to find what's eating disk space before deciding what to clean up manually or with Clear Disk Junk. By default each subfolder is measured to depth 2 (quick; sizes are estimates that exclude anything deeper) - pass -Depth to change that, or -Full for a complete recursive measure, which can take several minutes on a system drive. Fully read-only - never prompts, deletes, or modifies anything, even with custom -Path/-Top values.",
           "caution": false,
           "requiresProject": false,
           "projectArgName": null,
@@ -946,7 +953,7 @@
           "key": "6",
           "label": "Add MCP Server (From Catalog)",
           "script": "Add-McpServerFromCatalog.ps1",
-          "help": "Browsable picker over a curated catalog of popular MCP servers (Supabase, GitHub, Notion, Linear, Stripe, and more) - pick one, choose a variant if it offers more than one, and answer a few prompts (name, scope, API keys/headers, directories) instead of typing the full 'claude mcp add' command yourself. Use this when you want to add a well-known server without looking up its exact invocation. Safety note: mutates real Claude Code MCP configuration - always confirms first unless -Force is passed.",
+          "help": "Browsable picker over a curated catalog of popular MCP servers (Supabase, GitHub, Notion, Linear, Stripe, and more) - pick one, choose a variant if it offers more than one, and answer a few prompts (name, scope, API keys/headers, directories) instead of typing the full 'claude mcp add' command yourself. Use this when you want to add a well-known server without looking up its exact invocation. Note: this is an interactive picker with no non-interactive parameters, so it is not suitable for the Control Center's headless Run dialog - run it from the CLI menu or a real terminal instead. Safety note: mutates real Claude Code MCP configuration - always confirms first unless -Force is passed.",
           "caution": true,
           "requiresProject": false,
           "projectArgName": null,
@@ -958,7 +965,7 @@
           "key": "7",
           "label": "Scan MCP Setup (Global + Project)",
           "script": "Scan-McpServers.ps1",
-          "help": "Checks which catalog servers are already configured, both globally/user-scope and (if an active project is set) at project scope, and reports what's missing. For each missing entry with an automatable registration, asks whether to add it now, reusing the same catalog add flow as 'Add MCP Server (From Catalog)'. Use this periodically to make sure a project (or this machine) has the MCP servers you expect. Safety note: the scan itself is read-only, but accepting a prompt to add a missing server mutates real Claude Code MCP configuration - always confirms first unless -Force is passed.",
+          "help": "Checks which catalog servers are already configured, both globally/user-scope and (if an active project is set) at project scope, and reports what's missing. For each missing entry with an automatable registration, asks whether to add it now, reusing the same catalog add flow as 'Add MCP Server (From Catalog)'. Use this periodically to make sure a project (or this machine) has the MCP servers you expect. Note: the scan itself is read-only and works headlessly, but the 'add now?' step needs an interactive console - from the Control Center's headless Run dialog the scan completes and the add step is skipped. Safety note: accepting a prompt to add a missing server mutates real Claude Code MCP configuration - always confirms first unless -Force is passed.",
           "caution": true,
           "requiresProject": false,
           "projectArgName": null,
@@ -1014,5 +1021,6 @@
         }
       ]
     }
-  ]
+  ],
+  "loadErrors": []
 }
