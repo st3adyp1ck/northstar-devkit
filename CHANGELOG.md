@@ -2,6 +2,43 @@
 
 All notable changes to Northstar DevKit are documented here.
 
+## [4.7.0] - 2026-09-20
+
+DevKit becomes an admin-only application: a startup gate makes every
+launch path converge on the app running elevated, with one UAC prompt in
+the app's life (at first-run setup) and none after.
+
+### Changed
+
+- **DevKit now always runs as Administrator - there is no un-elevated
+  mode.** A startup gate in the app (`app/src-tauri/src/elevation.rs`,
+  release builds only) runs before the Tauri builder/plugins and redirects
+  every launch through the `NorthstarDevKit-Admin` scheduled-task
+  mechanism: with no elevation task present it shows a native consent
+  dialog and then elevates `Set-DevKitAdminMode.ps1` itself via
+  `ShellExecuteExW(runas)` - the one UAC prompt you ever see; with the
+  task present (and pointing at the current exe) it just starts it and
+  exits, so every launch after that begins elevated and silent, no matter
+  which shortcut, autostart, or updater path started it. A task whose
+  recorded exe no longer matches the running one (moved install, stale
+  copy) is re-registered rather than trusted. Because everything spawned
+  by the app inherits the elevated token, all tools, the RPC sidecar, and
+  the embedded terminal always run with full rights. Two escapes exist for
+  development/support only: debug builds skip the gate, and
+  `DEVKIT_ALLOW_UNELEVATED=1` bypasses it.
+- Trade-offs of the always-elevated model, stated plainly: an elevated
+  window cannot accept drag-and-drop from non-elevated Explorer (a Windows
+  UIPI restriction), and a bug in anything DevKit spawns has
+  machine-wide blast radius. The 'Enable/Disable DevKit Admin Mode'
+  entries are gone from System Tools - there is nothing to toggle.
+- The NSIS uninstaller now also removes the elevation scheduled task, the
+  'DevKit (Admin)' shortcuts, the hidden launcher, and the admin-mode
+  state marker (a `bundle.windows.nsis.installerHooks` hook; best-effort -
+  a leftover task is inert and self-heals on reinstall). One accepted gap:
+  if Start-with-Windows had been moved onto the task's logon trigger,
+  uninstalling removes that autostart rather than restoring the Run-key
+  value.
+
 ## [4.6.0] - 2026-09-20
 
 The full-review release: every surface (widget, Control Center, CLI, RPC
