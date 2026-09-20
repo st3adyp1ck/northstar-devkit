@@ -16,6 +16,34 @@ export class RpcClientError extends Error {
   }
 }
 
+/**
+ * The structured half of a sidecar RPC rejection, recovered from the flat
+ * string the invoke boundary hands back. The sidecar answers a failed
+ * method with `{ kind, message, detail? }`; HostError::Remote is built as
+ * `Remote(err.kind, err.message)` and its Display renders
+ * "sidecar returned an error: {KIND} ({message})" - KIND FIRST, message in
+ * the trailing parentheses (crates/devkit-host/src/host.rs). That flat
+ * string is what rpc_call's Result<T, String> rejection delivers here, so
+ * this parses the kind back out (e.g. toolLaneBusy) for callers to branch
+ * on. The message match is greedy up to the FINAL ")" so messages
+ * containing parentheses round-trip. Anything that doesn't match (local
+ * failures like timeouts and disconnects) comes back with a null kind and
+ * the raw text as the message.
+ */
+export interface RpcRejection {
+  kind: string | null;
+  message: string;
+  /** The exact rejection string, unparsed, for logging. */
+  raw: string;
+}
+
+export function parseRpcError(err: unknown): RpcRejection {
+  const raw = typeof err === "string" ? err : err instanceof Error ? err.message : String(err);
+  const match = raw.match(/^sidecar returned an error: ([A-Za-z][\w]*) \(([\s\S]*)\)$/);
+  if (match) return { kind: match[1], message: match[2], raw };
+  return { kind: null, message: raw, raw };
+}
+
 export async function rpcCall<T>(method: string, params?: Record<string, unknown>): Promise<T> {
   try {
     return await invoke<T>("rpc_call", { method, params: params ?? null });
@@ -70,20 +98,25 @@ export async function onDevKitEvent(handler: (evt: DevKitRpcEvent) => void): Pro
   return listen<DevKitRpcEvent>("devkit://event", (e) => handler(e.payload));
 }
 
-/** Subscribes to just one `runId`'s tool.output/started/finished events - used by the Control Center's tool runner. */
+/** Subscribes to just one `runId`'s tool.started/output/finished events - used by the Control Center's tool runner. */
 export function onToolRun(
   runId: string,
   handlers: {
+    /** Fires when the sidecar confirms the child process exists (carries its pid). Never fires for a refused run. */
+    onStarted?: (pid: number) => void;
     onOutput?: (stream: "stdout" | "stderr", line: string) => void;
-    onFinished?: (exitCode: number) => void;
+    /** `cancelled` is the sidecar's own flag (tool.finished flattens `{exitCode, cancelled}`) - true when the run ended via tool.stop. */
+    onFinished?: (exitCode: number, cancelled: boolean) => void;
   },
 ): Promise<UnlistenFn> {
   return onDevKitEvent((evt) => {
     if (evt.runId !== runId) return;
-    if (evt.event === "tool.output" && evt.stream && evt.line !== undefined) {
+    if (evt.event === "tool.started") {
+      handlers.onStarted?.(Number(evt.pid ?? 0));
+    } else if (evt.event === "tool.output" && evt.stream && evt.line !== undefined) {
       handlers.onOutput?.(evt.stream, evt.line);
     } else if (evt.event === "tool.finished") {
-      handlers.onFinished?.(Number(evt.exitCode ?? -1));
+      handlers.onFinished?.(Number(evt.exitCode ?? -1), evt.cancelled === true);
     }
   });
 }

@@ -1,6 +1,7 @@
-import { motion, useReducedMotion, type Transition } from "framer-motion";
+import { motion, type Transition } from "framer-motion";
 import { Button } from "./primitives/Button";
 import { GlassPanel } from "./primitives/GlassPanel";
+import { useAnimationsEnabled } from "../hooks/useApplyAppearance";
 import type { Update, UpdateDownloadProgress } from "../lib/updater";
 import type { UpdateCheckStatus } from "../stores/useUpdaterStore";
 import "./UpdateDialog.css";
@@ -29,13 +30,16 @@ export interface UpdateDialogProps {
  * handed and reports the two things a person can do: install, or dismiss.
  */
 export function UpdateDialog({ status, update, progress, error, onInstall, onLater }: UpdateDialogProps) {
-  const reducedMotion = useReducedMotion();
+  // In-app Animations setting AND the OS query - useReducedMotion() alone
+  // never sees the setting, and these opacity/scale transitions are exactly
+  // what MotionConfig's positional-only "always" reduction won't suppress.
+  const animationsEnabled = useAnimationsEnabled();
   const busy = status === "downloading" || status === "installing";
 
-  const overlayTransition: Transition = reducedMotion ? { duration: 0 } : { duration: 0.18, ease: [0.2, 0.8, 0.2, 1] };
-  const panelTransition: Transition = reducedMotion
-    ? { duration: 0 }
-    : { type: "spring", stiffness: 420, damping: 32, mass: 0.9 };
+  const overlayTransition: Transition = animationsEnabled ? { duration: 0.18, ease: [0.2, 0.8, 0.2, 1] } : { duration: 0 };
+  const panelTransition: Transition = animationsEnabled
+    ? { type: "spring", stiffness: 420, damping: 32, mass: 0.9 }
+    : { duration: 0 };
 
   function handleOverlayClick() {
     if (busy) return; // don't let a click-outside orphan an in-flight download/install
@@ -54,9 +58,9 @@ export function UpdateDialog({ status, update, progress, error, onInstall, onLat
       transition={overlayTransition}
     >
       <motion.div
-        initial={reducedMotion ? false : { opacity: 0, scale: 0.94, y: 16 }}
+        initial={animationsEnabled ? { opacity: 0, scale: 0.94, y: 16 } : false}
         animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={reducedMotion ? { opacity: 0 } : { opacity: 0, scale: 0.96, y: 8 }}
+        exit={animationsEnabled ? { opacity: 0, scale: 0.96, y: 8 } : { opacity: 0 }}
         transition={panelTransition}
       >
         <GlassPanel strong className="update-dialog">

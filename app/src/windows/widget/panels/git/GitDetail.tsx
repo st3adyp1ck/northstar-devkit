@@ -14,12 +14,14 @@ import "./GitDetail.css";
 
 /**
  * Modals that own Escape while they are up. Mirrors useWidgetFlyout's own
- * list: those dialogs listen on `window` without stopping propagation, so
- * without this check one Escape would dismiss the dialog AND collapse this
- * detail out from under it.
+ * list exactly (that copy is module-private): those dialogs listen on
+ * `window` without stopping propagation, so without this check one Escape
+ * would dismiss the dialog AND collapse this detail out from under it -
+ * including from the tray-mounted Control Center's tool dialog and the
+ * Error Center, which have no Escape handler of their own.
  */
 const DIALOG_OVERLAY_SELECTOR =
-  ".settings-dialog__overlay, .confirm-dialog__overlay, .update-dialog__overlay";
+  ".settings-dialog__overlay, .confirm-dialog__overlay, .update-dialog__overlay, .tool-run-dialog__overlay, .error-center__overlay, .project-manager__overlay";
 
 function openExternal(url: string) {
   openUrl(url).catch(() => {

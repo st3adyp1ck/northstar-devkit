@@ -14,6 +14,13 @@ interface RunHistoryListProps {
    * confirm prompt can't be forgotten at a call site.
    */
   onRunAgain?: (entry: RunHistoryEntry) => void;
+  /**
+   * Stops a still-running row through the host's tool.stop path. Optional
+   * because not every host can stop: hosts that own a single active run
+   * (ToolRunDialog) pass theirs, hosts that don't simply render no Stop
+   * button, exactly as before.
+   */
+  onStopRun?: (entry: RunHistoryEntry) => Promise<void>;
   /** Denser type and padding for the widget's narrow column. */
   compact?: boolean;
   /** Rows rendered; the store retains settings.preferences.runHistoryLimit. */
@@ -54,6 +61,7 @@ function formatDuration(startedAt: string, finishedAt: string | null): string {
 
 function ExitBadge({ entry }: { entry: RunHistoryEntry }) {
   if (entry.finishedAt === null) return <Badge tone="accent">running</Badge>;
+  if (entry.cancelled) return <Badge tone="warning">cancelled</Badge>;
   if (entry.detached || entry.exitCode === null) return <Badge tone="warning">unknown</Badge>;
   return <Badge tone={entry.exitCode === 0 ? "success" : "danger"}>exit {entry.exitCode}</Badge>;
 }
@@ -64,6 +72,7 @@ interface RunHistoryRowProps {
   compact: boolean;
   busy: boolean;
   onRunAgain?: (entry: RunHistoryEntry) => void;
+  onStopRun?: (entry: RunHistoryEntry) => Promise<void>;
 }
 
 /**
@@ -71,15 +80,18 @@ interface RunHistoryRowProps {
  * streamed output line of an in-flight run: without this, one chatty tool
  * would re-render all 50 rows - transcripts included - per line. Only the
  * row whose entry object actually changed re-renders, which is why the
- * list hands rows a stable `onRunAgain` (see RunHistoryList).
+ * list hands rows stable `onRunAgain`/`onStopRun` callbacks (see
+ * RunHistoryList).
  */
-const RunHistoryRow = memo(function RunHistoryRow({ entry, now, compact, busy, onRunAgain }: RunHistoryRowProps) {
+const RunHistoryRow = memo(function RunHistoryRow({ entry, now, compact, busy, onRunAgain, onStopRun }: RunHistoryRowProps) {
   const [open, setOpen] = useState(false);
   // Same lazy-mount contract as the Expander primitive: with 50 rows in the
   // list there is no reason to build 50 consoles nobody has opened, but a
   // row that HAS been opened stays mounted so collapsing it still animates.
   const [everOpened, setEverOpened] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const confirmDestructive = useConfirmDestructive();
+  const removeRun = useRunHistoryStore((s) => s.removeRun);
 
   function toggle() {
     setOpen((v) => {
@@ -112,32 +124,57 @@ const RunHistoryRow = memo(function RunHistoryRow({ entry, now, compact, busy, o
     }
   }
 
+  function stop() {
+    if (stopping || !onStopRun) return;
+    setStopping(true);
+    // The button is just a spinner while the stop is in flight; the row's
+    // own tool.finished finalizes it (exit -1) regardless of the outcome.
+    void Promise.resolve(onStopRun(entry)).finally(() => setStopping(false));
+  }
+
   const duration = formatDuration(entry.startedAt, entry.finishedAt);
 
   return (
     <div className="run-history__row">
-      <button type="button" className="run-history__trigger" aria-expanded={open} onClick={toggle}>
-        <svg
-          className={clsx("run-history__chevron", open && "run-history__chevron--open")}
-          width="10"
-          height="10"
-          viewBox="0 0 10 10"
-          aria-hidden="true"
-        >
-          <path d="M1 3 L5 7 L9 3" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-        <span className="run-history__ident">
-          <span className="run-history__label">{entry.label}</span>
-          <span className="run-history__script">
-            {entry.folder}/{entry.script}
+      <div className="run-history__head">
+        <button type="button" className="run-history__trigger" aria-expanded={open} onClick={toggle}>
+          <svg
+            className={clsx("run-history__chevron", open && "run-history__chevron--open")}
+            width="10"
+            height="10"
+            viewBox="0 0 10 10"
+            aria-hidden="true"
+          >
+            <path d="M1 3 L5 7 L9 3" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <span className="run-history__ident">
+            <span className="run-history__label">{entry.label}</span>
+            <span className="run-history__script">
+              {entry.folder}/{entry.script}
+            </span>
           </span>
-        </span>
-        <span className="run-history__meta">
-          <span>{relativeTime(entry.startedAt, now)}</span>
-          {duration && <span className="run-history__duration">{duration}</span>}
-          <ExitBadge entry={entry} />
-        </span>
-      </button>
+          <span className="run-history__meta">
+            <span>{relativeTime(entry.startedAt, now)}</span>
+            {duration && <span className="run-history__duration">{duration}</span>}
+            <ExitBadge entry={entry} />
+          </span>
+        </button>
+        {entry.finishedAt === null ? (
+          onStopRun && (
+            <div className="run-history__row-actions">
+              <Button size="sm" variant="danger" loading={stopping} onClick={stop}>
+                {stopping ? "Stopping" : "Stop"}
+              </Button>
+            </div>
+          )
+        ) : (
+          <div className="run-history__row-actions">
+            <Button size="sm" variant="ghost" onClick={() => removeRun(entry.id)}>
+              Dismiss
+            </Button>
+          </div>
+        )}
+      </div>
 
       <div className={clsx("run-history__panel", open && "run-history__panel--open")}>
         <div className="run-history__panel-inner">
@@ -189,11 +226,13 @@ const RunHistoryRow = memo(function RunHistoryRow({ entry, now, compact, busy, o
  * (components/ToolConsole).
  *
  * Rendered inside a host that owns execution (ToolRunDialog, the widget's
- * QuickActionsPanel) - the host supplies `onRunAgain` and this component
- * supplies the confirm gate, so re-running Docker Nuke from history is
- * exactly as guarded as running it the first time.
+ * QuickActionsPanel) - the host supplies `onRunAgain`/`onStopRun` and this
+ * component supplies the confirm gate, so re-running Docker Nuke from
+ * history is exactly as guarded as running it the first time, and a row of
+ * a still-running tool can be stopped without hunting down whichever
+ * surface launched it.
  */
-export function RunHistoryList({ onRunAgain, compact = false, maxRows, busy = false }: RunHistoryListProps) {
+export function RunHistoryList({ onRunAgain, onStopRun, compact = false, maxRows, busy = false }: RunHistoryListProps) {
   const entries = useRunHistoryStore((s) => s.entries);
   const clear = useRunHistoryStore((s) => s.clear);
   const confirmDestructive = useConfirmDestructive();
@@ -204,14 +243,20 @@ export function RunHistoryList({ onRunAgain, compact = false, maxRows, busy = fa
     return () => clearInterval(timer);
   }, []);
 
-  // Hosts rebuild their onRunAgain closure every render; rows need a stable
-  // identity for memo to be worth anything, so the live one is read through
-  // a ref at click time instead of being passed down directly.
+  // Hosts rebuild their onRunAgain/onStopRun closures every render; rows
+  // need stable identities for memo to be worth anything, so the live ones
+  // are read through refs at click time instead of being passed down
+  // directly.
   const runAgainRef = useRef(onRunAgain);
   useEffect(() => {
     runAgainRef.current = onRunAgain;
   }, [onRunAgain]);
   const handleRunAgain = useCallback((entry: RunHistoryEntry) => runAgainRef.current?.(entry), []);
+  const stopRunRef = useRef(onStopRun);
+  useEffect(() => {
+    stopRunRef.current = onStopRun;
+  }, [onStopRun]);
+  const handleStopRun = useCallback((entry: RunHistoryEntry) => stopRunRef.current?.(entry) ?? Promise.resolve(), []);
 
   const rows = maxRows ? entries.slice(0, maxRows) : entries;
 
@@ -258,6 +303,7 @@ export function RunHistoryList({ onRunAgain, compact = false, maxRows, busy = fa
               compact={compact}
               busy={busy}
               onRunAgain={onRunAgain ? handleRunAgain : undefined}
+              onStopRun={onStopRun ? handleStopRun : undefined}
             />
           ))}
         </div>

@@ -24,6 +24,7 @@
  */
 
 import { useErrorStore, type ErrorInput } from "../stores/useErrorStore";
+import { parseRpcError } from "./ipc";
 
 /** Stacks and event messages can be enormous; the detail view only needs so much. */
 const MAX_DETAIL_CHARS = 8000;
@@ -235,6 +236,15 @@ export function recordRpcFailure(method: string, err: unknown): void {
     if (method.startsWith(prefix)) return;
   }
   markRecorded(err);
+  // A toolLaneBusy refusal is expected flow, not a fault: the widget's run
+  // channel already surfaces "Another DevKit tool is already running…"
+  // inline where the click happened, so a permanent Error Center row would
+  // be noise for an already-explained click. Only the lane-busy KIND is
+  // skipped - genuine tool.run failures (unknown script, spawn errors) are
+  // exactly what this row exists for. markRecorded above still runs first:
+  // an uncaught refusal must not resurface as a generic unhandled-rejection
+  // row either.
+  if (parseRpcError(err).kind === "toolLaneBusy") return;
   const described = describeThrown(err);
   const kind = errorKind(described.message);
   recordAppError({

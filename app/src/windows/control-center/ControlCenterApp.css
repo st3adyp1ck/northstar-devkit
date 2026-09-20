@@ -69,6 +69,23 @@
   border-radius: var(--radius-md);
 }
 
+/* Partial-catalog notice (catalog.get's loadErrors): a degraded warning,
+   not a failure - the loaded categories below are fully usable. */
+.control-center__notice--warning {
+  background: color-mix(in srgb, var(--signal-amber) 12%, transparent);
+  border-color: color-mix(in srgb, var(--signal-amber) 36%, transparent);
+  color: var(--signal-amber);
+}
+
+/* Match-count chip shown beside the search box while a query is active. */
+.control-center__count {
+  flex-shrink: 0;
+  font-size: var(--text-2xs);
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .control-center__search {
   flex: 1;
   width: 100%;

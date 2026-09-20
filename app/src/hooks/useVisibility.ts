@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 
@@ -34,66 +34,111 @@ interface VisibilityEventPayload {
  * the explicit event, `document.hidden` can end up permanently stuck
  * reporting `true`, with nothing left to ever correct it and polling never
  * starting at all. If that turns out not to hold on some WebView2 version,
- * the `document.hidden` listener below is still there as a second,
- * independent way to end up in the correct state.
+ * the `document.hidden` listener is still there as a second, independent
+ * way to end up in the correct state.
+ *
+ * Shared, not per-hook: a window mounts this hook ten-plus times (every
+ * usePolledRpc instance, the TitleBar indicators, the CSS-animation gate),
+ * and each instance used to attach its own `devkit://visibility` listener
+ * and fire its own one-shot `isVisible()` IPC on mount. The signals are
+ * window-global, so the module now keeps ONE subscription per window - the
+ * first subscriber attaches it, the last detach tears it down - and every
+ * hook instance just reads the shared value through useSyncExternalStore.
+ * Initial state is unchanged: with no subscription started yet, the snapshot
+ * falls back to `!document.hidden`, exactly what the old per-instance
+ * useState seeded itself with.
  */
+
+let current: boolean | undefined;
+const listeners = new Set<() => void>();
+
+// Bump-per-start generation token: async work from a torn-down subscription
+// (a StrictMode remount, every consumer unmounting) can still resolve
+// afterwards, and must neither leak a listener nor clobber the new
+// generation's state. Same discipline as the old per-instance effect's
+// `cancelled` flag.
+let generation = 0;
+let removeDocumentListener: (() => void) | undefined;
+let unlistenDevkit: (() => void) | undefined;
+
+function emit(gen: number, visible: boolean): void {
+  if (gen !== generation) return;
+  if (current === visible) return;
+  current = visible;
+  for (const notify of listeners) notify();
+}
+
+function startSharedSubscription(): void {
+  const gen = ++generation;
+  current = !document.hidden;
+  const onDocumentChange = () => emit(gen, !document.hidden);
+  document.addEventListener("visibilitychange", onDocumentChange);
+  removeDocumentListener = () => document.removeEventListener("visibilitychange", onDocumentChange);
+
+  void (async () => {
+    const win = getCurrentWindow();
+    const label = win.label;
+    const un = await listen<VisibilityEventPayload>("devkit://visibility", (e) => {
+      if (e.payload.label === label) emit(gen, e.payload.visible);
+    });
+    // The subscription may have been torn down while `listen` was resolving -
+    // unlisten right away rather than stashing a handle the current
+    // generation would never call.
+    if (gen !== generation) {
+      un();
+    } else {
+      unlistenDevkit = un;
+    }
+    // THEN ask the OS what is actually true right now. Neither signal above
+    // covers a window that was created hidden and never shown: no
+    // set_window_visible call has run for it, so the devkit:// event never
+    // fires - and `document.hidden` turns out to be FALSE there anyway
+    // (measured on WebView2 151: the webview reports "visible" for the
+    // never-shown window, because Chromium disables occlusion tracking
+    // entirely for transparent windows). That is exactly the Control Center
+    // window at boot, which therefore spent its life polling and spinning a
+    // loading spinner at 60fps into a window nobody had ever seen - about a
+    // third of a core, measured.
+    //
+    // The OS answer is used AS-IS, not ANDed with !document.hidden: the
+    // docstring's contingency is document.hidden stuck TRUE on a
+    // created-hidden window, and folding it in here would nail this window
+    // invisible forever on exactly that WebView2 version. This is a one-shot
+    // seed in a last-write-wins design - the two listeners above keep
+    // correcting it, and events/responses do not share one ordered channel,
+    // so no ordering guarantee is claimed beyond "the seed reflects the OS
+    // state at resolution time".
+    try {
+      const actuallyVisible = await win.isVisible();
+      emit(gen, actuallyVisible);
+    } catch {
+      // Query failed - keep whatever the other two signals said.
+    }
+  })();
+}
+
+function stopSharedSubscription(): void {
+  generation++;
+  removeDocumentListener?.();
+  removeDocumentListener = undefined;
+  unlistenDevkit?.();
+  unlistenDevkit = undefined;
+  current = undefined;
+}
+
+function subscribe(notify: () => void): () => void {
+  listeners.add(notify);
+  if (listeners.size === 1) startSharedSubscription();
+  return () => {
+    listeners.delete(notify);
+    if (listeners.size === 0) stopSharedSubscription();
+  };
+}
+
+function getSnapshot(): boolean {
+  return current ?? !document.hidden;
+}
+
 export function useVisibility(): boolean {
-  const [visible, setVisible] = useState(!document.hidden);
-
-  useEffect(() => {
-    const onDocumentChange = () => setVisible(!document.hidden);
-    document.addEventListener("visibilitychange", onDocumentChange);
-
-    let unlisten: (() => void) | undefined;
-    let cancelled = false;
-
-    void (async () => {
-      const win = getCurrentWindow();
-      const label = win.label;
-      const un = await listen<VisibilityEventPayload>("devkit://visibility", (e) => {
-        if (e.payload.label === label) setVisible(e.payload.visible);
-      });
-      // The effect may have been torn down while `listen` was still
-      // resolving (e.g. a fast unmount) - unlisten right away instead of
-      // stashing a handle nothing will ever call.
-      if (cancelled) {
-        un();
-      } else {
-        unlisten = un;
-      }
-      // THEN ask the OS what is actually true right now. Neither signal
-      // above covers a window that was created hidden and never shown: no
-      // set_window_visible call has run for it, so the devkit:// event
-      // never fires - and `document.hidden` turns out to be FALSE there
-      // anyway (measured on WebView2 151: the webview reports "visible"
-      // for the never-shown window, because Chromium disables occlusion
-      // tracking entirely for transparent windows). That is exactly the
-      // Control Center window at boot, which therefore spent its life
-      // polling and spinning a loading spinner at 60fps into a window
-      // nobody had ever seen - about a third of a core, measured.
-      //
-      // The OS answer is used AS-IS, not ANDed with !document.hidden: the
-      // docstring's contingency is document.hidden stuck TRUE on a
-      // created-hidden window, and folding it in here would nail this
-      // window invisible forever on exactly that WebView2 version. This is
-      // a one-shot seed in a last-write-wins design - the two listeners
-      // above keep correcting it, and events/responses do not share one
-      // ordered channel, so no ordering guarantee is claimed beyond "the
-      // seed reflects the OS state at resolution time".
-      try {
-        const actuallyVisible = await win.isVisible();
-        if (!cancelled) setVisible(actuallyVisible);
-      } catch {
-        // Query failed - keep whatever the other two signals said.
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      document.removeEventListener("visibilitychange", onDocumentChange);
-      unlisten?.();
-    };
-  }, []);
-
-  return visible;
+  return useSyncExternalStore(subscribe, getSnapshot);
 }

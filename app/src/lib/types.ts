@@ -141,6 +141,25 @@ export interface ToolPrompt {
   InvalidMessage?: string;
 }
 
+/**
+ * A catalog item's `RequiresFile` spec, passed through verbatim from the
+ * manifest entry (see RpcMethods.ps1's catalog.get flattening - it forwards
+ * $item.RequiresFile untouched, so the PascalCase keys of the .psd1
+ * hashtable arrive as-is, and null for items without one). The dialog
+ * renders a text input + native browse for it and passes the chosen path as
+ * -<ParamName> <path> (the same splatting contract Build-DevKitToolCall
+ * applies to the file value).
+ */
+export interface RequiresFileSpec {
+  Description: string;
+  /** WinForms OpenFileDialog filter string ("Desc (*.json)|*.json|All files (*.*)|*.*") - parsed to tauri dialog filters client-side. */
+  Filter: string;
+  /** The form field's label, e.g. "Enter backup file path to restore". */
+  TypePrompt: string;
+  /** The script parameter the chosen path is passed as, e.g. "BackupFile". */
+  ParamName: string;
+}
+
 export interface CatalogItem {
   key: string;
   label: string;
@@ -149,7 +168,7 @@ export interface CatalogItem {
   caution: boolean;
   requiresProject: boolean;
   projectArgName: string | null;
-  requiresFile: unknown;
+  requiresFile: RequiresFileSpec | null;
   prompts: ToolPrompt[] | null;
   staticArgs: Record<string, unknown> | null;
 }
@@ -164,6 +183,13 @@ export interface CatalogModule {
 
 export interface Catalog {
   modules: CatalogModule[];
+  /**
+   * Names/descriptions of tool categories whose manifest failed to load,
+   * empty when the catalog built clean. Surfaced as a dismissible warning
+   * banner rather than a hard error - a broken category must not hide the
+   * ones that loaded.
+   */
+  loadErrors: string[];
 }
 
 // ---------- projects.* ----------
@@ -420,15 +446,6 @@ export interface DevKitPreferences {
 export interface DevKitSettings {
   schemaVersion: number;
   preferences: DevKitPreferences;
-}
-
-// ---------- junk ----------
-export interface JunkReport {
-  BytesBefore?: number;
-  BytesAfter?: number;
-  FreedBytes?: number;
-  TotalReclaimableBytes?: number;
-  [key: string]: unknown;
 }
 
 // ---------- tool.run ----------

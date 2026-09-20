@@ -14,6 +14,11 @@
   box-shadow: var(--shadow-lg);
 }
 
+/* Mount-focus target + the a11y dialog role; no visible ring on the panel. */
+.confirm-dialog__panel {
+  outline: none;
+}
+
 .confirm-dialog__title {
   font-size: var(--text-lg);
   font-weight: 700;

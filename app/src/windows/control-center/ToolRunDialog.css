@@ -84,6 +84,79 @@
   font-size: var(--text-sm);
 }
 
+/* Focus target for mount focus + the a11y dialog role - no visible ring on
+   the panel itself, its controls keep their own focus styles. */
+.tool-run-dialog__panel {
+  outline: none;
+}
+
+/* requiresFile field: the path input takes the room, the browse button sits
+   at its trailing edge. */
+.tool-run-dialog__file-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.tool-run-dialog__file-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Read-only rendering of the item's staticArgs - what the Run will apply
+   beyond the fields above, so "Close Out Session (Deep)" visibly carries
+   -IncludeRecycleBin -IncludePackageCache. */
+.tool-run-dialog__static-args {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  font-size: var(--text-2xs);
+  color: var(--text-tertiary);
+}
+
+.tool-run-dialog__arg-chip {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  color: var(--text-secondary);
+  background: var(--surface-sunken);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-sm);
+  padding: 2px var(--space-2);
+}
+
+/* A run that never launched: the tool.run RPC rejected before tool.started.
+   --lane-busy is the sidecar's "the tool lane is occupied" refusal, which
+   points at Run history (where the occupying run can be stopped). */
+.tool-run-dialog__launch-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  background: var(--danger-soft);
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+  border-radius: var(--radius-md);
+  color: var(--danger-strong);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  padding: var(--space-2) var(--space-3);
+}
+
+.tool-run-dialog__launch-error--lane-busy {
+  background: color-mix(in srgb, var(--signal-amber) 14%, transparent);
+  border-color: color-mix(in srgb, var(--signal-amber) 40%, transparent);
+  color: var(--signal-amber);
+}
+
+.tool-run-dialog__launch-error-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
 .tool-run-dialog__actions {
   display: flex;
   align-items: center;

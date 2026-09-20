@@ -1,21 +1,27 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { motion, type Transition } from "framer-motion";
-import { rpcCall, onToolRun } from "../../lib/ipc";
+import { open } from "@tauri-apps/plugin-dialog";
+import type { UnlistenFn } from "@tauri-apps/api/event";
+import clsx from "clsx";
+import { rpcCall, onToolRun, onDevKitEvent, parseRpcError } from "../../lib/ipc";
 import { useProjectStore } from "../../stores/useProjectStore";
 import { useRunHistoryStore, type RunHistoryEntry } from "../../stores/useRunHistoryStore";
 import { useConfirmDestructive } from "../../hooks/useConfirmDestructive";
+import { useAnimationsEnabled } from "../../hooks/useApplyAppearance";
 import { playSound } from "../../lib/sounds";
 import { Button } from "../../components/primitives/Button";
 import { GlassPanel } from "../../components/primitives/GlassPanel";
 import { Badge } from "../../components/primitives/Badge";
 import { Expander } from "../../components/primitives/Expander";
 import { RunHistoryList } from "../../components/history/RunHistoryList";
-import type { CatalogItem, CatalogModule } from "../../lib/types";
+import type { CatalogItem, CatalogModule, DirChildrenResult } from "../../lib/types";
 import "./ToolRunDialog.css";
 
 interface ToolRunDialogProps {
   module: CatalogModule;
   item: CatalogItem;
+  /** Mounted as the widget's embedded tray pane (no picker of its own) vs the standalone window. */
+  embedded?: boolean;
   onClose: () => void;
 }
 
@@ -61,18 +67,105 @@ interface ToolStopResult {
  */
 const MAX_CONSOLE_LINES = 2000;
 
-/** Same OS reduced-motion check the Control Center grid/nav use - see ControlCenterApp.tsx for the longer rationale. */
-function usePrefersReducedMotion(): boolean {
-  const [reduced, setReduced] = useState(
-    () => typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches,
-  );
-  useEffect(() => {
-    const mql = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const onChange = () => setReduced(mql.matches);
-    mql.addEventListener("change", onChange);
-    return () => mql.removeEventListener("change", onChange);
-  }, []);
-  return reduced;
+/**
+ * How long streamed console lines may pile up in the buffer before a flush.
+ * tool.output events arrive one line at a time and a chatty tool can emit
+ * ~1,800/s; committing each line as its own setLines gave the dialog one
+ * full re-render per line. Coalescing to a ~100ms window caps that at ~10
+ * re-renders/s while the run is live; tool.finished and every dialog state
+ * change (stop, close) flush immediately so nothing is ever left pending.
+ */
+const STREAM_FLUSH_MS = 100;
+
+/**
+ * Runs this dialog stopped watching while still live - Close mid-run,
+ * "Stop watching", or a new run replacing a degraded one. The history row
+ * keeps its runId and stays "running", and this single watcher finalizes it
+ * when tool.finished eventually lands - without it no mounted surface was
+ * listening, so the row spun forever and nothing anywhere could stop the
+ * run still holding the sidecar's tool lane. Rows handed off this way are
+ * stoppable from Run history (see stopRunFromHistory).
+ *
+ * Bounded, because a run whose tool.finished never arrives (a sidecar
+ * restart under it) would otherwise linger for the webview's whole life:
+ * entries age out after a day and the count is capped, oldest dropped
+ * first (insertion order == handoff order).
+ */
+const BACKGROUND_RUN_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const BACKGROUND_RUN_MAX_COUNT = 50;
+const backgroundRuns = new Map<string, number>();
+let backgroundWatcher: Promise<UnlistenFn> | null = null;
+
+function watchInBackground(runId: string): void {
+  const now = Date.now();
+  backgroundRuns.set(runId, now);
+  for (const [id, at] of backgroundRuns) {
+    if (now - at > BACKGROUND_RUN_MAX_AGE_MS) backgroundRuns.delete(id);
+  }
+  while (backgroundRuns.size > BACKGROUND_RUN_MAX_COUNT) {
+    const oldest = backgroundRuns.keys().next().value;
+    if (oldest === undefined) break;
+    backgroundRuns.delete(oldest);
+  }
+  backgroundWatcher ??= onDevKitEvent((evt) => {
+    const id = evt.runId;
+    if (!id || !backgroundRuns.has(id)) return;
+    const store = useRunHistoryStore.getState();
+    if (evt.event === "tool.output" && typeof evt.line === "string") {
+      store.appendLine(id, evt.stream === "stderr" ? "stderr" : "stdout", evt.line);
+    } else if (evt.event === "tool.finished") {
+      backgroundRuns.delete(id);
+      store.finishRun(id, Number(evt.exitCode ?? -1), evt.cancelled === true);
+    }
+  });
+}
+
+/**
+ * WinForms OpenFileDialog filter string ("DevKit backups (*.json)|*.json|All
+ * files (*.*)|*.*") -> tauri plugin-dialog filters. Alternating
+ * description|pattern pairs; extensions are derived from the *.ext
+ * patterns. "*"/"*.*" ("all files") map to NO filter rather than a literal
+ * "*" extension - the plugin's DialogFilter documents only real extensions,
+ * so a star would be passed through ambiguously; dropping the pair (or the
+ * whole list) leaves open() unfiltered, which IS "all files". Odd or empty
+ * strings degrade the same way rather than producing a half-built dialog.
+ */
+function parseWinFormsFilter(filter: string): { name: string; extensions: string[] }[] | undefined {
+  const parts = filter
+    .split("|")
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
+  const filters: { name: string; extensions: string[] }[] = [];
+  for (let i = 0; i + 1 < parts.length; i += 2) {
+    const extensions = parts[i + 1]
+      .split(";")
+      .map((p) => p.trim().replace(/^\*\./, ""))
+      .filter((p) => /^[A-Za-z0-9_-]+$/.test(p));
+    if (extensions.length > 0) filters.push({ name: parts[i], extensions });
+  }
+  return filters.length > 0 ? filters : undefined;
+}
+
+/**
+ * Best-effort existence check for a requiresFile path, through the
+ * files.children RPC - the webview has no filesystem access of its own.
+ * true/false when the parent directory lists; null when it can't (missing
+ * parent, access denied, sidecar error), meaning "can't say": a can't-say
+ * never blocks the run, since the tool itself re-validates the path and
+ * reports its own error.
+ */
+async function fileExistsOnDisk(path: string): Promise<boolean | null> {
+  const sep = Math.max(path.lastIndexOf("\\"), path.lastIndexOf("/"));
+  const parent = sep > 0 ? path.slice(0, sep) : ".";
+  const name = (sep >= 0 ? path.slice(sep + 1) : path).toLowerCase();
+  if (!name) return null;
+  try {
+    const result = await rpcCall<DirChildrenResult>("files.children", { path: parent });
+    if (result.Error) return null;
+    return result.Children.some((c) => !c.IsDirectory && c.Name.toLowerCase() === name);
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -84,7 +177,7 @@ function usePrefersReducedMotion(): boolean {
  * "most tools run headlessly with streamed output instead of bouncing you
  * to a terminal."
  */
-export function ToolRunDialog({ module, item, onClose }: ToolRunDialogProps) {
+export function ToolRunDialog({ module, item, embedded = false, onClose }: ToolRunDialogProps) {
   const active = useProjectStore((s) => s.active);
   const [values, setValues] = useState<Record<string, string>>({});
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -93,47 +186,150 @@ export function ToolRunDialog({ module, item, onClose }: ToolRunDialogProps) {
   const [exitCode, setExitCode] = useState<number | null>(null);
   /** The tool.run RPC failed but the run may still be alive - see executeRun. */
   const [degraded, setDegraded] = useState(false);
+  /** The run never started (hard tool.run rejection, e.g. the tool lane is busy). */
+  const [launchError, setLaunchError] = useState<{ message: string; laneBusy: boolean } | null>(null);
   /** A tool.stop is in flight for the active run. */
   const [stopping, setStopping] = useState(false);
   /** The run that just ended was cancelled from here, so it reads as cancelled rather than failed. */
   const [cancelled, setCancelled] = useState(false);
+  /** Bumped to reopen the Run history expander (the lane-busy state offers it). */
+  const [historyNonce, setHistoryNonce] = useState(0);
   const consoleRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const unlistenRef = useRef<(() => void) | null>(null);
   /** runId of the run this dialog is currently watching, if any. */
   const activeRunRef = useRef<string | null>(null);
   /**
-   * runId this dialog has asked the sidecar to kill. tool.finished carries a
-   * `cancelled` flag of its own, but onToolRun (lib/ipc.ts) forwards only the
-   * exit code, so this is how the finish handler knows a -1 was a
-   * cancellation the user asked for rather than a crash.
+   * runId this dialog has asked the sidecar to kill. tool.finished carries
+   * the sidecar's own `cancelled` flag (forwarded by onToolRun), which is
+   * the authoritative answer; this ref is the local cross-check for a stop
+   * requested from HERE, so a -1 is never misread as a crash.
    */
   const stopRequestedRef = useRef<string | null>(null);
-  const reducedMotion = usePrefersReducedMotion();
+  /** True once tool.started arrived for the active run - the only proof it actually launched. */
+  const startedRef = useRef(false);
+  /**
+   * Streamed lines waiting for the next coalesced flush (see
+   * STREAM_FLUSH_MS). Ref, not state: nothing reads it during render.
+   */
+  const lineBufferRef = useRef<{ stream: string; line: string }[]>([]);
+  const flushTimerRef = useRef<number | null>(null);
+  const animationsEnabled = useAnimationsEnabled();
   const confirmDestructive = useConfirmDestructive();
   const historyCount = useRunHistoryStore((s) => s.entries.length);
   const startRun = useRunHistoryStore((s) => s.startRun);
   const appendLine = useRunHistoryStore((s) => s.appendLine);
   const finishRun = useRunHistoryStore((s) => s.finishRun);
 
+  /**
+   * Commits buffered console lines in one setLines (see STREAM_FLUSH_MS).
+   * MAX_CONSOLE_LINES is applied here, same cap as before, just batched.
+   */
+  const flushLines = useCallback(() => {
+    if (flushTimerRef.current !== null) {
+      window.clearTimeout(flushTimerRef.current);
+      flushTimerRef.current = null;
+    }
+    const pending = lineBufferRef.current;
+    if (pending.length === 0) return;
+    lineBufferRef.current = [];
+    setLines((prev) => {
+      const next = [...prev, ...pending];
+      return next.length > MAX_CONSOLE_LINES ? next.slice(-MAX_CONSOLE_LINES) : next;
+    });
+  }, []);
+
+  function bufferLine(stream: string, line: string) {
+    lineBufferRef.current.push({ stream, line });
+    if (flushTimerRef.current === null) {
+      flushTimerRef.current = window.setTimeout(flushLines, STREAM_FLUSH_MS);
+    }
+  }
+
+  /**
+   * Empties the pending buffer into the run's HISTORY entry instead of the
+   * on-screen console - used when handing a still-live run to the background
+   * watcher, where lines must keep accumulating in the transcript even
+   * though nobody is rendering them any more.
+   */
+  function drainBufferToStore(runId: string) {
+    const pending = lineBufferRef.current;
+    lineBufferRef.current = [];
+    if (flushTimerRef.current !== null) {
+      window.clearTimeout(flushTimerRef.current);
+      flushTimerRef.current = null;
+    }
+    for (const l of pending) appendLine(runId, l.stream, l.line);
+  }
+
   useEffect(() => {
     consoleRef.current?.scrollTo({ top: consoleRef.current.scrollHeight });
   }, [lines]);
 
+  // Initial focus lands on the dialog panel so keyboard users tab from
+  // inside it (not from whatever sits under the overlay), and screen readers
+  // get role/aria-modal below.
+  useEffect(() => {
+    panelRef.current?.focus();
+  }, []);
+
+  /*
+   * Escape closes THIS dialog before any surrounding chrome reacts. The
+   * widget's flyout listens on window too but deliberately bails while a
+   * dialog overlay is in the DOM (see useWidgetFlyout's
+   * DIALOG_OVERLAY_SELECTOR), so the layering is: dialog first, tray second.
+   * preventDefault + stopPropagation keep that one-level-at-a-time order for
+   * any listener registered before this one. A modal rendered ABOVE this
+   * dialog (the caution confirm, settings, the error center...) owns Escape
+   * while it is up: this listener registered first (the dialog mounted
+   * before the confirm did), and same-target window listeners fire in
+   * registration order - so without this check one Escape would close the
+   * dialog underneath and orphan the confirm. Escape typed into the
+   * embedded terminal or a real textarea belongs to whatever is
+   * running/editing there and is left alone.
+   */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      if (
+        document.querySelector(
+          ".confirm-dialog__overlay, .update-dialog__overlay, .settings-dialog__overlay, .error-center__overlay, .project-manager__overlay",
+        )
+      ) {
+        return;
+      }
+      const t = e.target;
+      if (t instanceof Element && (t.closest(".terminal-view") || t.closest("textarea, [contenteditable='true']"))) return;
+      e.preventDefault();
+      e.stopPropagation();
+      onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   // Unsubscribe from any in-flight run's events if the dialog closes
-  // mid-run (e.g. the user hits Close while output is still streaming) -
-  // without this, the tool.output listener for that runId outlives the
-  // dialog and just accumulates with every run. Closing is deliberately NOT
-  // cancelling - that is what "Stop run" is for - so the run keeps going in
-  // the sidecar and its history entry is marked detached rather than left
-  // spinning forever.
+  // mid-run (e.g. the user hits Close while output is still streaming).
+  // Closing is deliberately NOT cancelling - that is what "Stop run" is for -
+  // so the run keeps going in the sidecar and its history row stays live
+  // and stoppable; the module-level background watcher (see
+  // watchInBackground) finalizes it when tool.finished lands.
   useEffect(() => {
     return () => {
+      if (flushTimerRef.current !== null) {
+        window.clearTimeout(flushTimerRef.current);
+        flushTimerRef.current = null;
+      }
+      const runId = activeRunRef.current;
       unlistenRef.current?.();
       unlistenRef.current = null;
-      const runId = activeRunRef.current;
       activeRunRef.current = null;
-      if (runId) useRunHistoryStore.getState().detachRun(runId);
+      if (runId) {
+        drainBufferToStore(runId);
+        watchInBackground(runId);
+      }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   /**
@@ -144,9 +340,14 @@ export function ToolRunDialog({ module, item, onClose }: ToolRunDialogProps) {
    * failed-validation value is treated identically to the PowerShell side
    * (Read-DevKitTypedValue returns $null for both) - Optional prompts skip
    * the arg silently, non-Optional prompts block the run with the same
-   * InvalidMessage/fallback text Invoke-DevKitTool would show.
+   * InvalidMessage/fallback text Invoke-DevKitTool would show. Values are
+   * deliberately NOT trimmed: Read-DevKitTypedValue preserves whitespace, so
+   * whatever survives validation here must reach the script byte for byte.
+   * A requiresFile entry adds its path as -<ParamName> <path> (the same
+   * splat Build-DevKitToolCall builds), validated non-empty and confirmed to
+   * exist where the check can run.
    */
-  function validate(): { ok: true; args: string[] } | { ok: false; errors: Record<string, string> } {
+  async function validate(): Promise<{ ok: true; args: string[] } | { ok: false; errors: Record<string, string> }> {
     const args: string[] = [];
     const errors: Record<string, string> = {};
 
@@ -155,14 +356,14 @@ export function ToolRunDialog({ module, item, onClose }: ToolRunDialogProps) {
     }
 
     for (const prompt of item.prompts ?? []) {
-      const raw = (values[prompt.Name] ?? "").trim();
+      const raw = values[prompt.Name] ?? "";
 
       if (prompt.Type === "YesNo") {
         if (raw === "y") args.push(`-${prompt.Name}`);
         continue;
       }
 
-      let valid = raw.length > 0;
+      let valid = /\S/.test(raw);
       if (valid && prompt.Type === "Int") {
         // Same as PS's '^\d+$' - digits only, no sign, no decimal point.
         if (!/^\d+$/.test(raw)) {
@@ -184,6 +385,18 @@ export function ToolRunDialog({ module, item, onClose }: ToolRunDialogProps) {
       }
 
       args.push(`-${prompt.Name}`, raw);
+    }
+
+    if (item.requiresFile) {
+      const paramName = item.requiresFile.ParamName;
+      const raw = values[paramName] ?? "";
+      if (!/\S/.test(raw)) {
+        errors[paramName] = `${item.requiresFile.TypePrompt} - a file is required.`;
+      } else if ((await fileExistsOnDisk(raw)) === false) {
+        errors[paramName] = `File not found: ${raw}`;
+      } else {
+        args.push(`-${paramName}`, raw);
+      }
     }
 
     if (Object.keys(errors).length > 0) return { ok: false, errors };
@@ -216,17 +429,23 @@ export function ToolRunDialog({ module, item, onClose }: ToolRunDialogProps) {
    */
   async function executeRun(args: string[], target: RunTarget, intro?: string) {
     // A previous run may still be subscribed (degraded, never finalized).
-    // Retire it before taking over the console.
+    // Hand it to the background watcher - its history row stays live and
+    // stoppable - before this dialog takes over the console.
     unlistenRef.current?.();
     unlistenRef.current = null;
     const previous = activeRunRef.current;
-    if (previous) useRunHistoryStore.getState().detachRun(previous);
+    if (previous) {
+      drainBufferToStore(previous);
+      watchInBackground(previous);
+    }
 
     setLines(intro ? [{ stream: "stdout", line: intro }] : []);
     setExitCode(null);
     setDegraded(false);
+    setLaunchError(null);
     setStopping(false);
     setCancelled(false);
+    startedRef.current = false;
     stopRequestedRef.current = null;
     setRunning(true);
 
@@ -236,22 +455,25 @@ export function ToolRunDialog({ module, item, onClose }: ToolRunDialogProps) {
 
     try {
       const unlisten = await onToolRun(runId, {
+        onStarted: () => {
+          startedRef.current = true;
+        },
         onOutput: (stream, line) => {
           // Cap the on-screen console. A runaway tool can emit thousands of
           // lines per second (a menu script looping on an unreadable stdin
           // managed ~1,800/s), and this array is rendered unvirtualized -
           // uncapped it means a React re-render and a new DOM node per line
-          // until the window dies. useRunHistoryStore already bounds what it
-          // retains; this bounds what is displayed.
-          setLines((prev) => {
-            const next = [...prev, { stream, line }];
-            return next.length > MAX_CONSOLE_LINES ? next.slice(-MAX_CONSOLE_LINES) : next;
-          });
+          // until the window dies. The lines are coalesced before they reach
+          // state (see STREAM_FLUSH_MS); the cap itself is applied in
+          // flushLines. useRunHistoryStore already bounds what it retains;
+          // this bounds what is displayed.
+          bufferLine(stream, line);
           appendLine(runId, stream, line);
         },
-        onFinished: (code) => {
+        onFinished: (code, evtCancelled) => {
           if (activeRunRef.current !== runId) return;
-          const wasCancelled = stopRequestedRef.current === runId;
+          flushLines();
+          const wasCancelled = evtCancelled || stopRequestedRef.current === runId;
           setExitCode(code);
           setRunning(false);
           setDegraded(false);
@@ -260,7 +482,7 @@ export function ToolRunDialog({ module, item, onClose }: ToolRunDialogProps) {
           unlisten();
           unlistenRef.current = null;
           activeRunRef.current = null;
-          finishRun(runId, code);
+          finishRun(runId, code, wasCancelled);
           // A killed pwsh child exits -1. That is the shape of a
           // cancellation the user asked for, not of a failure, so it must
           // not get the failure sound.
@@ -306,7 +528,51 @@ export function ToolRunDialog({ module, item, onClose }: ToolRunDialogProps) {
       // Superseded, or tool.finished already landed while the RPC was
       // still settling - the run's outcome is already known, don't muddy it.
       if (activeRunRef.current !== runId) return;
-      const message = `RPC error: ${String(err)} - the tool may still be running; still watching for it to finish.`;
+      const rejection = parseRpcError(err);
+
+      // The sidecar refuses to launch while its single tool lane is still
+      // busy with another run. Nothing started, nothing will, and there is
+      // nothing to watch - fail fast with the distinct state (plus a direct
+      // link to the history rows, where the other run can be stopped).
+      if (rejection.kind === "toolLaneBusy" || rejection.message.startsWith("Another DevKit tool is already running")) {
+        unlistenRef.current?.();
+        unlistenRef.current = null;
+        activeRunRef.current = null;
+        flushLines();
+        setRunning(false);
+        setStopping(false);
+        setExitCode(-1);
+        appendLine(runId, "stderr", rejection.message);
+        finishRun(runId, -1);
+        setLaunchError({ message: rejection.message, laneBusy: true });
+        playSound("error");
+        return;
+      }
+
+      // No tool.started ever arrived, so the run never launched - the
+      // rejection IS the outcome. Reset to a failed state instead of
+      // "still watching" forever.
+      if (!startedRef.current) {
+        unlistenRef.current?.();
+        unlistenRef.current = null;
+        activeRunRef.current = null;
+        flushLines();
+        const message = `Could not start this run: ${rejection.message}`;
+        setLines((prev) => [...prev, { stream: "stderr", line: message }]);
+        appendLine(runId, "stderr", message);
+        setExitCode(-1);
+        setRunning(false);
+        finishRun(runId, -1);
+        setLaunchError({ message, laneBusy: false });
+        playSound("error");
+        return;
+      }
+
+      // tool.started DID arrive: the RPC itself errored mid-flight (a
+      // sidecar hiccup) while the tool carries on. Downgrade to `degraded`
+      // - a warning line plus a "Stop watching" escape hatch - and keep the
+      // subscription up until the run genuinely ends or the dialog unmounts.
+      const message = `RPC error: ${rejection.raw} - the tool may still be running; still watching for it to finish.`;
       setLines((prev) => [...prev, { stream: "stderr", line: message }]);
       appendLine(runId, "stderr", message);
       setDegraded(true);
@@ -368,8 +634,9 @@ export function ToolRunDialog({ module, item, onClose }: ToolRunDialogProps) {
    * Detaches from a run without ending it - the escape hatch for a run whose
    * completion event will never arrive (the sidecar restarted under it, for
    * instance), so the dialog can't be left disabled forever. "Stop run" is
-   * what actually cancels; once detached, this dialog no longer knows the
-   * runId and can no longer stop it.
+   * what actually cancels. The run keeps its live history row (kept current
+   * by the background watcher), so it stays visible as running and can be
+   * stopped from there even after this dialog lets go of it.
    */
   function stopWatching() {
     const runId = activeRunRef.current;
@@ -377,15 +644,66 @@ export function ToolRunDialog({ module, item, onClose }: ToolRunDialogProps) {
     unlistenRef.current = null;
     activeRunRef.current = null;
     stopRequestedRef.current = null;
+    flushLines();
     if (runId) {
-      const message = "Stopped watching this run. It may still be executing, and can no longer be stopped from this dialog.";
+      const message =
+        "Stopped watching this run. It may still be executing - its Run history row below stays live and can stop it.";
       setLines((prev) => [...prev, { stream: "stderr", line: message }]);
       appendLine(runId, "stderr", message);
-      useRunHistoryStore.getState().detachRun(runId);
+      watchInBackground(runId);
     }
     setRunning(false);
     setDegraded(false);
     setStopping(false);
+  }
+
+  /**
+   * Stop requested from a Run history row. The run this dialog is watching
+   * goes through stopRun (its sound and cancelled-badge semantics); any
+   * other live row - one handed to the background watcher, or launched
+   * earlier and still holding the tool lane - is stopped by runId straight
+   * through tool.stop, and the background watcher finalizes the row when
+   * tool.finished lands.
+   */
+  function stopRunFromHistory(entry: RunHistoryEntry): Promise<void> {
+    if (entry.id === activeRunRef.current) {
+      void stopRun();
+      return Promise.resolve();
+    }
+    playSound("thud");
+    return rpcCall<ToolStopResult>("tool.stop", { runId: entry.id })
+      .then((result) => {
+        const line = result?.message ?? "Stop requested.";
+        useRunHistoryStore.getState().appendLine(entry.id, "stdout", line);
+      })
+      .catch((err) => {
+        useRunHistoryStore.getState().appendLine(entry.id, "stderr", `Could not stop this run: ${String(err)}`);
+      });
+  }
+
+  /** Native file picker for a requiresFile field; the typed path remains for manual entry. */
+  async function browseForFile() {
+    const spec = item.requiresFile;
+    if (!spec) return;
+    try {
+      const selected = await open({ multiple: false, filters: parseWinFormsFilter(spec.Filter) });
+      if (typeof selected === "string" && selected) {
+        setValues((v) => ({ ...v, [spec.ParamName]: selected }));
+        clearFieldError(spec.ParamName);
+      }
+    } catch {
+      // Cancelled, or the dialog plugin isn't permitted in this build - the
+      // text field below still works.
+    }
+  }
+
+  function clearFieldError(name: string) {
+    setFieldErrors((prev) => {
+      if (!(name in prev)) return prev;
+      const next = { ...prev };
+      delete next[name];
+      return next;
+    });
   }
 
   /** Replays a recorded run. RunHistoryList has already applied the caution gate. */
@@ -399,7 +717,7 @@ export function ToolRunDialog({ module, item, onClose }: ToolRunDialogProps) {
   }
 
   async function run() {
-    const result = validate();
+    const result = await validate();
     if (!result.ok) {
       setFieldErrors(result.errors);
       return;
@@ -441,11 +759,14 @@ export function ToolRunDialog({ module, item, onClose }: ToolRunDialogProps) {
 
   const needsProjectButMissing = item.requiresProject && !active;
   const hasFieldErrors = Object.keys(fieldErrors).length > 0;
+  const appliedStaticArgs = item.staticArgs
+    ? Object.entries(item.staticArgs).filter(([, v]) => v !== false && v !== null)
+    : [];
 
-  const overlayTransition: Transition = reducedMotion ? { duration: 0 } : { duration: 0.18, ease: [0.2, 0.8, 0.2, 1] };
-  const panelTransition: Transition = reducedMotion
-    ? { duration: 0 }
-    : { type: "spring", stiffness: 420, damping: 32, mass: 0.9 };
+  const overlayTransition: Transition = animationsEnabled ? { duration: 0.18, ease: [0.2, 0.8, 0.2, 1] } : { duration: 0 };
+  const panelTransition: Transition = animationsEnabled
+    ? { type: "spring", stiffness: 420, damping: 32, mass: 0.9 }
+    : { duration: 0 };
 
   return (
     <motion.div
@@ -457,13 +778,21 @@ export function ToolRunDialog({ module, item, onClose }: ToolRunDialogProps) {
       transition={overlayTransition}
     >
       <motion.div
-        initial={reducedMotion ? false : { opacity: 0, scale: 0.94, y: 16 }}
+        initial={animationsEnabled ? { opacity: 0, scale: 0.94, y: 16 } : false}
         animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={reducedMotion ? { opacity: 0 } : { opacity: 0, scale: 0.96, y: 8 }}
+        exit={animationsEnabled ? { opacity: 0, scale: 0.96, y: 8 } : { opacity: 0 }}
         transition={panelTransition}
       >
         <GlassPanel strong className="tool-run-dialog">
-          <div onClick={(e) => e.stopPropagation()}>
+          <div
+            ref={panelRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label={item.label}
+            tabIndex={-1}
+            className="tool-run-dialog__panel"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="tool-run-dialog__header">
               <div>
                 <div className="tool-run-dialog__title">{item.label}</div>
@@ -481,52 +810,86 @@ export function ToolRunDialog({ module, item, onClose }: ToolRunDialogProps) {
             <p className="tool-run-dialog__help">{item.help}</p>
 
             {needsProjectButMissing && (
-              <div className="tool-run-dialog__warning">Select a project in the widget first - this tool requires one.</div>
+              <div className="tool-run-dialog__warning">
+                {embedded
+                  ? "Select a project in the widget first - this tool requires one."
+                  : "Select a project in the title bar first - this tool requires one."}
+              </div>
             )}
 
             {(item.prompts ?? []).length > 0 && (
               <div className="tool-run-dialog__form">
-                {(item.prompts ?? []).map((p) => {
-                  function clearFieldError() {
-                    setFieldErrors((prev) => {
-                      if (!(p.Name in prev)) return prev;
-                      const next = { ...prev };
-                      delete next[p.Name];
-                      return next;
-                    });
-                  }
-                  return (
-                    <label key={p.Name} className="tool-run-dialog__field">
-                      <span>{p.Prompt}</span>
-                      {p.Type === "YesNo" ? (
-                        <select
-                          value={values[p.Name] ?? "n"}
-                          onChange={(e) => setValues((v) => ({ ...v, [p.Name]: e.target.value }))}
-                        >
-                          <option value="n">No</option>
-                          <option value="y">Yes</option>
-                        </select>
-                      ) : (
-                        <input
-                          type={p.Type === "Int" ? "number" : "text"}
-                          min={p.Min}
-                          max={p.Max}
-                          aria-invalid={p.Name in fieldErrors}
-                          value={values[p.Name] ?? ""}
-                          onChange={(e) => {
-                            setValues((v) => ({ ...v, [p.Name]: e.target.value }));
-                            clearFieldError();
-                          }}
-                        />
-                      )}
-                      {fieldErrors[p.Name] && (
-                        <span className="tool-run-dialog__script" style={{ color: "var(--signal-red)" }}>
-                          {fieldErrors[p.Name]}
-                        </span>
-                      )}
-                    </label>
-                  );
-                })}
+                {(item.prompts ?? []).map((p) => (
+                  <label key={p.Name} className="tool-run-dialog__field">
+                    <span>{p.Prompt}</span>
+                    {p.Type === "YesNo" ? (
+                      <select
+                        value={values[p.Name] ?? "n"}
+                        onChange={(e) => setValues((v) => ({ ...v, [p.Name]: e.target.value }))}
+                      >
+                        <option value="n">No</option>
+                        <option value="y">Yes</option>
+                      </select>
+                    ) : (
+                      <input
+                        type={p.Type === "Int" ? "number" : "text"}
+                        min={p.Min}
+                        max={p.Max}
+                        aria-invalid={p.Name in fieldErrors}
+                        value={values[p.Name] ?? ""}
+                        onChange={(e) => {
+                          setValues((v) => ({ ...v, [p.Name]: e.target.value }));
+                          clearFieldError(p.Name);
+                        }}
+                      />
+                    )}
+                    {fieldErrors[p.Name] && (
+                      <span className="tool-run-dialog__script" style={{ color: "var(--signal-red)" }}>
+                        {fieldErrors[p.Name]}
+                      </span>
+                    )}
+                  </label>
+                ))}
+              </div>
+            )}
+
+            {item.requiresFile && (
+              <div className="tool-run-dialog__form">
+                <label className="tool-run-dialog__field">
+                  <span>{item.requiresFile.TypePrompt}</span>
+                  <div className="tool-run-dialog__file-row">
+                    <input
+                      type="text"
+                      aria-invalid={item.requiresFile.ParamName in fieldErrors}
+                      placeholder={item.requiresFile.Description}
+                      value={values[item.requiresFile.ParamName] ?? ""}
+                      onChange={(e) => {
+                        const paramName = item.requiresFile!.ParamName;
+                        setValues((v) => ({ ...v, [paramName]: e.target.value }));
+                        clearFieldError(paramName);
+                      }}
+                    />
+                    <Button size="sm" variant="subtle" disabled={running} onClick={() => void browseForFile()}>
+                      Browse&hellip;
+                    </Button>
+                  </div>
+                  {fieldErrors[item.requiresFile.ParamName] && (
+                    <span className="tool-run-dialog__script" style={{ color: "var(--signal-red)" }}>
+                      {fieldErrors[item.requiresFile.ParamName]}
+                    </span>
+                  )}
+                </label>
+              </div>
+            )}
+
+            {appliedStaticArgs.length > 0 && (
+              <div className="tool-run-dialog__static-args" title="Arguments this menu entry always passes">
+                <span className="tool-run-dialog__static-args-label">Also applied by this menu entry:</span>
+                {appliedStaticArgs.map(([key, val]) => (
+                  <code key={key} className="tool-run-dialog__arg-chip">
+                    {val === true ? `-${key}` : `-${key} ${String(val)}`}
+                  </code>
+                ))}
               </div>
             )}
 
@@ -570,6 +933,27 @@ export function ToolRunDialog({ module, item, onClose }: ToolRunDialogProps) {
               </div>
             )}
 
+            {launchError && (
+              <div
+                className={clsx(
+                  "tool-run-dialog__launch-error",
+                  launchError.laneBusy && "tool-run-dialog__launch-error--lane-busy",
+                )}
+              >
+                <span>{launchError.message}</span>
+                <div className="tool-run-dialog__launch-error-actions">
+                  {launchError.laneBusy && (
+                    <Button size="sm" variant="subtle" onClick={() => setHistoryNonce((n) => n + 1)}>
+                      Show run history
+                    </Button>
+                  )}
+                  <Button size="sm" variant="ghost" onClick={() => setLaunchError(null)}>
+                    Dismiss
+                  </Button>
+                </div>
+              </div>
+            )}
+
             {lines.length > 0 && (
               <div className="tool-run-dialog__console" ref={consoleRef}>
                 {lines.map((l, i) => (
@@ -585,12 +969,14 @@ export function ToolRunDialog({ module, item, onClose }: ToolRunDialogProps) {
 
             <div className="tool-run-dialog__history">
               <Expander
+                key={historyNonce}
                 title="Run history"
+                defaultOpen={historyNonce > 0}
                 actionSlot={<Badge tone={historyCount > 0 ? "accent" : "neutral"}>{historyCount}</Badge>}
                 lazyMount
               >
                 <div className="tool-run-dialog__history-body">
-                  <RunHistoryList onRunAgain={runFromHistory} busy={running} />
+                  <RunHistoryList onRunAgain={runFromHistory} onStopRun={stopRunFromHistory} busy={running} />
                 </div>
               </Expander>
             </div>

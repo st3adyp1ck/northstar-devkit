@@ -18,10 +18,12 @@
  * drawing a confident wrong line. That is the whole reason this is a
  * separate, pure, testable module.
  *
- * Cost: a graph is capped at 40 commits and the PR list at 50, and both
- * traversals below are linear in the loaded node count with the base
- * branch's ancestor set memoised across PRs (nearly every PR targets the
- * same base), so a full rebuild is a few thousand operations.
+ * Cost: the log window starts at 40 commits and grows - 120, then a hard
+ * 400 ceiling - until every open-PR head lands inside it (see -ExtraTips in
+ * Get-DevKitRepoOverview), and the PR list is capped at 50. Both traversals
+ * below are linear in the loaded node count with the base branch's ancestor
+ * set memoised across PRs (nearly every PR targets the same base), so even
+ * the widest window stays in the tens of thousands of operations.
  */
 import { asArray } from "../../../../lib/arrays";
 import type { GitGraph, GitGraphNode } from "../../../../lib/types";
@@ -43,7 +45,7 @@ const ORIGIN_PREFIX = "origin/";
 export type PrAttachment =
   /** Head tip found AND its divergence from base is inside the loaded log - the full ribbon is drawable. */
   | "attached"
-  /** Head tip found, but where it left base is older than the 40 commits we have - the ribbon has to fade out. */
+  /** Head tip found, but where it left base is older than the loaded log window - the ribbon has to fade out. */
   | "open"
   /** The head branch has no ref anywhere in this log - there is no row to attach to at all. */
   | "unattached";
@@ -115,9 +117,10 @@ function stringField(pr: GitHubPrRow, key: string): string | null {
  *
  * `headRefOid` names the exact commit, so it needs no origin/ guess and
  * works for a PR from a fork, whose head branch has no ref in this repo at
- * all. It is only present if the sidecar's `gh pr list --json` field list
- * asks for it (it does not today - see this batch's report), so the ref-name
- * path stays the working one and this is a strict upgrade when it arrives.
+ * all. The sidecar's `gh pr list --json` field list asks for it (see
+ * Get-DevKitGitHubPullRequests), so this hash-exact path is the live one;
+ * the ref-name fallback below still covers PRs whose head sits outside the
+ * loaded log window.
  */
 function resolveHeadNode(
   byHash: Map<string, GitGraphNode>,
@@ -135,9 +138,9 @@ function resolveHeadNode(
 /**
  * Every loaded commit reachable from `start`, `start` included.
  *
- * Parents that fall outside the 40-commit window simply aren't in byHash, so
- * the walk stops there - which is exactly right: reachability we cannot see
- * is reachability we must not claim.
+ * Parents that fall outside the loaded log window simply aren't in byHash,
+ * so the walk stops there - which is exactly right: reachability we cannot
+ * see is reachability we must not claim.
  */
 function ancestorHashes(start: string, byHash: Map<string, GitGraphNode>): Set<string> {
   const seen = new Set<string>();

@@ -52,6 +52,8 @@ export interface RunHistoryEntry {
   caution: boolean;
   /** The watcher went away before `tool.finished` arrived; outcome unknown. */
   detached: boolean;
+  /** Ended via tool.stop (tool.finished's own cancelled flag) - displayed as "cancelled", not "exit -1". */
+  cancelled: boolean;
 }
 
 /** What a caller knows about a run at launch time. */
@@ -135,6 +137,7 @@ function sanitizeEntry(value: unknown): RunHistoryEntry | null {
     droppedLines: typeof raw.droppedLines === "number" && raw.droppedLines > 0 ? Math.floor(raw.droppedLines) : 0,
     caution: raw.caution === true,
     detached: raw.detached === true || typeof raw.exitCode !== "number",
+    cancelled: raw.cancelled === true,
   };
 }
 
@@ -305,9 +308,11 @@ interface RunHistoryState {
   /** Records a run at launch. `id` is the runId passed to `tool.run`. */
   startRun: (id: string, spec: RunSpec) => void;
   appendLine: (id: string, stream: string, line: string) => void;
-  finishRun: (id: string, exitCode: number) => void;
+  finishRun: (id: string, exitCode: number, cancelled?: boolean) => void;
   /** The watcher is going away (dialog closed, user stopped watching). */
   detachRun: (id: string) => void;
+  /** Drops one row outright (the row's own Dismiss button) - no confirm, unlike clear(). */
+  removeRun: (id: string) => void;
   clear: () => void;
 }
 
@@ -330,6 +335,7 @@ export const useRunHistoryStore = create<RunHistoryState>((set, get) => ({
         droppedLines: 0,
         caution: spec.caution === true,
         detached: false,
+        cancelled: false,
       };
       return { entries: [entry, ...s.entries.filter((e) => e.id !== id)].slice(0, s.limit) };
     });
@@ -356,7 +362,7 @@ export const useRunHistoryStore = create<RunHistoryState>((set, get) => ({
     schedulePersist(() => get().entries);
   },
 
-  finishRun: (id, exitCode) => {
+  finishRun: (id, exitCode, cancelled = false) => {
     set((s) => {
       const index = s.entries.findIndex((e) => e.id === id);
       if (index < 0) return s;
@@ -366,6 +372,7 @@ export const useRunHistoryStore = create<RunHistoryState>((set, get) => ({
         finishedAt: new Date().toISOString(),
         exitCode,
         detached: false,
+        cancelled,
       };
       return { entries: enforceBudget(entries) };
     });
@@ -380,6 +387,11 @@ export const useRunHistoryStore = create<RunHistoryState>((set, get) => ({
       entries[index] = { ...entries[index], finishedAt: new Date().toISOString(), exitCode: null, detached: true };
       return { entries: enforceBudget(entries) };
     });
+    flushPersist(get().entries);
+  },
+
+  removeRun: (id) => {
+    set((s) => ({ entries: s.entries.filter((e) => e.id !== id) }));
     flushPersist(get().entries);
   },
 

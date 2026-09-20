@@ -115,11 +115,21 @@ export function GitPanel() {
   // and the graph back to skeletons, and downgrading the "last known" stale
   // state to a hard "Could not reach the DevKit sidecar".
   const prTipsRef = useRef<string[]>([]);
+  // `enabled` also folds in the poll's OWN verdict: once the backend has
+  // proven "not a git repo" there is nothing left to refresh, and the 6s
+  // spawn costs real sidecar time (the gh polls below sit behind the same
+  // flag for the same reason). A hook's result cannot gate the render that
+  // calls the hook, so the gate rides the PREVIOUS render's value through
+  // state - one 6s grace tick when disabling, exact when re-enabling.
+  // Accepted tradeoff: a folder git-init'd mid-session is not noticed until
+  // the project is re-selected (a new path is a fresh cache entry, and the
+  // gate reopens for it).
+  const [knownNotRepoPrev, setKnownNotRepoPrev] = useState(false);
   const overview = usePolledRpc<GitOverview>(
     "git.overview",
     path ? { path, includeGraph: true } : undefined,
     OVERVIEW_POLL_MS,
-    !!path && onScreen,
+    !!path && onScreen && !knownNotRepoPrev,
     { extraTips: prTipsRef.current },
   );
   const { refetch } = overview;
@@ -134,13 +144,21 @@ export function GitPanel() {
   const dirtyFiles = asArray<GitDirtyFile>(data?.DirtyFiles);
   const graph = data?.Graph ?? null;
 
+  // Sync the gate mirror declared above (render N's poll ran on render N-1's
+  // verdict; the state bump is what re-renders and applies it).
+  useEffect(() => setKnownNotRepoPrev(knownNotRepo), [knownNotRepo]);
+
   const lists = useGitHubLists(path, onScreen && !notRepoReason);
   const { prs, issues, prRows, issueRows } = lists;
 
-  // Feeds NEXT render's git.overview params - see prTipsRef above. Guarded
-  // so the write only happens when the tip set actually changed.
+  // Feeds NEXT render's git.overview params - see prTipsRef above. The write
+  // lives in an effect, guarded so it only lands when the tip set actually
+  // changed: the hook reads the ref earlier in the same render, so effect
+  // timing changes nothing about the one-render lag the ref already had.
   const prTips = prRows.map((pr) => pr.headRefOid).filter((oid): oid is string => typeof oid === "string" && oid.length > 0);
-  if (prTipsRef.current.join() !== prTips.join()) prTipsRef.current = prTips;
+  useEffect(() => {
+    if (prTipsRef.current.join() !== prTips.join()) prTipsRef.current = prTips;
+  }, [prTips]);
 
   // Lane hues rotate off the LIVE accent so they stay distinguishable in all
   // ten themes; read from settings rather than the DOM - see prLaneColors.ts.

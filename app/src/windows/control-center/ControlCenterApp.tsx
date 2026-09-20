@@ -170,18 +170,55 @@ export function ControlCenterApp({ embedded = false }: { embedded?: boolean }) {
     return Array.from(set);
   }, [catalog]);
 
+  /*
+   * One matching contract, shared by the nav/module filter and the per-item
+   * render filter, so a section can never render with zero of the items the
+   * module filter counted. A query matches an item's label/help, its
+   * script's basename (typing "kill-port" or "env-restore" finds the tool),
+   * and the module/group metadata around it (typing "tools" or "system"
+   * surfaces those sections wholesale instead of nine empty headers).
+   */
+  const searchQuery = search.trim().toLowerCase();
+
+  function scriptBaseName(script: string): string {
+    return script.replace(/\.[^.\\/]+$/, "").toLowerCase();
+  }
+
+  function itemMatchesQuery(item: CatalogItem, q: string): boolean {
+    return item.label.toLowerCase().includes(q) || item.help.toLowerCase().includes(q) || scriptBaseName(item.script).includes(q);
+  }
+
+  function moduleMatchesQuery(module: CatalogModule, q: string): boolean {
+    return module.name.toLowerCase().includes(q) || module.group.toLowerCase().includes(q) || module.folder.toLowerCase().includes(q);
+  }
+
+  /** Items rendered inside a visible module - the whole module when its metadata matched, otherwise the matching items. */
+  function filterModuleItems(module: CatalogModule, q: string): CatalogItem[] {
+    if (!q || moduleMatchesQuery(module, q)) return module.items;
+    return module.items.filter((item) => itemMatchesQuery(item, q));
+  }
+
   const visibleModules = useMemo(() => {
     const modules = catalog?.modules ?? [];
-    const q = search.trim().toLowerCase();
+    const q = searchQuery;
     return modules.filter((m) => {
       if (activeGroup && m.group !== activeGroup) return false;
       if (!q) return true;
-      return (
-        m.name.toLowerCase().includes(q) ||
-        m.items.some((i) => i.label.toLowerCase().includes(q) || i.help.toLowerCase().includes(q))
-      );
+      return moduleMatchesQuery(m, q) || m.items.some((item) => itemMatchesQuery(item, q));
     });
-  }, [catalog, activeGroup, search]);
+  }, [catalog, activeGroup, searchQuery]);
+
+  const visibleToolCount = useMemo(
+    () => visibleModules.reduce((total, m) => total + filterModuleItems(m, searchQuery).length, 0),
+    [visibleModules, searchQuery],
+  );
+
+  // Dismissal is keyed by the error CONTENTS, not the catalog's identity:
+  // a window-focus refetch rebuilds the catalog object without the errors
+  // changing, and the banner must stay dismissed in that case - it only
+  // reappears when a different set of load errors actually arrives.
+  const loadErrorsKey = (catalog?.loadErrors ?? []).join("\n");
+  const [dismissedLoadErrorsKey, setDismissedLoadErrorsKey] = useState<string | null>(null);
 
   const navTransition: Transition = reducedMotion
     ? { duration: 0 }
@@ -234,6 +271,7 @@ export function ControlCenterApp({ embedded = false }: { embedded?: boolean }) {
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                 />
+                {searchQuery && <span className="control-center__count">{visibleToolCount} tool{visibleToolCount === 1 ? "" : "s"}</span>}
               </div>
             </TitleBar>
           )}
@@ -249,6 +287,7 @@ export function ControlCenterApp({ embedded = false }: { embedded?: boolean }) {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
+              {searchQuery && <span className="control-center__count">{visibleToolCount} tool{visibleToolCount === 1 ? "" : "s"}</span>}
             </div>
           )}
           <div className="control-center__body">
@@ -293,6 +332,18 @@ export function ControlCenterApp({ embedded = false }: { embedded?: boolean }) {
                     opened.
                   </span>
                   <Button size="sm" variant="ghost" onClick={() => setMissingTool(null)}>
+                    Dismiss
+                  </Button>
+                </div>
+              )}
+
+              {loadErrorsKey.length > 0 && loadErrorsKey !== dismissedLoadErrorsKey && (
+                <div className="control-center__notice control-center__notice--warning" role="status">
+                  <span>
+                    Some tool categories failed to load: {catalog!.loadErrors.join("; ")}. The rest of the catalog works
+                    as usual.
+                  </span>
+                  <Button size="sm" variant="ghost" onClick={() => setDismissedLoadErrorsKey(loadErrorsKey)}>
                     Dismiss
                   </Button>
                 </div>
@@ -355,10 +406,7 @@ export function ControlCenterApp({ embedded = false }: { embedded?: boolean }) {
               {!isLoading && !isError && (
                 <AnimatePresence mode="popLayout">
                   {visibleModules.map((module) => {
-                    const q = search.trim().toLowerCase();
-                    const items = module.items.filter(
-                      (item) => !q || item.label.toLowerCase().includes(q) || item.help.toLowerCase().includes(q),
-                    );
+                    const items = filterModuleItems(module, searchQuery);
                     return (
                       <motion.section
                         key={module.folder}
@@ -420,7 +468,12 @@ export function ControlCenterApp({ embedded = false }: { embedded?: boolean }) {
           </div>
           <AnimatePresence>
             {selected && (
-              <ToolRunDialog module={selected.module} item={selected.item} onClose={() => setSelected(null)} />
+              <ToolRunDialog
+                module={selected.module}
+                item={selected.item}
+                embedded={embedded}
+                onClose={() => setSelected(null)}
+              />
             )}
           </AnimatePresence>
         </div>

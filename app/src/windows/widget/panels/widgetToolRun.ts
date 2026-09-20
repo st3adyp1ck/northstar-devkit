@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { onDevKitEvent, rpcCall } from "../../../lib/ipc";
+import { onDevKitEvent, parseRpcError, rpcCall } from "../../../lib/ipc";
 import { useRunHistoryStore, type RunSpec } from "../../../stores/useRunHistoryStore";
 import { playSound } from "../../../lib/sounds";
 import type { ToolConsoleLine } from "../../../components/ToolConsole";
@@ -80,6 +80,12 @@ const IDLE: WidgetToolRunSnapshot = {
   launchError: null,
 };
 
+// Module scope survives unmounts but NOT a webview reload: reloading during
+// an in-flight run resets all of this while the sidecar's child process (and
+// the single tool lane's occupancy) keeps going, and the fresh module does
+// not know the runId - the lane can be busy with a phantom run no UI can see
+// until the child exits and drains it. Rare and self-limiting; documented
+// rather than solved.
 let snapshot: WidgetToolRunSnapshot = IDLE;
 let unlisten: (() => void) | null = null;
 const subscribers = new Set<() => void>();
@@ -113,6 +119,19 @@ function appendLive(stream: string, line: string): void {
 function detachListener(): void {
   unlisten?.();
   unlisten = null;
+}
+
+/**
+ * How a refused or failed launch reads on screen. tool.run's rejection
+ * carries the sidecar's HostError display string ("sidecar returned an
+ * error: toolLaneBusy (Another DevKit tool is already running…)");
+ * parseRpcError recovers just the human message when the text matches that
+ * wire format, and the raw text stands when it doesn't (local failures,
+ * like the output subscription below, never carry a kind).
+ */
+function describeLaunchFailure(err: unknown): string {
+  const parsed = parseRpcError(err);
+  return parsed.kind !== null ? parsed.message : String(err);
 }
 
 /** Ends a run that was never actually launched, with the reason on screen. */
@@ -184,7 +203,7 @@ export async function startWidgetToolRun(spec: WidgetRunSpec): Promise<void> {
   } catch (err) {
     // Failing to subscribe at all is terminal in the other direction:
     // nothing in this window would ever finalize the run.
-    failLaunch(runId, `Could not subscribe to run output: ${String(err)}`);
+    failLaunch(runId, `Could not subscribe to run output: ${describeLaunchFailure(err)}`);
     return;
   }
 
@@ -199,7 +218,7 @@ export async function startWidgetToolRun(spec: WidgetRunSpec): Promise<void> {
   } catch (err) {
     if (snapshot.runId !== runId) return;
     if (!sawEvent) {
-      failLaunch(runId, `Couldn't start ${spec.script}: ${String(err)}`);
+      failLaunch(runId, `Couldn't start ${spec.script}: ${describeLaunchFailure(err)}`);
       return;
     }
     const message = `RPC error: ${String(err)} - the tool may still be running; still watching for it to finish.`;
