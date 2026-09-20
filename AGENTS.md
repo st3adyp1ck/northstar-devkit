@@ -271,8 +271,8 @@ try {
   params)` - never call the raw `invoke("rpc_call", ...)` Tauri API
   directly from a component. Streamed events (`tool.run` output) go
   through `onDevKitEvent`/`onToolRun`, keyed by `runId`.
-- Destructive actions (kill a process, run a "caution" tool, clear system
-  junk) go through `useConfirmDestructive()`, which mirrors
+- Destructive actions (kill a process, run a "caution" tool)
+  go through `useConfirmDestructive()`, which mirrors
   `Confirm-DevKitDestructiveAction`'s `preferences.confirmDestructive`
   gate on the PowerShell side - see Security Considerations below.
 - Framer Motion for animation, gated by `<MotionConfig reducedMotion=...>`
@@ -477,11 +477,27 @@ ever writes a line" true by construction:
   lane is exactly one worker.) This mirrors the old WPF widget's
   `MetricsRunspace`/`McpRunspace`/`WorkRunspace` split, for the same
   reason: a slow `gh pr list` call must never stall a metrics poll.
-- The **main thread** just reads stdin line-by-line and routes each
-  request to a lane by method-name prefix: `metrics.*` -> metrics lane;
-  `git.*`/`github.*`/`tool.*`/`maintenance.*` -> slow lane; everything
-  else -> work lane. `ping`/`shutdown` are handled inline with no lane
-  hop.
+- The **main thread** routes each request to a lane by method-name
+  prefix: `metrics.*` (plus the polled read-only collectors
+  `process.topCpu`/`process.topMemory`/`files.children`) -> metrics
+  lane; `git.*`/`github.*`/`tool.*`/`maintenance.*` -> slow lane;
+  everything else -> work lane. `ping`/`shutdown` are handled inline
+  with no lane hop. It also **single-flights `tool.run`**: a fixed-key
+  `TryAdd` gate means a second `tool.run` while one is running is
+  refused immediately with a `toolLaneBusy` error (rather than queuing
+  behind a never-ending dev server) - this doubles as the cross-window
+  in-flight guard, since the embedded tray and the standalone Control
+  Center are two UI instances. The gate slot is released (ownership-
+  checked) when the run finishes, even on spawn failure.
+
+Two hardening details live on the main thread too: stdin is read via
+`ReadLineAsync` (woken by `AsyncWaitHandle.WaitOne(200)`, so requests
+aren't latency-penalized by the probe cadence), with a ~30s lane-health
+probe that exits the process - letting the Rust host respawn a healthy
+sidecar - if a lane runspace faults natively; and the console
+input/output encodings are forced to UTF-8 (no BOM) at boot, so
+non-ASCII tool output (e.g. from the powershell.exe 5.1 fallback's OEM
+codepage) can't corrupt NDJSON framing.
 
 If this ever proves fragile in practice, the file's own header comment
 documents the fallback: split the three lanes into three separate `pwsh`
@@ -502,15 +518,22 @@ touching the lane/writer plumbing.
 `catalog.get` (`Get-DevKitCatalogPayload`) is the method every UI depends
 on: it flattens `Get-DevKitGuiCatalog`'s manifest-driven groups (from
 `core/DevKit-GuiCore.ps1`) into the flat `{ modules: [...] }` shape both
-the Control Center and the CLI render directly, and computes a `caution`
-flag from each item's Help text containing `"Safety note:"`.
+the Control Center and the CLI render directly, computes a `caution`
+flag from each item's Help text containing `"Safety note:"`, and carries
+a top-level `loadErrors` string array so a broken `_module.psd1` shows
+as a banner in the Control Center instead of silently dropping the
+category.
 
 `tool.run` is the Control Center's "Run" button: it spawns the target
 `tools/<folder>/<script>.ps1` as a **non-interactive** child process
 (`-NonInteractive`, stdin closed immediately) and streams its
 stdout/stderr back as `tool.output` events keyed by a `runId`, finishing
-with `tool.finished`. See "Two ways a tool actually runs" below - this is
-deliberately different from how the CLI runs the same script.
+with `tool.finished`. Only one run is active at a time - a second
+`tool.run` while one is running is refused with a `toolLaneBusy` error
+(single-flighted on the main thread, see the sidecar section above), and
+`tool.stop` kills the child process tree. See "Two ways a tool actually
+runs" below - this is deliberately different from how the CLI runs the
+same script.
 
 `core/DevKit.Core.psm1` is what makes all of this possible without
 touching library code: it dot-sources `tools/lib/*` and the two
@@ -526,12 +549,14 @@ multiplexes concurrent calls over its one stdout stream by request id.
 From the Rust side, the three PowerShell lanes are invisible - this
 client just sees one stream and demuxes.
 
-Two things worth knowing if you touch this file:
+Four things worth knowing if you touch this file:
 
 - **Respawn with backoff**: `ensure_alive()` is idempotent and serializes
   concurrent respawn attempts via the same mutex that guards the running
   process; each failed attempt increases an exponential backoff (200ms
-  doubling, capped at 10s) before the next.
+  doubling, capped at 10s) before the next. The backoff sleep is sliced
+  (~100ms) and checks the shutdown latch, so `shutdown()` never waits
+  out a full backoff cap behind a crash-looping sidecar.
 - **Per-generation pending maps**: each spawn of the sidecar gets its own
   `HashMap<id, oneshot::Sender>` (owned by that generation's
   `RunningSidecar`, not shared on `Inner`). This closes a real race: a
@@ -541,6 +566,15 @@ Two things worth knowing if you touch this file:
   in-flight entry. Giving each generation its own map makes that
   impossible by construction - the same "correct by construction, not by
   convention" philosophy as the PowerShell side's single writer runspace.
+- **Lossy line decoding**: both stdout and stderr are read with
+  `read_until(b'\n')` + `String::from_utf8_lossy` per line - one
+  invalid-UTF-8 line (e.g. OEM-codepage output from the powershell.exe
+  5.1 fallback) decodes with U+FFFD and the stream resyncs instead of
+  killing the whole generation.
+- **Bounded stdin writes**: writes to the sidecar's stdin have a ~10s
+  timeout; a sidecar that stops reading is marked dead and its
+  generation torn down (under the same lock, so no respawn interleaves),
+  so other in-flight callers fail fast instead of parking for hours.
 
 `call()` transparently respawns a dead sidecar before retrying.
 `shutdown()` sends the RPC `shutdown` call, then waits up to 8s for the
@@ -586,9 +620,11 @@ reliably drive `document.visibilityState`, which the frontend's
   - the full catalog-driven tool browser. Renders the `catalog.get`
   payload as a searchable, grouped card grid; clicking a card opens
   `ToolRunDialog.tsx`, which builds a dynamic form from the item's
-  `prompts`/`requiresProject`/`staticArgs` (mirroring
+  `prompts`/`requiresProject`/`requiresFile`/`staticArgs` (mirroring
   `Read-DevKitTypedValue`'s validation contract exactly - see its own
-  code comments) and runs the tool via the headless `tool.run` path,
+  code comments; `requiresFile` renders a text input + native
+  plugin-dialog browse and passes the path as `-<ParamName> <path>`) and
+  runs the tool via the headless `tool.run` path,
   streaming its output live. The SAME component also mounts inside the
   docked widget as a slide-out flyout tray via
   `<ControlCenterApp embedded />` (`WidgetApp.tsx`'s `flyoutPanes`): the
@@ -619,13 +655,20 @@ A separate capability from the RPC sidecar entirely: `terminal_spawn`
 opens a real pseudo-console (`portable_pty`, ConPTY) running an
 interactive `pwsh.exe`, wired to an `@xterm/xterm` instance in the
 frontend (`components/TerminalView.tsx`) via `devkit://terminal` events
-(raw UTF-8 chunks, not base64 - `from_utf8_lossy` handles a chunk
-boundary splitting a multi-byte character rather than panicking). It
+(raw UTF-8 chunks, not base64 - a small carry-over buffer
+(`Utf8ChunkDecoder`) reassembles a multi-byte character split across
+read boundaries instead of emitting a transient U+FFFD). It
 replaces the old widget's "launch an external Windows Terminal window and
 glue it over the panel" approach with a PTY that actually lives inside
 the app. Sessions are tracked in a `TerminalRegistry` Tauri-managed
-state, keyed by session id; `terminal_write`/`terminal_resize`/
-`terminal_kill` round out the four commands. The widget's Terminal panel
+state, keyed by session id and carrying an owning window label; sessions
+are reaped when their window is destroyed (widget tray-hide deliberately
+does NOT kill them) and by an idle reaper (no output AND no input for
+~6h - a quiet session the user is actively viewing is the documented
+trade-off). `terminal_write` takes a per-session writer lock and clones
+its handles out of the global registry first, so one stalled child can't
+block resize/kill for every session; `terminal_resize`/`terminal_kill`
+round out the four commands. The widget's Terminal panel
 starts collapsed by default (`lazyMount` on its `<Expander>`), so it
 costs nothing until a viewer opens it.
 
@@ -634,14 +677,22 @@ costs nothing until a viewer opens it.
 `devkit` (package `devkit-cli`, binary `devkit.exe`) is a ratatui
 terminal menu that replaces the old `DevKit.ps1` TUI, driven by the exact
 same `catalog.get` payload the GUI renders (`cli/src/menu.rs`,
-`catalog.rs`). Arrow-key navigation, `/` search, `p` to switch the active
-project, a digit-accumulator jump (type a number then Enter to jump
-straight to that row - a generous 5-digit cap guards against a stuck
-key), and a native Windows file picker (shells out to a hidden `pwsh`
+`catalog.rs`). Arrow-key navigation (plus `j`/`k`, PageUp/PageDown,
+Home/End), `/` search (a blank query shows the full list; Enter only
+runs an item while a query is typed), `p` to switch the active project,
+`q` to go back, a digit-accumulator jump (type a number then Enter to
+jump straight to that row - a generous 5-digit cap guards against a stuck
+key), editable text prompts (cursor movement, Home/End, Delete, bracketed
+paste), and a native Windows file picker (shells out to a hidden `pwsh`
 process running `System.Windows.Forms.OpenFileDialog`, with
-`CREATE_NO_WINDOW` so it doesn't flash a console) for `RequiresFile`
-prompts. `devkit catalog` prints the parsed catalog as JSON; `devkit
-doctor` pings the sidecar and confirms it's alive.
+`CREATE_NO_WINDOW` so it doesn't flash a console, a 120s hang deadline,
+and stderr surfaced on failure) for `RequiresFile`
+prompts. The interactive menu requires a TTY - piped invocations get a
+clear error pointing at `devkit catalog`/`doctor`. First paint shows a
+"Loading catalog…" screen while `catalog.get` and `projects.getActive`
+are in flight against the cold sidecar. `devkit catalog` prints the
+parsed catalog as JSON; `devkit doctor` pings the sidecar and confirms
+it's alive.
 
 **There is no installer for the CLI yet** - it's built from source only
 (`cargo build --release -p devkit-cli`, producing
@@ -776,7 +827,7 @@ cargo build --release -p devkit-cli
   `Confirm-DevKitDestructiveAction` helper in `tools/lib/DevKit-Common.ps1`,
   which any new destructive script should call rather than hand-rolling
   its own y/n or typed-phrase prompt. The app UI has a parallel gate for
-  RPC-driven destructive actions (process kill, junk clear, running a
+  RPC-driven destructive actions (process kill, running a
   "caution"-flagged tool from the Control Center):
   `useConfirmDestructive()` (`app/src/hooks/useConfirmDestructive.ts`),
   which reads the same setting described next.
