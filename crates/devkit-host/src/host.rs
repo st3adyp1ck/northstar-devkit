@@ -60,6 +60,32 @@ const SHUTDOWN_GRACE: Duration = Duration::from_secs(8);
 /// How long [`PsHost::shutdown`] then lets the reader task observe EOF and
 /// fail any still-pending requests before aborting it.
 const READER_DRAIN_GRACE: Duration = Duration::from_millis(250);
+/// Ceiling for a single stdin write+flush. A sidecar that has stopped
+/// reading its stdin (a wedged PowerShell lane, a full pipe buffer) would
+/// otherwise block forever on the write - while holding the `running` lock,
+/// stalling every later call, `ensure_alive` AND shutdown behind it. Past
+/// this the sidecar is treated as dead and the normal respawn path takes
+/// over.
+const STDIN_WRITE_TIMEOUT: Duration = Duration::from_secs(10);
+/// Granularity of the interruptible respawn-backoff sleep in
+/// [`PsHost::ensure_alive`]. Not the backoff cap - the slice the backoff is
+/// slept in, so a `shutdown` arriving mid-backoff can cut it short instead
+/// of waiting out the full (up to 10s) delay holding the `running` lock.
+const BACKOFF_SLEEP_SLICE: Duration = Duration::from_millis(100);
+
+/// Strips the `\n` (and a CRLF's `\r`) terminator the way `lines()` used to
+/// and lossy-decodes the body: one invalid-UTF-8 byte becomes U+FFFD instead
+/// of killing the whole reader - which matters because the documented
+/// powershell.exe 5.1 fallback speaks OEM codepages, so any non-ASCII tool
+/// output line arrives as not-UTF-8 (see the reader task in
+/// [`PsHost::ensure_alive`]).
+fn decode_sidecar_line(raw: &[u8]) -> String {
+    let mut line = String::from_utf8_lossy(raw).into_owned();
+    while line.ends_with('\n') || line.ends_with('\r') {
+        line.pop();
+    }
+    line
+}
 
 /// Delay to wait before respawn attempt number `attempt`, where `attempt`
 /// is the count of spawn attempts already made since the sidecar was last
@@ -236,6 +262,12 @@ impl PsHost {
     /// Send a request and await its response, with the spec's default
     /// timeout. On a dead sidecar this transparently respawns once (with
     /// exponential backoff tracked across calls) before retrying.
+    ///
+    /// CONTRACT - at-least-once: a call that reports failure may already
+    /// have executed on the sidecar (`tool.run` starts its script before the
+    /// connection can drop mid-flight), so a frontend retry of a "caution"
+    /// tool can double-execute; retry gating is the UI's job, not this
+    /// layer's.
     pub async fn call(&self, method: &str, params: Option<Value>) -> HostResult<Value> {
         self.call_with_timeout(method, params, self.inner.spec.default_timeout)
             .await
@@ -284,6 +316,12 @@ impl PsHost {
         let mut line = serde_json::to_vec(&req)?;
         line.push(b'\n');
 
+        enum StdinWrite {
+            Ok,
+            Failed,
+            TimedOut,
+        }
+
         // Insert into (and, on failure, remove from) the CURRENTLY running
         // generation's own pending map, captured once while holding
         // `running`'s lock, and reused for the timeout-path removal below.
@@ -299,31 +337,71 @@ impl PsHost {
         // Giving each generation its own map (owned by `RunningSidecar`)
         // makes that race impossible by construction, matching the
         // single-writer-by-construction philosophy of the PowerShell side.
-        let pending = {
-            let mut guard = self.inner.running.lock().await;
-            match guard.as_mut() {
-                Some(running) => {
-                    let pending = running.pending.clone();
-                    pending.lock().await.insert(id, tx);
-                    if let Err(e) = running.stdin.write_all(&line).await {
+        let mut guard = self.inner.running.lock().await;
+        let (pending, write_outcome) = match guard.as_mut() {
+            Some(running) => {
+                let pending = running.pending.clone();
+                pending.lock().await.insert(id, tx);
+                // Time-boxed rather than bare: a sidecar that stopped
+                // reading its stdin wedges every later call, respawn
+                // and shutdown behind this same `running` lock. On a
+                // timeout the sidecar is marked dead exactly like a
+                // failed write, so the next call respawns it through
+                // the normal health path.
+                let write_result = tokio::time::timeout(STDIN_WRITE_TIMEOUT, async {
+                    running.stdin.write_all(&line).await?;
+                    running.stdin.flush().await?;
+                    Ok::<(), std::io::Error>(())
+                })
+                .await;
+                let write_outcome = match write_result {
+                    Ok(Ok(())) => StdinWrite::Ok,
+                    Ok(Err(e)) => {
                         warn!(error = %e, "sidecar stdin write failed, marking dead");
-                        self.inner.alive.store(false, Ordering::SeqCst);
-                        pending.lock().await.remove(&id);
-                        return Err(HostError::Disconnected);
+                        StdinWrite::Failed
                     }
-                    if let Err(e) = running.stdin.flush().await {
-                        warn!(error = %e, "sidecar stdin flush failed, marking dead");
-                        self.inner.alive.store(false, Ordering::SeqCst);
-                        pending.lock().await.remove(&id);
-                        return Err(HostError::Disconnected);
+                    Err(_elapsed) => {
+                        warn!(
+                            timeout_ms = STDIN_WRITE_TIMEOUT.as_millis() as u64,
+                            "sidecar stdin write timed out (sidecar not reading stdin), marking dead"
+                        );
+                        StdinWrite::TimedOut
                     }
-                    pending
+                };
+                if !matches!(write_outcome, StdinWrite::Ok) {
+                    self.inner.alive.store(false, Ordering::SeqCst);
+                    pending.lock().await.remove(&id);
                 }
-                None => {
-                    return Err(HostError::Dead);
-                }
+                (pending, write_outcome)
+            }
+            None => {
+                return Err(HostError::Dead);
             }
         };
+        match write_outcome {
+            StdinWrite::Ok => {}
+            StdinWrite::Failed => return Err(HostError::Disconnected),
+            StdinWrite::TimedOut => {
+                // The wedged generation has to come down NOW, not at the
+                // next ensure_alive: its OTHER in-flight callers are parked
+                // on responses that can never arrive (the sidecar is alive
+                // but not reading stdin, so it will never answer them), and
+                // left in place they would sit out their own timeouts -
+                // hours long for a `tool.*` call. Still holding `running`,
+                // so no ensure_alive can interleave and respawn underneath
+                // us. Taking the generation + start_kill makes its reader
+                // task hit EOF and drain this generation's pending map with
+                // `Disconnected` - exactly the cleanup a normal death gives
+                // every other caller.
+                if let Some(mut running) = guard.take() {
+                    let _ = running.child.start_kill();
+                }
+                return Err(HostError::Disconnected);
+            }
+        }
+        // The `running` lock is held only across the stdin write, never
+        // across the wait for the reply (see the doc comment above).
+        drop(guard);
 
         match tokio::time::timeout(timeout, rx).await {
             Ok(Ok(resp)) => {
@@ -383,7 +461,22 @@ impl PsHost {
                 backoff_ms = backoff.as_millis() as u64,
                 "backing off before sidecar respawn"
             );
-            tokio::time::sleep(backoff).await;
+            // Slept in slices, not one long sleep, and STILL under the
+            // `running` lock: that lock is what serializes concurrent
+            // respawn attempts, so it must be held throughout - but
+            // `shutdown` blocks on it too, and during a crash loop the
+            // backoff is up to 10s of app-exit latency for no reason. Each
+            // slice re-checks the shutdown latch so an arriving shutdown
+            // bails out within ~100ms instead.
+            let mut remaining = backoff;
+            while !remaining.is_zero() {
+                if self.inner.shutting_down.load(Ordering::SeqCst) {
+                    return Err(HostError::Dead);
+                }
+                let slice = remaining.min(BACKOFF_SLEEP_SLICE);
+                tokio::time::sleep(slice).await;
+                remaining -= slice;
+            }
         }
 
         let spec = &self.inner.spec;
@@ -454,15 +547,31 @@ impl PsHost {
         self.inner.alive.store(true, Ordering::SeqCst);
 
         let reader_task = tokio::spawn(async move {
-            let mut lines = BufReader::new(stdout).lines();
+            let mut reader = BufReader::new(stdout);
+            let mut raw = Vec::new();
             // "This generation emitted at least one well-formed protocol
             // line", i.e. it got far enough to actually serve RPC. Garbage
             // on stdout deliberately does not count.
             let mut spoke = false;
             let mut cleared_backoff = false;
             loop {
-                match lines.next_line().await {
-                    Ok(Some(line)) => {
+                // `read_until` + lossy decode, NOT `lines().next_line()`:
+                // one invalid-UTF-8 byte made the whole reader error out
+                // and took the generation down - acute with the documented
+                // powershell.exe 5.1 fallback, whose console output is
+                // OEM-codepage, so ANY non-ASCII tool output line meant
+                // "sidecar dead" + a backoff respawn loop. A bad line now
+                // decodes with U+FFFD (and typically just fails JSON parse,
+                // which is logged and skipped) while the stream resyncs on
+                // the next \n. A genuine OS-level read error still breaks.
+                raw.clear();
+                match reader.read_until(b'\n', &mut raw).await {
+                    Ok(0) => {
+                        debug!("sidecar stdout closed (EOF)");
+                        break;
+                    }
+                    Ok(_) => {
+                        let line = decode_sidecar_line(&raw);
                         if line.trim().is_empty() {
                             continue;
                         }
@@ -493,10 +602,6 @@ impl PsHost {
                             inner.mark_generation_healthy(generation);
                             cleared_backoff = true;
                         }
-                    }
-                    Ok(None) => {
-                        debug!("sidecar stdout closed (EOF)");
-                        break;
                     }
                     Err(e) => {
                         error!(error = %e, "sidecar stdout read error");
@@ -534,9 +639,13 @@ impl PsHost {
             // generation's in-flight requests live in a different map and
             // are untouched by this drain.
             let mut map = pending_for_reader.lock().await;
-            for (_, tx) in map.drain() {
+            for (id, tx) in map.drain() {
+                // Echo the REAL request id, not a synthetic 0: the demux
+                // matches responses by id at every other layer, so a fake
+                // one here would silently mislabel the failure if this
+                // response ever travels further than its oneshot.
                 let _ = tx.send(RpcResponse {
-                    id: 0,
+                    id,
                     ok: false,
                     result: None,
                     error: Some(RpcError {
@@ -550,11 +659,29 @@ impl PsHost {
         });
 
         // Sidecar stderr is diagnostic-only (pwsh startup warnings, dot-source
-        // errors) - forward to tracing rather than the RPC channel.
+        // errors) - forward to tracing rather than the RPC channel. Same
+        // read_until + lossy treatment as the stdout reader: one
+        // invalid-UTF-8 line (OEM codepage via the powershell.exe 5.1
+        // fallback) used to make `lines().next_line()` error out and end
+        // stderr forwarding silently for the rest of the generation.
         tokio::spawn(async move {
-            let mut lines = BufReader::new(stderr).lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                warn!(target: "devkit_sidecar_stderr", "{line}");
+            let mut reader = BufReader::new(stderr);
+            let mut raw = Vec::new();
+            loop {
+                raw.clear();
+                match reader.read_until(b'\n', &mut raw).await {
+                    Ok(0) => break,
+                    Ok(_) => {
+                        let line = decode_sidecar_line(&raw);
+                        if !line.is_empty() {
+                            warn!(target: "devkit_sidecar_stderr", "{line}");
+                        }
+                    }
+                    Err(e) => {
+                        error!(error = %e, "sidecar stderr read error");
+                        break;
+                    }
+                }
             }
         });
 
@@ -747,5 +874,37 @@ mod tests {
         // import, worst case on a cold AV-scanned install), or a machine
         // that is merely slow would be misread as one that is broken.
         assert!(HEALTHY_UPTIME >= Duration::from_secs(5));
+    }
+
+    #[test]
+    fn invalid_utf8_line_decodes_lossily_and_the_stream_resyncs() {
+        // The powershell.exe 5.1 fallback speaks OEM codepages: any non-ASCII
+        // tool output line arrives as bytes that are NOT valid UTF-8. The old
+        // `lines()` reader broke the loop on the first such line and killed
+        // the generation; lossy decode must substitute U+FFFD, keep a
+        // well-formed response line parseable, and let the NEXT line parse
+        // too. The \r\n exercises the CRLF strip (a bare \r would break JSON
+        // parse exactly like the old `lines()` avoided).
+        let stream: &[u8] = b"{\"id\":7,\"ok\":true,\"result\":\"caf\xE9\"}\r\n{\"id\":8,\"ok\":true}\n";
+        let mut lines = stream.split(|b| *b == b'\n');
+        let first = decode_sidecar_line(lines.next().unwrap());
+        assert!(first.ends_with('}'), "CRLF terminator must be stripped: {first:?}");
+        let msg: SidecarMessage = serde_json::from_str(&first).unwrap();
+        match msg {
+            SidecarMessage::Response(r) => {
+                assert_eq!(r.id, 7);
+                assert!(r.ok);
+            }
+            SidecarMessage::Event(_) => panic!("expected Response variant"),
+        }
+        // The invalid byte took U+FFFD's place inside the parsed string.
+        assert!(first.contains('\u{FFFD}'));
+
+        let second = decode_sidecar_line(lines.next().unwrap());
+        let msg: SidecarMessage = serde_json::from_str(&second).unwrap();
+        match msg {
+            SidecarMessage::Response(r) => assert_eq!(r.id, 8),
+            SidecarMessage::Event(_) => panic!("expected Response variant"),
+        }
     }
 }

@@ -108,7 +108,10 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
     let icon = app
         .default_window_icon()
         .cloned()
-        .expect("bundle.icon must be configured");
+        // No expect(): a missing bundle.icon is a packaging problem and
+        // must not panic the whole app at startup - build() returns the
+        // error so it surfaces with context instead.
+        .ok_or_else(|| tauri::Error::AssetNotFound("bundle.icon".to_string()))?;
 
     // The autostart item's checkmark is baked into its TEXT (there is no
     // native check state on a plain MenuItem), so it has to be rewritten

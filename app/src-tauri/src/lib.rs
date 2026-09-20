@@ -268,6 +268,12 @@ fn run_app() {
 
             tray::build(&handle)?;
 
+            // Terminal-session backstop: kills sessions idle past the
+            // threshold (see terminal.rs's IDLE_TIMEOUT for the rationale)
+            // - the webview-reload / frontend-crash path orphans a session
+            // with its window still alive, so nothing else reaps it.
+            terminal::start_idle_reaper(handle.clone());
+
             // The widget is DevKit's main face (since 4.0) - show it once
             // setup completes. Windows are created hidden (see
             // tauri.conf.json) so window-state restore + the tray/menu
@@ -319,6 +325,16 @@ fn run_app() {
                     let shown = !minimized && window.is_visible().unwrap_or(true);
                     emit_visibility(window, window.label(), shown);
                 }
+            }
+            // A window that actually CLOSES (never the tray-hide:
+            // CloseRequested is prevented above) orphans its terminal
+            // sessions - they are scoped per window label, so kill the
+            // closing window's. Both windows, hence before the widget-only
+            // gate. The widget itself only reaches this on app exit, where
+            // kill_all reaps everything anyway; the reaper covers the
+            // webview-reload case, where the window survives.
+            if let WindowEvent::Destroyed = event {
+                terminal::kill_window_sessions(window.app_handle(), window.label());
             }
             if window.label() != "widget" {
                 return;

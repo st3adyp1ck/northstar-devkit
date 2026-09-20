@@ -155,23 +155,25 @@ pub struct SearchHit<'a> {
 /// Case-insensitive substring search over every item's module name, label,
 /// and help text - mirrors `Search-DevKitGuiTools`' haystack exactly
 /// (`"$($module.Name) $($item.Label) $($item.Help)"`, PowerShell `-match`
-/// being case-insensitive by default).
+/// being case-insensitive by default). A blank query is "no filter" and
+/// returns every item, so `/` + backspace-to-blank shows the full catalog
+/// instead of a misleading "Results (0)".
 pub fn search<'a>(catalog: &'a Catalog, keyword: &str) -> Vec<SearchHit<'a>> {
-    if keyword.trim().is_empty() {
-        return Vec::new();
-    }
-    let needle = keyword.to_lowercase();
+    let needle = keyword.trim().to_lowercase();
     let mut out = Vec::new();
     for module in &catalog.modules {
         for item in &module.items {
-            let haystack = format!("{} {} {}", module.name, item.label, item.help).to_lowercase();
-            if haystack.contains(&needle) {
-                out.push(SearchHit {
-                    module_name: &module.name,
-                    folder: &module.folder,
-                    item,
-                });
+            if !needle.is_empty() {
+                let haystack = format!("{} {} {}", module.name, item.label, item.help).to_lowercase();
+                if !haystack.contains(&needle) {
+                    continue;
+                }
             }
+            out.push(SearchHit {
+                module_name: &module.name,
+                folder: &module.folder,
+                item,
+            });
         }
     }
     out

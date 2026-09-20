@@ -155,6 +155,19 @@ pub async fn sidecar_restart(host: State<'_, PsHost>) -> Result<(), String> {
 /// authoritative signal to pair with (or, if it turns out to be needed,
 /// stand in for) `document.hidden`.
 ///
+/// Showing does three things, in order:
+///  1. un-minimize, if the window is iconic - `show()` alone issues
+///     SW_SHOW, which does NOT restore an iconic window, so every "show"
+///     path (tray, command palette, `show_window`) no-oped on a minimized
+///     window before this existed. Guarded on `is_minimized()` because an
+///     unguarded restore would also un-maximize a maximized one.
+///  2. `show()`;
+///  3. `set_focus()`, best-effort: Windows' foreground lock routinely
+///     rejects programmatic focus, and the window IS shown either way - the
+///     visibility event below must fire regardless. Returning early on a
+///     `set_focus` failure used to leave a freshly-shown window's polls off
+///     forever because `devkit://visibility` never arrived.
+///
 /// This isn't belt-and-suspenders paranoia: `WebviewWindow::hide()`/`show()`
 /// only move the top-level OS window (tauri-runtime-wry's
 /// `WindowMessage::Show`/`Hide` call `tao::Window::set_visible`, full stop).
@@ -173,8 +186,18 @@ pub fn set_window_visible<R: Runtime>(
     visible: bool,
 ) -> Result<(), String> {
     if visible {
+        if window.is_minimized().unwrap_or(false) {
+            // Best-effort: a failed restore must not turn the whole show
+            // into a no-op (the old `?` returned before `show()` ran) -
+            // pre-fix behavior at least put the window on the taskbar.
+            if let Err(e) = window.unminimize() {
+                tracing::warn!(error = %e, label = window.label(), "could not restore the minimized window before showing it");
+            }
+        }
         window.show().map_err(|e| e.to_string())?;
-        window.set_focus().map_err(|e| e.to_string())?;
+        if let Err(e) = window.set_focus() {
+            tracing::warn!(error = %e, label = window.label(), "could not focus the shown window");
+        }
     } else {
         window.hide().map_err(|e| e.to_string())?;
     }
@@ -186,9 +209,16 @@ pub fn set_window_visible<R: Runtime>(
 /// "Show/Hide" entry, its left-click handler, and the widget's own hide
 /// button so clicking the tray icon again always surfaces it, even on
 /// shells that hide new tray icons by default.
+///
+/// Same iconic treatment as `toggle_widget`: a minimized window still
+/// reports `is_visible() == true` on Windows, so the plain toggle answered
+/// a tray click on a minimized control-center by HIDING it, and the next
+/// click showed it back from the taskbar rather than on screen. Minimized
+/// counts as not-shown here too.
 pub fn toggle_window_visibility<R: Runtime>(window: &tauri::WebviewWindow<R>) -> Result<(), String> {
-    let visible = window.is_visible().map_err(|e| e.to_string())?;
-    set_window_visible(window, !visible)
+    let shown = window.is_visible().map_err(|e| e.to_string())?
+        && !window.is_minimized().unwrap_or(false);
+    set_window_visible(window, !shown)
 }
 
 /// Emits the `devkit://visibility` event (see `set_window_visible` above).

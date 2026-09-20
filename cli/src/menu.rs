@@ -12,6 +12,7 @@ use std::io::{self, Stdout};
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 use anyhow::Context;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
@@ -105,18 +106,46 @@ pub async fn run(host: PsHost, pwsh: PathBuf, root: PathBuf) -> anyhow::Result<(
 }
 
 async fn run_inner(host: &PsHost, pwsh: &Path, root: &Path, tui: &mut Tui) -> anyhow::Result<()> {
-    let catalog: Catalog = serde_json::from_value(host.call("catalog.get", None).await?)
+    // Draw the loading screen BEFORE the first RPC: against a cold sidecar
+    // the two fetches below can take seconds each (60s timeout apiece), and
+    // the user was staring at a blank alternate screen meanwhile. The calls
+    // themselves are fired concurrently via join - they are independent,
+    // and serializing them doubled the cold-start wait for no reason.
+    // (Caveat: Ctrl+C can't interrupt the join!-blocked load because
+    // event::read isn't polled during it - the wait is bounded by the two
+    // RPC calls' 60s timeouts, after which the normal error path restores
+    // the terminal. Acceptable for a cold-start wait.)
+    tui.terminal.draw(draw_loading)?;
+    let (catalog_value, project_value) = tokio::join!(
+        host.call("catalog.get", None),
+        host.call("projects.getActive", None),
+    );
+    let catalog: Catalog = serde_json::from_value(catalog_value?)
         .context("failed to parse catalog.get response")?;
     let mut active_project: Option<LinkedProject> =
-        serde_json::from_value(host.call("projects.getActive", None).await?)
+        serde_json::from_value(project_value?)
             .context("failed to parse projects.getActive response")?;
 
     let groups = catalog::ordered_groups(&catalog);
+    if groups.is_empty() {
+        // An empty catalog rendered as a blank bordered box told the user
+        // nothing - say what it means instead. (An UNREACHABLE sidecar
+        // fails the RPC above and never reaches here; an empty payload
+        // means the sidecar answered but loaded no tool manifests - the
+        // Control Center's banner reports the underlying loadErrors.)
+        message_screen(
+            tui,
+            "Main Menu",
+            "Catalog is empty - the sidecar is running but no tool manifests loaded (check the Control Center's banner for load errors).",
+            true,
+        )?;
+        return Ok(());
+    }
 
     loop {
         let project_line = format_project_line(&active_project);
         let rows: Vec<ListRow> = groups.iter().map(|g| ListRow::plain(g.clone())).collect();
-        let help = "\u{2191}/\u{2193} move   Enter open   / search   p project   digits+Enter jump   Esc quit";
+        let help = "\u{2191}/\u{2193}/j/k move   Enter open   / search   p project   digits+Enter jump   PgUp/PgDn/Home/End   q/Esc quit";
 
         match list_screen(tui, "Main Menu", help, &rows, &project_line, true, true)? {
             ListAction::Back => break,
@@ -150,11 +179,19 @@ async fn run_category_loop(
     loop {
         let project_line = format_project_line(active_project);
         let entries = catalog::items_for_group(catalog, group);
-        let rows: Vec<ListRow> = entries
-            .iter()
-            .map(|(_, module_name, item)| ListRow::tool(module_name, item))
-            .collect();
-        let help = "\u{2191}/\u{2193} move   Enter run   p project   digits+Enter jump   Esc back";
+        let rows: Vec<ListRow> = if entries.is_empty() {
+            // A group whose modules all contributed zero items rendered a
+            // blank bordered box - show a one-line explanation instead.
+            // The row is a placeholder: Enter on it is a no-op (guarded
+            // below), never a tool run.
+            vec![ListRow::plain("(no tools in this category)".to_string())]
+        } else {
+            entries
+                .iter()
+                .map(|(_, module_name, item)| ListRow::tool(module_name, item))
+                .collect()
+        };
+        let help = "\u{2191}/\u{2193}/j/k move   Enter run   p project   digits+Enter jump   PgUp/PgDn/Home/End   q/Esc back";
 
         match list_screen(tui, group, help, &rows, &project_line, false, true)? {
             ListAction::Back => return Ok(()),
@@ -164,7 +201,9 @@ async fn run_category_loop(
                 }
             }
             ListAction::Enter(i) => {
-                let (folder, _module_name, item) = entries[i];
+                let Some((folder, _module_name, item)) = entries.get(i) else {
+                    continue; // the "(no tools in this category)" placeholder
+                };
                 if let Some(msg) =
                     run_tool_flow(host, tui, pwsh, root, folder, item, active_project).await?
                 {
@@ -266,12 +305,13 @@ async fn run_tool_flow(
                 )))
             }
         };
-        // Empty output means the dialog was cancelled - treated exactly
-        // like a blank required text prompt: `build_arguments` below turns
-        // this `None` into the "Missing required file" error message.
+        // Empty output means the dialog was cancelled - report that
+        // plainly rather than letting `build_arguments` turn it into a
+        // red "Missing required file" error for a deliberate cancel
+        // (matching the forced-project-pick cancel above).
         let value = match picked {
             Some(path) if !path.trim().is_empty() => PromptRawValue::Text(path),
-            _ => PromptRawValue::None,
+            _ => return Ok(Some("Cancelled.".to_string())),
         };
         values.insert(rf.param_name.clone(), value);
     }
@@ -346,6 +386,13 @@ async fn run_tool_flow(
 // the console).
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
+/// Hard ceiling on how long the native OpenFileDialog may run before the
+/// CLI gives up on it: long enough for a human to browse folders, short
+/// enough that a hung ShowDialog (modal parked behind another window, a
+/// dead WinForms message loop) can't wedge the CLI forever with its TUI
+/// suspended.
+const PICKER_TIMEOUT: Duration = Duration::from_secs(120);
+
 /// Shells out to a hidden `pwsh` process that shows a native
 /// `System.Windows.Forms.OpenFileDialog` and reads the chosen path back
 /// from its stdout - the CLI has no console-native file picker of its own,
@@ -354,8 +401,12 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 /// the item's own label, so the user sees why a picker popped up; `filter`
 /// is `RequiresFile.Filter` verbatim (already a standard Windows Forms
 /// filter string - see `catalog::RequiresFile`), defaulting to "All Files
-/// (*.*)|*.*" when absent. Returns `Ok(None)` if the dialog produced no
-/// output (cancelled/closed with no selection).
+/// (*.*)|*.*" when absent.
+///
+/// Cancellation is distinguishable from failure: a dismissed dialog exits
+/// pwsh zero with empty stdout (`Ok(None)`), while a pwsh crash surfaces as
+/// `Err` carrying stderr, and a dialog hung past [`PICKER_TIMEOUT`] is
+/// killed and also reported as `Err`.
 fn run_native_file_picker(
     pwsh: &Path,
     title: &str,
@@ -374,7 +425,7 @@ fn run_native_file_picker(
         ps_single_quote(title),
     );
 
-    let output = Command::new(pwsh)
+    let mut child = Command::new(pwsh)
         .arg("-NoLogo")
         .arg("-NoProfile")
         .arg("-NonInteractive")
@@ -388,8 +439,67 @@ fn run_native_file_picker(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .creation_flags(CREATE_NO_WINDOW)
-        .output()
+        .spawn()
         .context("failed to launch the native file picker")?;
+
+    // Poll with a hard deadline rather than blocking in `output()`: a hung
+    // ShowDialog must not freeze the CLI (the TUI is suspended for the
+    // duration) forever - kill the child and report.
+    let deadline = Instant::now() + PICKER_TIMEOUT;
+    loop {
+        if child
+            .try_wait()
+            .context("failed to wait on the file picker process")?
+            .is_some()
+        {
+            break;
+        }
+        if Instant::now() >= deadline {
+            // The child may have exited in the gap between the last
+            // try_wait and the deadline check - re-check BEFORE killing so
+            // a just-finished dialog isn't killed (and reported as an
+            // error) after all.
+            match child.try_wait() {
+                Ok(Some(_)) => break,
+                Ok(None) => {}
+                Err(e) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    anyhow::bail!("failed to wait on the file picker process: {e}");
+                }
+            }
+            let _ = child.kill();
+            let _ = child.wait();
+            anyhow::bail!(
+                "the native file picker did not respond within {}s",
+                PICKER_TIMEOUT.as_secs()
+            );
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    // try_wait reaped the exit status above; wait_with_output returns that
+    // same status again and then drains the piped streams.
+    let output = child
+        .wait_with_output()
+        .context("failed to read the file picker's output")?;
+
+    // A pwsh crash (e.g. WinForms unavailable in the forced
+    // -NonInteractive shell) must not masquerade as "user cancelled" -
+    // both look like empty stdout. Non-zero exit surfaces stderr so the
+    // real problem is visible.
+    if !output.status.success() {
+        let status = output.status;
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stderr = stderr.trim();
+        anyhow::bail!(
+            "the native file picker exited with {status}{}",
+            if stderr.is_empty() {
+                String::new()
+            } else {
+                format!(": {stderr}")
+            }
+        );
+    }
 
     let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
     if path.is_empty() {
@@ -448,7 +558,7 @@ async fn project_picker_flow(
         } else {
             "Pick a linked project to make it Active."
         };
-        let help = "\u{2191}/\u{2193} move   Enter select   Esc cancel";
+        let help = "\u{2191}/\u{2193}/j/k move   Enter select   q/Esc cancel";
 
         match list_screen(tui, title, help, &rows, subtitle, false, false)? {
             ListAction::Back => return Ok(None),
@@ -606,6 +716,32 @@ enum TextInputKind {
     DigitsOnly,
 }
 
+/// Byte index of the character before `i`; `i` must be a char boundary.
+/// Editing moves by Unicode scalar, which is all the ASCII-centric tool
+/// arguments need.
+fn prev_char_boundary(s: &str, i: usize) -> usize {
+    if i == 0 {
+        return 0;
+    }
+    let mut i = i - 1;
+    while !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
+}
+
+/// Byte index one character after `i`; `i` must be a char boundary.
+fn next_char_boundary(s: &str, i: usize) -> usize {
+    if i >= s.len() {
+        return s.len();
+    }
+    let mut i = i + 1;
+    while i < s.len() && !s.is_char_boundary(i) {
+        i += 1;
+    }
+    i
+}
+
 fn read_text_input(
     tui: &mut Tui,
     title: &str,
@@ -614,32 +750,73 @@ fn read_text_input(
     project_line: &str,
 ) -> anyhow::Result<Option<String>> {
     let mut buf = String::new();
+    // Byte index of the editing cursor; every mutation keeps it on a char
+    // boundary. Left/Right/Home/End move it, Backspace/Delete edit at it;
+    // previously only append-at-end and pop-from-end were possible.
+    let mut cursor = 0usize;
     loop {
         tui.terminal
-            .draw(|f| draw_text_input(f, title, subtitle, &buf, project_line))?;
-        if let Event::Key(key) = event::read()? {
-            if key.kind != KeyEventKind::Press {
-                continue;
-            }
-            if is_cancel_key(key.code, key.modifiers) {
-                return Ok(None);
-            }
-            match key.code {
-                KeyCode::Enter => return Ok(Some(buf)),
-                KeyCode::Backspace => {
-                    buf.pop();
+            .draw(|f| draw_text_input(f, title, subtitle, &buf, cursor, project_line))?;
+        match event::read()? {
+            Event::Key(key) => {
+                if key.kind != KeyEventKind::Press {
+                    continue;
                 }
-                KeyCode::Char(c) => {
+                if is_cancel_key(key.code, key.modifiers) {
+                    return Ok(None);
+                }
+                match key.code {
+                    KeyCode::Enter => return Ok(Some(buf)),
+                    KeyCode::Left => cursor = prev_char_boundary(&buf, cursor),
+                    KeyCode::Right => cursor = next_char_boundary(&buf, cursor),
+                    KeyCode::Home => cursor = 0,
+                    KeyCode::End => cursor = buf.len(),
+                    KeyCode::Backspace => {
+                        if cursor > 0 {
+                            let prev = prev_char_boundary(&buf, cursor);
+                            buf.replace_range(prev..cursor, "");
+                            cursor = prev;
+                        }
+                    }
+                    KeyCode::Delete => {
+                        if cursor < buf.len() {
+                            let next = next_char_boundary(&buf, cursor);
+                            buf.replace_range(cursor..next, "");
+                        }
+                    }
+                    KeyCode::Char(c) => {
+                        let accept = match kind {
+                            TextInputKind::Free => !c.is_control(),
+                            TextInputKind::DigitsOnly => c.is_ascii_digit(),
+                        };
+                        if accept {
+                            buf.insert(cursor, c);
+                            cursor += c.len_utf8();
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            // Bracketed paste arrives as one event carrying the whole text;
+            // without this arm a paste into the prompt was silently dropped.
+            // These prompts are single-line tool arguments, so the pasted
+            // text is whitespace-folded to one line first (raw \r\n and
+            // control chars must not reach argv), and the DigitsOnly filter
+            // applies per character exactly like typed input.
+            Event::Paste(text) => {
+                let folded: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
+                for c in folded.chars() {
                     let accept = match kind {
-                        TextInputKind::Free => !c.is_control(),
+                        TextInputKind::Free => true,
                         TextInputKind::DigitsOnly => c.is_ascii_digit(),
                     };
                     if accept {
-                        buf.push(c);
+                        buf.insert(cursor, c);
+                        cursor += c.len_utf8();
                     }
                 }
-                _ => {}
             }
+            _ => {}
         }
     }
 }
@@ -704,6 +881,26 @@ impl ListRow {
     }
 }
 
+/// True when no Control/Alt modifier is held. Letter bindings (j/k
+/// navigation, p project, q back) guard on this so chords like Ctrl+P keep
+/// their own meanings; SHIFT is deliberately allowed so the capital letter
+/// forms (P, J, K, Q) still work.
+fn no_ctrl_alt(modifiers: KeyModifiers) -> bool {
+    !modifiers.contains(KeyModifiers::CONTROL) && !modifiers.contains(KeyModifiers::ALT)
+}
+
+/// Rows VISIBLE in the list body: terminal height minus the header (3) and
+/// footer (1) of `shell_layout` minus the list's own two border rows, so a
+/// PageUp/PageDown step moves exactly one screenful (move_selection's wrap
+/// used to paper over a 2-row overshoot). Falls back to a sane middle when
+/// the size can't be read.
+fn list_viewport(tui: &Tui) -> usize {
+    tui.terminal
+        .size()
+        .map(|area| (area.height as usize).saturating_sub(4 + 2).max(1))
+        .unwrap_or(20)
+}
+
 /// Cap on the jump-to-row digit buffer below - generous for any realistic
 /// category/search list (five digits covers up to row 99999) while keeping
 /// a stray held-down digit key from growing the buffer unboundedly.
@@ -760,8 +957,34 @@ fn list_screen(
             }
             jump_buf.clear();
             match key.code {
-                KeyCode::Up => move_selection(&mut state, rows.len(), -1),
-                KeyCode::Down => move_selection(&mut state, rows.len(), 1),
+                // j/k (vim-style) alongside the arrows; PageUp/PageDown
+                // step a viewport, Home/End jump to the ends.
+                KeyCode::Up | KeyCode::Char('k') | KeyCode::Char('K')
+                    if no_ctrl_alt(key.modifiers) =>
+                {
+                    move_selection(&mut state, rows.len(), -1)
+                }
+                KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('J')
+                    if no_ctrl_alt(key.modifiers) =>
+                {
+                    move_selection(&mut state, rows.len(), 1)
+                }
+                KeyCode::PageUp => {
+                    move_selection(&mut state, rows.len(), -(list_viewport(tui) as i32))
+                }
+                KeyCode::PageDown => {
+                    move_selection(&mut state, rows.len(), list_viewport(tui) as i32)
+                }
+                KeyCode::Home => {
+                    if !rows.is_empty() {
+                        state.select(Some(0));
+                    }
+                }
+                KeyCode::End => {
+                    if !rows.is_empty() {
+                        state.select(Some(rows.len() - 1));
+                    }
+                }
                 KeyCode::Enter => {
                     if let Some(i) = state.selected() {
                         if i < rows.len() {
@@ -769,9 +992,18 @@ fn list_screen(
                         }
                     }
                 }
-                KeyCode::Char('/') if allow_search => return Ok(ListAction::Search),
-                KeyCode::Char('p') | KeyCode::Char('P') if allow_project_toggle => {
+                // Modifier-guarded so Ctrl+P (etc.) doesn't switch projects.
+                KeyCode::Char('/') if allow_search && no_ctrl_alt(key.modifiers) => {
+                    return Ok(ListAction::Search)
+                }
+                KeyCode::Char('p') | KeyCode::Char('P')
+                    if allow_project_toggle && no_ctrl_alt(key.modifiers) =>
+                {
                     return Ok(ListAction::ToggleProject)
+                }
+                // q backs out of any menu, same as Esc (both keep working).
+                KeyCode::Char('q') | KeyCode::Char('Q') if no_ctrl_alt(key.modifiers) => {
+                    return Ok(ListAction::Back)
                 }
                 _ => {}
             }
@@ -808,6 +1040,14 @@ fn search_screen(tui: &mut Tui, catalog: &Catalog, project_line: &str) -> anyhow
             }
             match key.code {
                 KeyCode::Enter => {
+                    // A blank query browses only: hits is then the whole
+                    // catalog, and running the selected row would launch
+                    // whatever happens to be first in manifest order
+                    // sight-unseen. Require a real filter before Enter
+                    // executes anything.
+                    if query.trim().is_empty() {
+                        continue;
+                    }
                     if let Some(i) = state.selected() {
                         if let Some(hit) = hits.get(i) {
                             return Ok(SearchOutcome::Run(
@@ -885,6 +1125,23 @@ fn render_footer(f: &mut Frame<'_>, area: Rect, help: &str) {
         Style::default().fg(Color::DarkGray),
     )));
     f.render_widget(footer, area);
+}
+
+fn draw_loading(f: &mut Frame<'_>) {
+    let area = f.area();
+    let text = Paragraph::new(vec![
+        Line::from(Span::styled(
+            "Northstar DevKit",
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Loading catalog\u{2026}",
+            Style::default().fg(Color::White),
+        )),
+    ])
+    .block(Block::default().borders(Borders::ALL));
+    f.render_widget(text, area);
 }
 
 fn draw_list(
@@ -998,17 +1255,21 @@ fn draw_search(
     );
 }
 
-fn draw_text_input(f: &mut Frame<'_>, title: &str, subtitle: &str, buf: &str, project_line: &str) {
+fn draw_text_input(f: &mut Frame<'_>, title: &str, subtitle: &str, buf: &str, cursor: usize, project_line: &str) {
     let (header_area, body_area, footer_area) = shell_layout(f.area());
     render_header(f, header_area, title, project_line);
 
+    // Render the block cursor at the editing position, not just the end.
+    let cursor = cursor.min(buf.len());
+    let (before, after) = buf.split_at(cursor);
     let text = vec![
         Line::from(Span::styled(subtitle.to_string(), Style::default().fg(Color::White))),
         Line::from(""),
         Line::from(vec![
             Span::raw("> "),
-            Span::styled(buf.to_string(), Style::default().fg(Color::Yellow)),
+            Span::styled(before.to_string(), Style::default().fg(Color::Yellow)),
             Span::styled("\u{2502}", Style::default().fg(Color::DarkGray)),
+            Span::styled(after.to_string(), Style::default().fg(Color::Yellow)),
         ]),
     ];
     let paragraph = Paragraph::new(text)
@@ -1016,7 +1277,11 @@ fn draw_text_input(f: &mut Frame<'_>, title: &str, subtitle: &str, buf: &str, pr
         .wrap(Wrap { trim: true });
     f.render_widget(paragraph, body_area);
 
-    render_footer(f, footer_area, "Enter confirm   Esc cancel");
+    render_footer(
+        f,
+        footer_area,
+        "Enter confirm   Esc cancel   \u{2190}/\u{2192}/Home/End move   Del delete",
+    );
 }
 
 fn draw_yesno(f: &mut Frame<'_>, spec: &catalog::ToolPrompt, project_line: &str) {
