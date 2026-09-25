@@ -58,7 +58,7 @@ dunce = "1"
 # for the admin check and MessageBoxW for the one-time-setup consent prompt.
 # 0.59 is already in the tree as a transitive dep of tauri, so this adds no
 # new code to the lockfile beyond the direct edge.
-windows-sys = { version = "0.59", features = [
+windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Security",
     "Win32_System_Registry",
